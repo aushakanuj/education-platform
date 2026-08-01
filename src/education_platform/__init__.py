@@ -1,0 +1,1 @@
+"""Education agentic platform backend."""
