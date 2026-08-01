@@ -3,6 +3,16 @@
 FastAPI backend for administrator-approved curriculum libraries and teacher-facing grounded
 curriculum assistance.
 
+## Product design
+
+The evolving target design covers academic periods, curriculum templates, grades, sections, student
+enrollment, timetables, teacher workspaces, topic-scoped question corpora, offline section quiz
+variants, and supervisor-approved two-week material and plan batches.
+
+See the [design documentation](docs/design/README.md) for the current source of truth. These
+documents describe the planned product; the implementation below currently covers only the initial
+backend foundation.
+
 ## POC capabilities
 
 - JWT authentication for administrators and teachers
@@ -44,7 +54,7 @@ uv run pytest
 
 ## Current constraints
 
-The initial POC uses local object storage and in-process document processing for a simple
-developer experience. The Docker stack is ready for the planned S3-compatible object storage and
-Redis-backed worker adapters. Assessment workflows, students, analytics, and production cloud
-hardening are intentionally deferred.
+The current implementation uses local object storage and in-process document processing for a
+simple developer experience. The Docker stack is ready for planned S3-compatible storage and
+Redis-backed worker adapters. The broader product design—academic periods, students, timetables,
+assessment variants, supervisor reviews, and analytics—has not yet been implemented.
