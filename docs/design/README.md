@@ -4,22 +4,50 @@ This directory contains the evolving design documentation for the platform. Docu
 high-level product decisions toward detailed component designs, contracts, data models, and
 operational concerns.
 
+The POC is built around two directories:
+
+- **SourceCurriculum** — administrator-owned AcademicPeriod → Grade → Subject → Topic → Subtopic
+  folders with published source materials and one common mastery quiz per subtopic.
+- **StudentLearningDirectory** — private per-student view that references published sources and
+  stores progress, attempts, and four-pillar evaluation snapshots.
+
+Students with active Grade and Grade–Subject enrollments study the shared published material, take
+the common subtopic quiz, and review marks, anonymized peer context, weak subtopics, and progress
+over time. Teachers consume assigned-group evidence. Broader teacher workspace planning, parent
+views, adaptive practice, and private dynamic materials are under
+[future scope](./future-scope/README.md).
+
+Start with the [HTML project overview](../project-overview.html) (open in a browser),
+[architecture diagrams](../architecture.md), the
+[abstract system view](./00-abstract-system-view.md), and
+[student learning experience](./01-student-learning-experience.md).
+
 ## Design sequence
 
+0. [HTML project overview](../project-overview.html) — detailed readable summary
+0b. [Architecture diagrams](../architecture.md) — diagram-only target views
 1. [Abstract system view](./00-abstract-system-view.md)
-2. [Teacher workspace and academic planning](./01-teacher-workspace-and-planning.md)
-3. [Assessment blueprints and section variants](./02-assessment-blueprints-and-section-variants.md)
+2. [Student learning experience](./01-student-learning-experience.md)
+3. [Identity, tenancy, and authorization](./02-identity-tenancy-and-authorization.md)
 4. [Academic structure, enrollment, and timetable](./03-academic-structure-enrollment-and-timetable.md)
-5. [Material lifecycle and AI artifacts](./04-material-lifecycle-and-ai-artifacts.md)
-6. [Analytics and comparison insights](./05-analytics-and-comparison-insights.md)
-7. [Identity, tenancy, and authorization](./06-identity-tenancy-and-authorization.md)
-8. Document ingestion and knowledge indexing
-9. AI assistant orchestration
-10. Notifications, forums, and certifications
-11. API and Flutter client contract
-12. Data model and event flows
-13. Security, privacy, and auditability
-14. Deployment, observability, and disaster recovery
+5. [Material lifecycle and source curriculum](./04-material-lifecycle-and-ai-artifacts.md)
+6. [Assessment: common subtopic mastery quizzes](./05-assessment-common-subtopic-mastery-quizzes.md)
+7. [Analytics and comparison insights](./06-analytics-and-comparison-insights.md)
+
+## Future scope
+
+Deferred product surfaces live under [`future-scope/`](./future-scope/README.md), starting with
+[teacher workspace and academic planning](./future-scope/teacher-workspace-and-planning.md).
+
+Later design topics still to document:
+
+- Document ingestion and knowledge indexing
+- AI assistant orchestration
+- Notifications, forums, and certifications
+- API and React / React Native client contract
+- Data model and event flows
+- Security, privacy, and auditability
+- Deployment, observability, and disaster recovery
 
 ## How to use these documents
 

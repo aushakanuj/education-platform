@@ -1,25 +1,46 @@
 # Education Agentic Platform
 
-FastAPI backend for administrator-approved curriculum libraries and teacher-facing grounded
-curriculum assistance.
+FastAPI backend for an institution-aware education platform. The first product POC is a
+common-curriculum student-evaluation loop:
+
+- administrators publish a shared SourceCurriculum by Grade → Subject → Topic → Subtopic;
+- enrolled students open a private StudentLearningDirectory that references those published
+  sources;
+- after each subtopic, students take the same common mastery quiz and review four performance
+  pillars—marks, anonymized peer context, weak subtopics, and progress over time;
+- teachers use assigned-group evidence to support students.
 
 ## Product design
 
-The evolving target design covers academic periods, curriculum templates, grades, sections, student
-enrollment, timetables, teacher workspaces, topic-scoped question corpora, offline section quiz
-variants, and supervisor-approved two-week material and plan batches.
+The design covers academic periods, Grade and Grade–Subject enrollments, administrator-published
+source materials, common subtopic mastery quizzes with automatic objective scoring, and learner
+evaluation snapshots. Parent views, teacher-authored material, adaptive practice, and private
+dynamic materials are documented as later phases.
 
-See the [design documentation](docs/design/README.md) for the current source of truth. These
-documents describe the planned product; the implementation below currently covers only the initial
-backend foundation.
+See the [HTML project overview](docs/project-overview.html) (open in a browser),
+[architecture diagrams](docs/architecture.md), and
+[design documentation](docs/design/README.md) for the current source of truth, especially the
+[abstract system view](docs/design/00-abstract-system-view.md) and
+[student learning experience](docs/design/01-student-learning-experience.md). These documents
+describe the planned product; the implementation below currently covers only the initial backend
+foundation.
 
-## POC capabilities
+## Current implementation capabilities
 
 - JWT authentication for administrators and teachers
 - Administrator-managed teacher accounts, curriculum collections, assignments, documents, and
   publication
 - Text, PDF, and DOCX document parsing with source chunks
 - Assignment-scoped teacher Q&A with citations and structured lesson-plan generation
+
+## Planned POC capabilities
+
+- Student accounts with Grade and Grade–Subject enrollment-scoped access
+- Administrator-published SourceCurriculum folders and materials
+- Common mastery quizzes after each subtopic, attempts, and automatic scoring
+- Private StudentLearningDirectory progress, attempts, and evaluation snapshots
+- Marks, anonymized peer context, subtopic struggle analysis, and progress trends
+- Teacher class insights
 
 ## Prerequisites
 
@@ -56,5 +77,6 @@ uv run pytest
 
 The current implementation uses local object storage and in-process document processing for a
 simple developer experience. The Docker stack is ready for planned S3-compatible storage and
-Redis-backed worker adapters. The broader product design—academic periods, students, timetables,
-assessment variants, supervisor reviews, and analytics—has not yet been implemented.
+Redis-backed worker adapters. The broader product design—SourceCurriculum folders,
+Grade–Subject enrollment, common subtopic quizzes, and evaluation snapshots—has not yet been
+implemented.

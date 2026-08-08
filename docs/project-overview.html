@@ -1,0 +1,1085 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Education Agentic Platform — Project Overview</title>
+  <script type="module">
+    import mermaid from "https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs";
+    mermaid.initialize({
+      startOnLoad: true,
+      theme: "neutral",
+      securityLevel: "loose",
+      flowchart: { htmlLabels: true, curve: "basis" },
+    });
+  </script>
+  <style>
+    :root {
+      --bg: #f7f6f2;
+      --surface: #ffffff;
+      --ink: #1a1f1c;
+      --muted: #5a635c;
+      --line: #d8ddd8;
+      --accent: #0f5c4c;
+      --accent-soft: #e6f2ee;
+      --warn: #8a4b12;
+      --warn-soft: #fff4e8;
+      --code-bg: #eef1ee;
+      --nav-w: 280px;
+      --serif: "Iowan Old Style", "Palatino Linotype", Palatino, Georgia, serif;
+      --sans: "Avenir Next", "Segoe UI", system-ui, sans-serif;
+      --mono: "SF Mono", "Menlo", "Consolas", monospace;
+    }
+
+    * { box-sizing: border-box; }
+    html { scroll-behavior: smooth; }
+    body {
+      margin: 0;
+      color: var(--ink);
+      background:
+        radial-gradient(1200px 600px at 10% -10%, #e8f0ec 0%, transparent 55%),
+        radial-gradient(900px 500px at 100% 0%, #f0ebe3 0%, transparent 50%),
+        var(--bg);
+      font-family: var(--sans);
+      line-height: 1.55;
+      font-size: 16px;
+    }
+
+    a { color: var(--accent); text-underline-offset: 2px; }
+    a:hover { color: #0a4036; }
+
+    .layout {
+      display: grid;
+      grid-template-columns: var(--nav-w) minmax(0, 1fr);
+      min-height: 100vh;
+    }
+
+    nav.toc {
+      position: sticky;
+      top: 0;
+      height: 100vh;
+      overflow: auto;
+      padding: 1.5rem 1.25rem 2rem;
+      border-right: 1px solid var(--line);
+      background: rgba(255, 255, 255, 0.72);
+      backdrop-filter: blur(8px);
+    }
+
+    nav.toc .brand {
+      font-family: var(--serif);
+      font-size: 1.15rem;
+      font-weight: 700;
+      letter-spacing: -0.02em;
+      margin: 0 0 0.35rem;
+      color: var(--ink);
+      text-decoration: none;
+    }
+
+    nav.toc .sub {
+      color: var(--muted);
+      font-size: 0.8rem;
+      margin-bottom: 1.25rem;
+    }
+
+    nav.toc ol {
+      list-style: none;
+      margin: 0;
+      padding: 0;
+    }
+
+    nav.toc > ol > li { margin: 0.15rem 0; }
+    nav.toc a {
+      display: block;
+      padding: 0.35rem 0.5rem;
+      border-radius: 6px;
+      color: var(--ink);
+      text-decoration: none;
+      font-size: 0.9rem;
+    }
+    nav.toc a:hover { background: var(--accent-soft); color: var(--accent); }
+    nav.toc .nested {
+      padding-left: 0.75rem;
+      margin: 0.15rem 0 0.5rem;
+    }
+    nav.toc .nested a {
+      font-size: 0.8rem;
+      color: var(--muted);
+    }
+
+    main {
+      padding: 2rem clamp(1.25rem, 3vw, 3rem) 4rem;
+      max-width: 980px;
+    }
+
+    header.hero {
+      margin-bottom: 2.5rem;
+      padding-bottom: 1.5rem;
+      border-bottom: 1px solid var(--line);
+    }
+
+    header.hero h1 {
+      font-family: var(--serif);
+      font-size: clamp(1.9rem, 3.5vw, 2.6rem);
+      line-height: 1.15;
+      letter-spacing: -0.03em;
+      margin: 0 0 0.75rem;
+    }
+
+    header.hero p.lede {
+      font-size: 1.1rem;
+      color: var(--muted);
+      max-width: 62ch;
+      margin: 0 0 1rem;
+    }
+
+    .meta-row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.5rem;
+    }
+
+    .pill {
+      display: inline-block;
+      padding: 0.25rem 0.65rem;
+      border-radius: 999px;
+      border: 1px solid var(--line);
+      background: var(--surface);
+      font-size: 0.78rem;
+      color: var(--muted);
+    }
+
+    .pill.ok { background: var(--accent-soft); border-color: #b7d7cd; color: var(--accent); }
+    .pill.later { background: var(--warn-soft); border-color: #efd3b0; color: var(--warn); }
+
+    section {
+      margin: 2.75rem 0;
+      scroll-margin-top: 1rem;
+    }
+
+    h2 {
+      font-family: var(--serif);
+      font-size: 1.65rem;
+      letter-spacing: -0.02em;
+      margin: 0 0 0.75rem;
+      padding-bottom: 0.4rem;
+      border-bottom: 1px solid var(--line);
+    }
+
+    h3 {
+      font-size: 1.15rem;
+      margin: 1.75rem 0 0.5rem;
+      color: var(--ink);
+    }
+
+    h4 {
+      font-size: 1rem;
+      margin: 1.25rem 0 0.4rem;
+      color: var(--muted);
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+      font-weight: 600;
+    }
+
+    p { margin: 0.65rem 0; max-width: 72ch; }
+    ul, ol { max-width: 72ch; padding-left: 1.25rem; }
+    li { margin: 0.3rem 0; }
+
+    .callout {
+      background: var(--surface);
+      border: 1px solid var(--line);
+      border-left: 4px solid var(--accent);
+      padding: 0.9rem 1rem;
+      border-radius: 8px;
+      margin: 1rem 0;
+      max-width: 72ch;
+    }
+
+    .callout.warn {
+      border-left-color: var(--warn);
+      background: var(--warn-soft);
+    }
+
+    .grid-2 {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+      gap: 1rem;
+      margin: 1rem 0;
+    }
+
+    .card {
+      background: var(--surface);
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      padding: 1rem 1.1rem;
+    }
+
+    .card h3 { margin-top: 0; font-size: 1.05rem; border: 0; }
+    .card p:last-child { margin-bottom: 0; }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 0.92rem;
+      margin: 1rem 0;
+      background: var(--surface);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      overflow: hidden;
+    }
+
+    th, td {
+      text-align: left;
+      padding: 0.65rem 0.75rem;
+      border-bottom: 1px solid var(--line);
+      vertical-align: top;
+    }
+
+    th {
+      background: var(--accent-soft);
+      color: var(--accent);
+      font-weight: 600;
+      font-size: 0.82rem;
+      text-transform: uppercase;
+      letter-spacing: 0.03em;
+    }
+
+    tr:last-child td { border-bottom: 0; }
+
+    pre, code {
+      font-family: var(--mono);
+      font-size: 0.85em;
+    }
+
+    pre {
+      background: var(--code-bg);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 0.9rem 1rem;
+      overflow: auto;
+      max-width: 100%;
+      line-height: 1.45;
+    }
+
+    code.inline {
+      background: var(--code-bg);
+      padding: 0.1rem 0.35rem;
+      border-radius: 4px;
+    }
+
+    .diagram {
+      background: var(--surface);
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      padding: 1rem;
+      margin: 1rem 0 1.5rem;
+      overflow-x: auto;
+    }
+
+    .diagram .mermaid { display: flex; justify-content: center; }
+
+    .doc-links {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.5rem;
+      margin: 0.75rem 0 0;
+    }
+
+    .doc-links a {
+      font-size: 0.85rem;
+      text-decoration: none;
+      padding: 0.3rem 0.6rem;
+      border-radius: 6px;
+      background: var(--accent-soft);
+      color: var(--accent);
+    }
+
+    footer {
+      margin-top: 3rem;
+      padding-top: 1rem;
+      border-top: 1px solid var(--line);
+      color: var(--muted);
+      font-size: 0.9rem;
+    }
+
+    @media (max-width: 900px) {
+      .layout { grid-template-columns: 1fr; }
+      nav.toc {
+        position: relative;
+        height: auto;
+        border-right: 0;
+        border-bottom: 1px solid var(--line);
+      }
+    }
+
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --bg: #121614;
+        --surface: #1b211e;
+        --ink: #e8ebe8;
+        --muted: #a3ada6;
+        --line: #2d3631;
+        --accent: #6fc4ae;
+        --accent-soft: #243530;
+        --warn: #e0a66a;
+        --warn-soft: #2e2418;
+        --code-bg: #151a17;
+      }
+      body {
+        background:
+          radial-gradient(1000px 500px at 0% 0%, #1a2923 0%, transparent 55%),
+          var(--bg);
+      }
+      nav.toc { background: rgba(27, 33, 30, 0.85); }
+    }
+  </style>
+</head>
+<body>
+  <div class="layout">
+    <nav class="toc" aria-label="Table of contents">
+      <a class="brand" href="#top">Education Agentic Platform</a>
+      <div class="sub">Detailed project overview</div>
+      <ol>
+        <li><a href="#purpose">1. Purpose &amp; POC thesis</a></li>
+        <li><a href="#directories">2. Two directories</a></li>
+        <li><a href="#actors">3. Actors &amp; roles</a></li>
+        <li><a href="#components">4. Bounded components</a></li>
+        <li><a href="#identity">5. Identity &amp; authorization</a></li>
+        <li><a href="#academic">6. Academic structure</a></li>
+        <li><a href="#materials">7. Materials &amp; ingestion</a></li>
+        <li><a href="#assessment">8. Assessment</a></li>
+        <li><a href="#analytics">9. Analytics (four pillars)</a></li>
+        <li><a href="#student-loop">10. Student learning loop</a></li>
+        <li><a href="#architecture">11. Architecture diagrams</a></li>
+        <li><a href="#infrastructure">12. Infrastructure &amp; stack</a></li>
+        <li><a href="#implementation">13. Implemented vs planned</a></li>
+        <li><a href="#security">14. Trust &amp; security</a></li>
+        <li><a href="#deferred">15. Deferred scope</a></li>
+        <li><a href="#setup">16. Setup &amp; quality</a></li>
+        <li><a href="#docs-index">17. Source documents</a></li>
+      </ol>
+    </nav>
+
+    <main id="top">
+      <header class="hero">
+        <h1>Education Agentic Platform</h1>
+        <p class="lede">
+          An institution-aware FastAPI backend and product design for a common-curriculum
+          student-evaluation loop: publish shared materials, enroll learners, assess with one
+          mastery quiz per subtopic, and surface four-pillar evidence to students and teachers.
+        </p>
+        <div class="meta-row">
+          <span class="pill ok">Target design: student-evaluation POC</span>
+          <span class="pill">Backend: FastAPI + PostgreSQL</span>
+          <span class="pill">Clients: React web + React Native</span>
+          <span class="pill later">Foundation implemented; learner loop designed</span>
+        </div>
+        <div class="doc-links">
+          <a href="./architecture.md">Architecture diagrams</a>
+          <a href="./design/README.md">Design docs</a>
+          <a href="../README.md">Repository README</a>
+        </div>
+      </header>
+
+      <!-- 1 -->
+      <section id="purpose">
+        <h2>1. Purpose &amp; POC thesis</h2>
+        <p>
+          The platform helps educational institutions improve learning outcomes by combining
+          approved curriculum, online learner activity, assessment evidence, and role-scoped
+          insights. AI assistance is grounded in institution-approved content and operates only
+          inside each user’s role, enrollment, and institutional boundaries.
+        </p>
+        <div class="callout">
+          <strong>POC thesis.</strong> An administrator publishes one shared source curriculum for an
+          AcademicPeriod → Grade → Subject. Every enrolled student opens a private learning
+          directory that reuses those published source versions. After each subtopic, the student
+          completes the same common objective quiz and receives an evaluation across four pillars:
+          marks, anonymized peer context, weak subtopics, and progress over time. Teachers use
+          assigned-class evidence to support students.
+        </div>
+        <h3>Design principles</h3>
+        <ul>
+          <li><strong>Two directories</strong> — SourceCurriculum is shared and immutable after publish; StudentLearningDirectory is private and progress-owned.</li>
+          <li><strong>Common material first</strong> — one trusted material and quiz per subtopic before evaluation begins.</li>
+          <li><strong>Learner evaluation first</strong> — each increment strengthens study → quiz → four-pillar evidence.</li>
+          <li><strong>Authorization before retrieval</strong> — content and AI context require active Grade–Subject enrollment.</li>
+          <li><strong>Facts before interpretation</strong> — distinguish source facts, calculated metrics, and later AI wording.</li>
+          <li><strong>No curriculum mutation from analytics</strong> — student evidence must not rewrite the common source.</li>
+          <li><strong>Portable infrastructure</strong> — local adapters replaceable by production services.</li>
+        </ul>
+      </section>
+
+      <!-- 2 -->
+      <section id="directories">
+        <h2>2. Two directories</h2>
+        <p>
+          Folders are a navigation/UI concept. Persistence uses relational records and immutable
+          versions. Students never receive a private copy of the shared files—only references plus
+          their own progress, attempts, and snapshots.
+        </p>
+        <div class="grid-2">
+          <div class="card">
+            <h3>SourceCurriculum (admin-owned)</h3>
+            <pre>SourceCurriculum
+└── AcademicPeriod
+    └── Grade
+        └── Subject
+            └── Topic
+                └── Subtopic
+                    ├── SourceMaterialVersions
+                    │   └── PublishedVersion
+                    └── CommonMasteryQuiz
+                        └── PublishedVersion</pre>
+            <p>One published material and one common mastery quiz serve every student enrolled in that Grade–Subject offering.</p>
+          </div>
+          <div class="card">
+            <h3>StudentLearningDirectory (private)</h3>
+            <pre>StudentLearningDirectory
+└── StudentId
+    └── AcademicPeriod
+        └── Grade
+            └── Subject
+                └── Topic
+                    └── Subtopic
+                        ├── SourceMaterialReference
+                        ├── MaterialProgress
+                        ├── MasteryQuizAttempts
+                        └── EvaluationSnapshots</pre>
+            <p>Virtual and private. References published versions; owns progress and evidence.</p>
+          </div>
+        </div>
+        <h3>Access formula</h3>
+        <pre>active institution
++ active academic period
++ active Grade enrollment
++ active Grade–Subject enrollment
++ published source / released quiz version</pre>
+      </section>
+
+      <!-- 3 -->
+      <section id="actors">
+        <h2>3. Actors &amp; roles</h2>
+        <table>
+          <thead>
+            <tr>
+              <th>Actor</th>
+              <th>POC authority</th>
+              <th>Cannot</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><strong>Administrator</strong></td>
+              <td>Provision accounts; manage periods, folders, enrollments, teaching assignments; publish materials and quizzes; configure pass/mastery and release policy; audit</td>
+              <td>Bypass peer-privacy rules for student-facing peer views</td>
+            </tr>
+            <tr>
+              <td><strong>Teacher</strong></td>
+              <td>Within teaching assignment: view published sources, assigned rosters, individual results, class aggregates</td>
+              <td>Publish common SourceCurriculum; see unassigned groups</td>
+            </tr>
+            <tr>
+              <td><strong>Student</strong></td>
+              <td>Own directory; study published materials; attempt released quizzes; view own results and anonymized peer bands</td>
+              <td>See other students’ data; access drafts; change enrollments or curriculum</td>
+            </tr>
+          </tbody>
+        </table>
+        <p>
+          Future roles (not POC gates): parent/guardian, supervisor, TPO / academic leadership,
+          institution operator.
+        </p>
+        <div class="diagram">
+          <pre class="mermaid">
+flowchart LR
+    Administrator -->|configures enrollments| Institution
+    Administrator -->|publishes SourceCurriculum| Source
+    Administrator -->|assigns| Teacher
+    Student -->|opens StudentLearningDirectory| StudentDir
+    Source -->|referenced by| StudentDir
+    Student -->|studies published material| Source
+    Student -->|attempts common mastery quiz| Assessment
+    Assessment --> Analytics
+    Analytics -->|evaluation snapshot| StudentDir
+    Analytics -->|class insights| Teacher
+          </pre>
+        </div>
+      </section>
+
+      <!-- 4 -->
+      <section id="components">
+        <h2>4. Bounded components</h2>
+        <table>
+          <thead>
+            <tr><th>Component</th><th>Owns</th></tr>
+          </thead>
+          <tbody>
+            <tr><td>A. Identity and access</td><td>Users, roles, institutions, sessions, authorization policies, audit events</td></tr>
+            <tr><td>B. Academic structure</td><td>Periods, grades, subjects, topics, subtopics, Grade &amp; Grade–Subject enrollments, optional sections, teaching assignments</td></tr>
+            <tr><td>C. Source curriculum</td><td>SourceCurriculum hierarchy, material versions, metadata, publication state</td></tr>
+            <tr><td>D. Ingestion &amp; indexing</td><td>Parse, chunk, embed, index published sources (async, idempotent, observable)</td></tr>
+            <tr><td>E. Assessment</td><td>Common mastery quizzes, attempts, automatic objective scoring, result release</td></tr>
+            <tr><td>F. Analytics &amp; insights</td><td>Metric definitions, evaluation snapshots, student/teacher reporting views (never mutates source)</td></tr>
+            <tr><td>G. Student learning experience</td><td>Private directory presentation, progress UX, attempt UX, four-pillar dashboard contract</td></tr>
+            <tr><td>H. Platform infrastructure</td><td>Storage, queues, DB, observability, config, deployment adapters</td></tr>
+          </tbody>
+        </table>
+        <div class="diagram">
+          <pre class="mermaid">
+flowchart TB
+    Identity[IdentityAndAccess]
+    Academic[AcademicStructure]
+    Source[SourceCurriculum]
+    Ingestion[IngestionAndIndexing]
+    Assessment[Assessment]
+    Analytics[AnalyticsAndInsights]
+    StudentUX[StudentLearningExperience]
+    Infra[PlatformInfrastructure]
+    AiAssist[GroundedAI]
+
+    Identity --> Academic
+    Academic --> Source
+    Academic --> StudentUX
+    Source --> Ingestion
+    Source --> Assessment
+    Source --> StudentUX
+    Assessment --> Analytics
+    Analytics --> StudentUX
+    Identity --> StudentUX
+    Identity --> Assessment
+    Identity --> AiAssist
+    Source --> AiAssist
+    Ingestion --> AiAssist
+    Infra --> Identity
+    Infra --> Academic
+    Infra --> Source
+    Infra --> Ingestion
+    Infra --> Assessment
+    Infra --> Analytics
+    Infra --> AiAssist
+          </pre>
+        </div>
+      </section>
+
+      <!-- 5 -->
+      <section id="identity">
+        <h2>5. Identity, tenancy &amp; authorization</h2>
+        <h3>Key decisions</h3>
+        <ul>
+          <li>One account belongs to exactly one institution.</li>
+          <li>Administrator-provisioned accounts (no self-signup in the POC).</li>
+          <li>Multiple explicitly scoped roles allowed (e.g. multiple teaching assignments).</li>
+          <li>Student access requires <em>both</em> active Grade enrollment and active Grade–Subject enrollment.</li>
+          <li>Auth: backend-managed email/password with access + refresh tokens.</li>
+          <li>Deactivation revokes sessions immediately; records remain for audit.</li>
+        </ul>
+        <h3>Authorization order (every protected request)</h3>
+        <ol>
+          <li>Authenticated?</li>
+          <li>User active and session valid?</li>
+          <li>Resource in user’s institution?</li>
+          <li>Academic period status permits the action?</li>
+          <li>Role and explicit scope permit?</li>
+          <li>For learner resources: Grade + Grade–Subject enrollments?</li>
+          <li>Resource lifecycle (published / released) permits?</li>
+        </ol>
+        <div class="callout warn">
+          Client-supplied grade, subject, or student identifiers never grant access by themselves.
+          Authorization runs before content lookup and before any AI context assembly.
+        </div>
+        <h3>Period status effects</h3>
+        <table>
+          <thead>
+            <tr><th>Status</th><th>Administrator</th><th>Teacher</th><th>Student</th></tr>
+          </thead>
+          <tbody>
+            <tr><td>Planned</td><td>Configure</td><td>Read setup</td><td>No learner access</td></tr>
+            <tr><td>Active</td><td>Full configured authority</td><td>View assigned evidence</td><td>Study, attempt, view released results</td></tr>
+            <tr><td>Closed</td><td>Audited corrections</td><td>Mostly read-only</td><td>Read-only history</td></tr>
+            <tr><td>Archived</td><td>Read-only</td><td>Original scope read-only</td><td>Own history read-only</td></tr>
+          </tbody>
+        </table>
+        <div class="doc-links">
+          <a href="./design/02-identity-tenancy-and-authorization.md">Design: identity</a>
+        </div>
+      </section>
+
+      <!-- 6 -->
+      <section id="academic">
+        <h2>6. Academic structure &amp; enrollment</h2>
+        <p>
+          Academic periods are first-class. One period is active per institution at a time.
+          Grade 8 Mathematics in 2026–27 is distinct from Grade 8 Mathematics in 2027–28.
+        </p>
+        <pre>Institution
+├── Academic period
+│   ├── SourceCurriculum (Grade → Subject → Topic → Subtopic)
+│   ├── Grade
+│   │   ├── StudentGradeEnrollment
+│   │   └── Section (optional reporting group only)
+│   ├── StudentSubjectEnrollment (Grade–Subject offering)
+│   └── Teaching assignment (Teacher + Grade–Subject ± section)
+└── Users / Student profiles</pre>
+        <h3>POC decisions</h3>
+        <ul>
+          <li>Same published material and quiz for every student in a Grade–Subject offering.</li>
+          <li>Sections do not change material or quiz assignment in the POC.</li>
+          <li>Student section transfer not supported in the POC.</li>
+          <li>Timetable retained for later teacher workflows; not required for material/quiz access.</li>
+          <li>Administrators create or copy prior-period Topic/Subtopic templates as new period-scoped records.</li>
+        </ul>
+        <div class="doc-links">
+          <a href="./design/03-academic-structure-enrollment-and-timetable.md">Design: academic structure</a>
+        </div>
+      </section>
+
+      <!-- 7 -->
+      <section id="materials">
+        <h2>7. Materials, publication &amp; ingestion</h2>
+        <p>
+          Administrators create folder structure, upload source files under a subtopic, and publish
+          an immutable version. Enrolled students resolve that version by reference. A common
+          mastery quiz may release only after its material is published.
+        </p>
+        <h3>Publication lifecycle</h3>
+        <div class="diagram">
+          <pre class="mermaid">
+stateDiagram-v2
+    [*] --> Draft
+    Draft --> Processing: UploadAccepted
+    Processing --> Ready: IngestionSucceeds
+    Processing --> Failed: IngestionFails
+    Failed --> Draft: CorrectAndReupload
+    Ready --> Published: AdminPublishes
+    Published --> Superseded: NewerVersionPublished
+    Published --> Archived
+    Superseded --> Archived
+          </pre>
+        </div>
+        <ul>
+          <li>Draft / processing versions are invisible to students.</li>
+          <li>Publishing a newer version supersedes the previous for <em>new</em> study sessions.</li>
+          <li>Existing progress and attempts keep the exact version the student used.</li>
+          <li>Ingestion: validate → store blob → parse PDF/DOCX/TXT → chunk with metadata → optional embeddings → ready/failed.</li>
+          <li>Uploaded and extracted text are untrusted data—never system instructions.</li>
+        </ul>
+        <div class="doc-links">
+          <a href="./design/04-material-lifecycle-and-ai-artifacts.md">Design: material lifecycle</a>
+        </div>
+      </section>
+
+      <!-- 8 -->
+      <section id="assessment">
+        <h2>8. Assessment — common subtopic mastery quizzes</h2>
+        <p>
+          One common objective mastery quiz per Grade–Subject–Subtopic. Every enrolled student
+          attempts the same published question set (subject to retake policy and attempt windows).
+        </p>
+        <h3>Question types (POC)</h3>
+        <table>
+          <thead><tr><th>Type</th><th>Marking</th></tr></thead>
+          <tbody>
+            <tr><td>Multiple choice</td><td>Exact option match</td></tr>
+            <tr><td>True / false</td><td>Exact boolean match</td></tr>
+            <tr><td>Matching</td><td>Exact mapping match</td></tr>
+            <tr><td>Short numeric</td><td>Normalized numeric comparison</td></tr>
+          </tbody>
+        </table>
+        <p>Every question maps to the parent subtopic and at least one learning outcome (enables struggle analysis).</p>
+        <h3>Attempt lifecycle</h3>
+        <div class="diagram">
+          <pre class="mermaid">
+stateDiagram-v2
+    [*] --> NotStarted
+    NotStarted --> InProgress: StartAttempt
+    InProgress --> Submitted: StudentSubmits
+    InProgress --> Expired: TimerEnds
+    Submitted --> Scored: AutoScore
+    Expired --> Scored: AutoScoreLockedAnswers
+    Scored --> Released: ResultsVisible
+    Scored --> Held: AwaitAdminRelease
+    Held --> Released: ResultsReleased
+    Released --> Invalidated: AuditedCorrection
+          </pre>
+        </div>
+        <ul>
+          <li>Only one InProgress attempt per student per quiz version at a time.</li>
+          <li>Answers immutable after Submitted / Expired.</li>
+          <li>Retakes create a new attempt; history is retained.</li>
+          <li>Result release: institution default <code class="inline">immediate</code> or <code class="inline">admin_release</code>.</li>
+          <li>Deferred: adaptive practice, section variants, live AI question authoring, subjective grading.</li>
+        </ul>
+        <div class="doc-links">
+          <a href="./design/05-assessment-common-subtopic-mastery-quizzes.md">Design: assessment</a>
+        </div>
+      </section>
+
+      <!-- 9 -->
+      <section id="analytics">
+        <h2>9. Analytics — four evaluation pillars</h2>
+        <p>
+          Each scored released attempt writes a versioned <strong>EvaluationSnapshot</strong> into the
+          student’s private directory. Analytics must not rank students by default, expose classmate
+          identities, or change SourceCurriculum.
+        </p>
+        <div class="grid-2">
+          <div class="card">
+            <h3>1. Marks</h3>
+            <p>Attempt score, percent, pass/mastery flags, attempt history, subject average, completion rate.</p>
+          </div>
+          <div class="card">
+            <h3>2. Peer context</h3>
+            <p>Anonymized percentile/cohort band for the same quiz version. Never names or raw peer marks.</p>
+          </div>
+          <div class="card">
+            <h3>3. Subtopic / outcomes</h3>
+            <p>Outcome scores and struggle flags from tagged answers (default struggle: &lt;50% with ≥2 tagged questions).</p>
+          </div>
+          <div class="card">
+            <h3>4. Progress over time</h3>
+            <p>Score, mastery, and completion trends; retake deltas across successive quizzes.</p>
+          </div>
+        </div>
+        <h3>Evidence model</h3>
+        <table>
+          <thead><tr><th>Type</th><th>Meaning</th><th>Example</th></tr></thead>
+          <tbody>
+            <tr><td>Source fact</td><td>Immutable recorded event</td><td>Scored 21/30 on Linear Equations quiz v1 attempt 1</td></tr>
+            <tr><td>Calculated metric</td><td>Deterministic from facts</td><td>Outcome “inverse operations” correctness 40%</td></tr>
+            <tr><td>Comparison</td><td>Relation to eligible cohort</td><td>Middle 50% band for this quiz version</td></tr>
+          </tbody>
+        </table>
+        <h3>Peer evidence gate</h3>
+        <pre>marked_students &gt;= 5
+AND marked_students / enrolled_students_at_assessment &gt;= 0.80</pre>
+        <p>If unmet: show personal metrics only; suppress peer conclusions (insufficient evidence).</p>
+        <h3>Default thresholds</h3>
+        <ul>
+          <li>Mastery: 70%</li>
+          <li>Pass: 50%</li>
+        </ul>
+        <div class="doc-links">
+          <a href="./design/06-analytics-and-comparison-insights.md">Design: analytics</a>
+        </div>
+      </section>
+
+      <!-- 10 -->
+      <section id="student-loop">
+        <h2>10. Student learning loop</h2>
+        <pre>Sign in
+  → open private AcademicPeriod / Grade / Subject directory
+  → open Topic / Subtopic
+  → study administrator-published source material (referenced)
+  → take the common mastery quiz for that subtopic
+  → receive marks, peer context, weak-subtopic evidence, progress over time
+  → continue to the next subtopic</pre>
+        <p>
+          Default progression: next subtopic unlocks after the prior subtopic quiz is submitted.
+          Missing either required enrollment yields an explicit blocked home state with no curriculum leak.
+        </p>
+        <div class="diagram">
+          <pre class="mermaid">
+flowchart TD
+    Login[Student_signs_in] --> Home[Home_Grade_Subject_directory]
+    Home --> Subtopic[Open_Topic_then_Subtopic]
+    Subtopic --> Study[Study_published_source_material]
+    Study --> QuizReady{Common_quiz_released?}
+    QuizReady -->|No| Home
+    QuizReady -->|Yes| Attempt[Start_or_resume_attempt]
+    Attempt --> Submit[Submit_or_timer_expiry]
+    Submit --> Score[Automatic_objective_scoring]
+    Score --> Views[Four_pillar_evaluation_snapshot]
+    Views --> Next[Next_subtopic_when_unlocked]
+          </pre>
+        </div>
+        <h3>Illustrative student APIs</h3>
+        <table>
+          <thead><tr><th>Endpoint concept</th><th>Purpose</th></tr></thead>
+          <tbody>
+            <tr><td><code class="inline">GET /api/v1/student/me/enrollments</code></td><td>Active period, grade, Grade–Subject enrollments</td></tr>
+            <tr><td><code class="inline">GET /api/v1/student/directory</code></td><td>Private tree</td></tr>
+            <tr><td><code class="inline">GET .../subtopics/{id}/material</code></td><td>Published material after enrollment checks</td></tr>
+            <tr><td><code class="inline">POST .../material/progress</code></td><td>Opened / completed</td></tr>
+            <tr><td><code class="inline">GET .../quiz</code> / attempt endpoints</td><td>Released quiz, start, save, submit</td></tr>
+            <tr><td><code class="inline">GET /api/v1/student/performance</code></td><td>Four pillars</td></tr>
+          </tbody>
+        </table>
+        <div class="doc-links">
+          <a href="./design/01-student-learning-experience.md">Design: student experience</a>
+        </div>
+      </section>
+
+      <!-- 11 -->
+      <section id="architecture">
+        <h2>11. Architecture — request &amp; pipeline views</h2>
+        <p>
+          Full diagram-only index:
+          <a href="./architecture.md">docs/architecture.md</a>.
+        </p>
+        <h3>Study → evaluation pipeline</h3>
+        <div class="diagram">
+          <pre class="mermaid">
+flowchart TD
+    AdminSetup[Admin_enrollments] --> Publish
+    AdminUpload[Admin_publish_material_and_quiz] --> Publish
+    Publish --> OpenDir[Student_opens_directory]
+    OpenDir --> Study[Study_published_material]
+    Study --> Attempt[Submit_common_subtopic_quiz]
+    Attempt --> Score[Auto_objective_scoring]
+    Score --> Snapshot[EvaluationSnapshot]
+    Snapshot --> StudentView[Four_pillar_student_view]
+    Snapshot --> TeacherView[Teacher_class_insights]
+          </pre>
+        </div>
+        <h3>Request lifecycle (material + quiz)</h3>
+        <div class="diagram">
+          <pre class="mermaid">
+sequenceDiagram
+    participant Student
+    participant Api as API
+    participant Access as AccessService
+    participant Curriculum as CurriculumService
+    participant Store as ContentStore
+    participant Assessment as AssessmentService
+    participant Metrics as MetricsService
+
+    Student->>Api: RequestSubtopicMaterial
+    Api->>Access: ValidateTokenInstitutionGradeSubject
+    Access-->>Api: ActiveEnrollmentConfirmed
+    Api->>Curriculum: ResolvePublishedMaterial
+    Curriculum->>Store: ReadPublishedVersion
+    Store-->>Api: MaterialPayload
+    Api-->>Student: MaterialAndProgressState
+
+    Student->>Api: SubmitSubtopicQuiz
+    Api->>Access: ValidateQuizAccess
+    Api->>Assessment: ValidateAttemptAndScoreAnswers
+    Assessment->>Metrics: PersistScoreAndOutcomeEvidence
+    Metrics->>Metrics: CalculateFourPillars
+    Metrics-->>Api: EvaluationSnapshot
+    Api-->>Student: ScoreAndEvaluation
+          </pre>
+        </div>
+        <h3>Authorization gate</h3>
+        <div class="diagram">
+          <pre class="mermaid">
+flowchart TD
+    Req[ProtectedRequest] --> AuthN{Authenticated_active?}
+    AuthN -->|no| Deny[Deny_audit]
+    AuthN -->|yes| Inst{Same_institution?}
+    Inst -->|no| Deny
+    Inst -->|yes| Period{Period_permits?}
+    Period -->|no| Deny
+    Period -->|yes| Role{Role_and_scope?}
+    Role -->|no| Deny
+    Role -->|yes| Enroll{Grade_and_GradeSubject_enrollment?}
+    Enroll -->|no| Deny
+    Enroll -->|yes| Life{Published_or_released?}
+    Life -->|no| Deny
+    Life -->|yes| Resolve[Resolve_content]
+          </pre>
+        </div>
+      </section>
+
+      <!-- 12 -->
+      <section id="infrastructure">
+        <h2>12. Infrastructure &amp; engineering stack</h2>
+        <div class="diagram">
+          <pre class="mermaid">
+flowchart TB
+    subgraph Clients[Clients]
+        Web[ReactWebApp]
+        Mobile[ReactNativeApp]
+    end
+    subgraph App[Application]
+        Api[FastAPI]
+        Worker[IngestionWorker]
+        AiPorts[LLM_Embedding_Ports]
+    end
+    subgraph Data[Data_plane]
+        Pg["PostgreSQL_pgvector"]
+        Objects[ObjectStorage]
+        Redis[Redis_queue]
+    end
+    Web --> Api
+    Mobile --> Api
+    Api --> Pg
+    Api --> Objects
+    Api --> AiPorts
+    Api --> Redis
+    Worker --> Redis
+    Worker --> Objects
+    Worker --> Pg
+    Worker --> AiPorts
+    LocalDev["Local_dev: SQLite_local_files_in_process"] -.-> Api
+    Compose["Compose: Postgres_Redis_MinIO"] -.-> Data
+          </pre>
+        </div>
+        <h3>Repository conventions</h3>
+        <ul>
+          <li>Python via <code class="inline">uv</code> (no <code class="inline">requirements.txt</code>).</li>
+          <li>Thin HTTP routes; business logic in module services; persistence in models/repositories.</li>
+          <li>Alembic migrations for schema; do not rely on <code class="inline">create_all</code> for production.</li>
+          <li>Package layout under <code class="inline">src/education_platform/</code>: <code class="inline">core</code>, <code class="inline">api</code>, <code class="inline">db</code>, <code class="inline">modules</code> (auth, curriculum, ai).</li>
+          <li>Compose stack: PostgreSQL + pgvector, Redis, MinIO.</li>
+          <li>Provider-neutral LLM/embedding ports; OpenAI-compatible adapter configurable via environment.</li>
+          <li>Clients: React web app and React Native mobile app against the same FastAPI OpenAPI / JWT contract (Flutter is not used).</li>
+        </ul>
+      </section>
+
+      <!-- 13 -->
+      <section id="implementation">
+        <h2>13. Implemented today vs designed POC</h2>
+        <div class="grid-2">
+          <div class="card">
+            <h3>Current backend foundation</h3>
+            <ul>
+              <li>JWT authentication for administrators and teachers</li>
+              <li>Admin-managed teacher accounts, curriculum collections, assignments, documents, publication</li>
+              <li>Text, PDF, DOCX parsing with source chunks</li>
+              <li>Assignment-scoped teacher Q&amp;A with citations and structured lesson-plan generation</li>
+              <li>Local object storage and in-process ingestion for simple local DX</li>
+            </ul>
+          </div>
+          <div class="card">
+            <h3>Designed POC (not fully implemented)</h3>
+            <ul>
+              <li>Student accounts with Grade + Grade–Subject enrollment gates</li>
+              <li>SourceCurriculum folders (AcademicPeriod → … → Subtopic)</li>
+              <li>Common mastery quizzes, attempts, automatic scoring</li>
+              <li>StudentLearningDirectory progress, attempts, evaluation snapshots</li>
+              <li>Four-pillar analytics and teacher class insights</li>
+            </ul>
+          </div>
+        </div>
+        <div class="callout">
+          Design documents under <code class="inline">docs/design/</code> are the product source of truth.
+          The codebase currently covers the administrator/teacher content and grounded-AI foundation
+          that the learner loop will build on.
+        </div>
+      </section>
+
+      <!-- 14 -->
+      <section id="security">
+        <h2>14. Trust boundaries &amp; security</h2>
+        <div class="diagram">
+          <pre class="mermaid">
+flowchart TB
+    subgraph Untrusted[Untrusted]
+        Client[Client_requests]
+        Uploads[Uploaded_files_extracted_text]
+        ModelOut[Model_output]
+        PeerRaw[Peer_identities_raw_marks]
+    end
+    subgraph Trusted[Trusted_server_side]
+        AuthZ[AuthN_AuthZ_enrollment_checks]
+        Policy[Publication_and_release_policy]
+        Scoring[Deterministic_objective_scoring]
+        Snapshots[Evaluation_snapshots]
+        AnonPeer[Anonymized_peer_bands_only]
+    end
+    Client --> AuthZ
+    Uploads --> Policy
+    ModelOut --> Policy
+    AuthZ --> Scoring
+    Scoring --> Snapshots
+    Snapshots --> AnonPeer
+    PeerRaw -.->|never_exposed_to_students| AnonPeer
+    Snapshots -.->|must_not_mutate| SourceCurriculum[SourceCurriculum]
+          </pre>
+        </div>
+        <ol>
+          <li><strong>Client → API</strong> — clients untrusted; authz is server-side.</li>
+          <li><strong>Institution isolation</strong> — tenant IDs are never proof of access.</li>
+          <li><strong>Uploaded files</strong> — files and extracted text are untrusted data.</li>
+          <li><strong>Retrieved text → model</strong> — cannot override system/application policy.</li>
+          <li><strong>Model output</strong> — untrusted until schema validation and policy checks; cannot grant access, change scores, or publish curriculum.</li>
+          <li><strong>Analytics → curriculum</strong> — derived insights cannot silently alter SourceCurriculum.</li>
+          <li><strong>Peer privacy</strong> — anonymized aggregates only.</li>
+          <li><strong>Student directories</strong> — never visible across students.</li>
+        </ol>
+      </section>
+
+      <!-- 15 -->
+      <section id="deferred">
+        <h2>15. Deferred / future scope</h2>
+        <ul>
+          <li>Parent / guardian progress views</li>
+          <li>Supervisor review workflows</li>
+          <li>Teacher workspace &amp; academic planning (see future-scope doc)</li>
+          <li>Teacher-authored derivatives and section-specific material/quiz assignment</li>
+          <li>Private AI-generated dynamic material versions per student</li>
+          <li>Adaptive practice from a large approved question corpus</li>
+          <li>Subjective, essay, and handwritten evaluation</li>
+          <li>Predictive analytics / causal impact claims</li>
+          <li>Forums, certifications, enterprise SSO / SCIM / MFA</li>
+          <li>TPO / leadership institution-wide dashboards</li>
+          <li>Production cloud deployment, DR, compliance certification</li>
+        </ul>
+        <div class="doc-links">
+          <a href="./design/future-scope/README.md">Future scope index</a>
+          <a href="./design/future-scope/teacher-workspace-and-planning.md">Teacher workspace</a>
+        </div>
+      </section>
+
+      <!-- 16 -->
+      <section id="setup">
+        <h2>16. Local setup &amp; quality gates</h2>
+        <h3>Prerequisites</h3>
+        <ul>
+          <li>Docker Desktop (PostgreSQL, Redis, MinIO via Compose)</li>
+          <li>macOS/Linux: bash + curl; Windows: PowerShell</li>
+        </ul>
+        <h3>Bootstrap</h3>
+        <pre># macOS / Linux
+./scripts/setup-macos.sh
+
+# Windows PowerShell
+./scripts/setup-windows.ps1
+
+docker compose up -d
+# copy .env.example → .env and set JWT secret
+uv run alembic upgrade head
+uv run uvicorn education_platform.main:app --reload
+# API docs: http://127.0.0.1:8000/docs</pre>
+        <h3>Quality checks</h3>
+        <pre>uv run ruff format --check .
+uv run ruff check .
+uv run mypy src
+uv run pytest</pre>
+        <p>
+          Project agent rules also require institution/role/assignment/publication checks before
+          curriculum retrieval, treating uploads and model output as untrusted, and Alembic for
+          schema changes.
+        </p>
+      </section>
+
+      <!-- 17 -->
+      <section id="docs-index">
+        <h2>17. Source documents</h2>
+        <table>
+          <thead><tr><th>Document</th><th>Role</th></tr></thead>
+          <tbody>
+            <tr><td><a href="./architecture.md">docs/architecture.md</a></td><td>Diagram-only target architecture index</td></tr>
+            <tr><td><a href="./design/00-abstract-system-view.md">00 abstract system view</a></td><td>Product model, components, POC boundary</td></tr>
+            <tr><td><a href="./design/01-student-learning-experience.md">01 student learning experience</a></td><td>Learner directory, UX, APIs</td></tr>
+            <tr><td><a href="./design/02-identity-tenancy-and-authorization.md">02 identity</a></td><td>Roles, tenancy, authz</td></tr>
+            <tr><td><a href="./design/03-academic-structure-enrollment-and-timetable.md">03 academic structure</a></td><td>Periods, enrollments, assignments</td></tr>
+            <tr><td><a href="./design/04-material-lifecycle-and-ai-artifacts.md">04 materials</a></td><td>Publication &amp; ingestion</td></tr>
+            <tr><td><a href="./design/05-assessment-common-subtopic-mastery-quizzes.md">05 assessment</a></td><td>Common quizzes &amp; scoring</td></tr>
+            <tr><td><a href="./design/06-analytics-and-comparison-insights.md">06 analytics</a></td><td>Four pillars &amp; snapshots</td></tr>
+            <tr><td><a href="../README.md">README.md</a></td><td>Setup and current vs planned capabilities</td></tr>
+            <tr><td><a href="../AGENTS.md">AGENTS.md</a></td><td>Backend engineering invariants</td></tr>
+          </tbody>
+        </table>
+      </section>
+
+      <footer>
+        Generated as a readable HTML overview of the Education Agentic Platform design and
+        foundation. Open this file in a browser to render Mermaid diagrams. For authoritative
+        component detail, prefer the linked Markdown design documents.
+      </footer>
+    </main>
+  </div>
+</body>
+</html>
