@@ -32,42 +32,23 @@ fi
 
 mkdir -p .local-storage
 
-if command -v docker >/dev/null 2>&1 && docker info >/dev/null 2>&1; then
-  log "Starting Docker Compose services (PostgreSQL, Redis, MinIO)..."
-  docker compose up -d
-
-  log "Waiting for PostgreSQL..."
-  ready=false
-  for _ in $(seq 1 30); do
-    if docker compose exec -T postgres pg_isready -U education -d education >/dev/null 2>&1; then
-      ready=true
-      break
-    fi
-    sleep 1
-  done
-
-  if [[ "$ready" == true ]]; then
-    log "Applying database migrations..."
-    uv run alembic upgrade head
-  else
-    log "PostgreSQL did not become ready in time."
-    log "Check Docker Desktop, then run: uv run alembic upgrade head"
-  fi
-else
-  log "Docker is unavailable; skipping Compose services and migrations."
-  log "Install and start Docker Desktop, then run:"
-  log "  docker compose up -d"
-  log "  uv run alembic upgrade head"
-fi
+log "Applying database migrations (SQLite)..."
+uv run alembic upgrade head
 
 cat <<'EOF'
 
 Setup complete.
 
+Local development uses SQLite (education.db) by default.
+
 Next steps:
   1. Review .env and set JWT_SECRET_KEY for non-local use
   2. Start the API: uv run uvicorn education_platform.main:app --reload
   3. Open API docs: http://127.0.0.1:8000/docs
+
+Optional PostgreSQL stack:
+  docker compose up -d
+  # then switch DATABASE_URL in .env to the PostgreSQL URL from .env.example
 
 Quality checks:
   uv run ruff format --check .
