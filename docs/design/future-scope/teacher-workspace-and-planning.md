@@ -3,26 +3,29 @@
 ## 1. Scope
 
 This component provides the teacher's primary workspace: a chat-led landing page, timetable, shared
-subject materials, section-specific materials, and curriculum-aligned planning.
+subject materials, section-specific materials, remediation authoring, class performance insights,
+and curriculum-aligned planning.
+
+The overall product is student-evaluation-centric. For the POC, administrators publish the
+SourceCurriculum that enrolled students consume through private StudentLearningDirectory views;
+teachers inspect assigned-group evidence after common mastery quiz attempts. Teacher-authored
+material, remediation authoring, adaptive practice, and advanced planning are later extensions.
+See [Student learning experience](../01-student-learning-experience.md) and
+[Analytics and comparison insights](../06-analytics-and-comparison-insights.md).
 
 It establishes the academic hierarchy used by assessment and analytics:
 
 ```text
 Institution
 └── Academic period
+    ├── SourceCurriculum
+    │   └── Grade → Subject → Topic → Subtopic
+    │       ├── SourceMaterialVersions
+    │       └── CommonMasteryQuiz
     └── Teacher assignment
-        └── Grade + Subject + Section
-            ├── Grade–Subject workspace
-            │   ├── Subject-wide materials
-            │   └── Topics
-            │       ├── Learning outcomes
-            │       ├── Topic materials
-            │       ├── Quiz corpus and blueprint
-            │       └── Master-plan sessions
-            └── Section workspace
-                ├── Session overrides
-                ├── Section materials
-                └── Section quiz variants and progress data
+        └── Grade + Subject (+ optional section)
+            ├── Read published SourceCurriculum materials
+            └── Class insights for assigned enrolled students
 ```
 
 Example:
@@ -67,12 +70,14 @@ Academic period · 2026–27
 
 ## 3. Teacher landing experience
 
-After login, the teacher sees two primary surfaces:
+After login, the teacher sees three primary surfaces:
 
-1. **Assistant chat** — ask questions, create lesson material, prepare quizzes, and retrieve approved
-   curriculum content.
+1. **Assistant chat** — ask questions, create lesson material, prepare quizzes, draft remediation,
+   and retrieve approved curriculum content.
 2. **Timetable** — today and upcoming sessions, including grade, section, subject, planned topic,
    and current progress status.
+3. **Class insights** — assigned-section completion, score distributions, common weak subtopics,
+   trends, and links to create remediation drafts.
 
 The workspace opens in the teacher's active academic period. Previous periods remain available as
 an archive, read-only by default, so a teacher can inspect prior plans, materials, and results
@@ -82,8 +87,10 @@ The teacher can open a timetable session to:
 
 - read the master-plan expectation;
 - see any existing section override;
-- prepare or attach materials;
+- prepare or attach materials and remedial modules;
 - generate a lesson plan or quiz from approved content;
+- release approved section quizzes to enrolled learners;
+- inspect assigned-section results after online attempts;
 - record the session as taught, delayed, cancelled, or adapted;
 - add an adaptation reason such as remediation, enrichment, holiday, or low attendance.
 
