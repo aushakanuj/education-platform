@@ -44,8 +44,8 @@ foundation.
 
 ## Prerequisites
 
-- Docker Desktop (for PostgreSQL, Redis, and MinIO in the portable local stack)
 - macOS/Linux: `bash` and `curl`; Windows: PowerShell
+- Docker Desktop is optional for local development (SQLite is the default database)
 
 ## Setup
 
@@ -56,13 +56,20 @@ foundation.
 # Windows PowerShell
 ./scripts/setup-windows.ps1
 
-docker compose up -d
-uv run alembic upgrade head
 uv run uvicorn education_platform.main:app --reload
 ```
 
-Copy `.env.example` to `.env` before starting the app and replace the development JWT secret.
-The API documentation is then available at `http://127.0.0.1:8000/docs`.
+The setup scripts create `.env` from `.env.example`, apply Alembic migrations, and use
+**SQLite** (`education.db`) by default. Replace the development JWT secret before sharing an
+environment. The API documentation is then available at `http://127.0.0.1:8000/docs`.
+
+To exercise the optional PostgreSQL/pgvector, Redis, and MinIO stack:
+
+```bash
+docker compose up -d
+# switch DATABASE_URL in .env to the PostgreSQL URL shown in .env.example
+uv run alembic upgrade head
+```
 
 ## Quality checks
 
