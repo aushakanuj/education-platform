@@ -1,0 +1,119 @@
+import { ApiError, type TokenResponse } from "./types";
+
+const ACCESS_KEY = "ep_access_token";
+const REFRESH_KEY = "ep_refresh_token";
+
+export function getApiBaseUrl(): string {
+  return (import.meta.env.VITE_API_BASE_URL as string | undefined)?.replace(/\/$/, "") ??
+    "http://127.0.0.1:8000";
+}
+
+export function getAccessToken(): string | null {
+  return localStorage.getItem(ACCESS_KEY);
+}
+
+export function getRefreshToken(): string | null {
+  return localStorage.getItem(REFRESH_KEY);
+}
+
+export function setTokens(tokens: TokenResponse): void {
+  localStorage.setItem(ACCESS_KEY, tokens.access_token);
+  localStorage.setItem(REFRESH_KEY, tokens.refresh_token);
+}
+
+export function clearTokens(): void {
+  localStorage.removeItem(ACCESS_KEY);
+  localStorage.removeItem(REFRESH_KEY);
+}
+
+type RequestOptions = {
+  method?: string;
+  body?: unknown;
+  auth?: boolean;
+  skipRefresh?: boolean;
+};
+
+let refreshPromise: Promise<boolean> | null = null;
+
+async function refreshAccessToken(): Promise<boolean> {
+  const refresh = getRefreshToken();
+  if (!refresh) {
+    return false;
+  }
+  try {
+    const res = await fetch(`${getApiBaseUrl()}/api/v1/auth/refresh`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ refresh_token: refresh }),
+    });
+    if (!res.ok) {
+      clearTokens();
+      return false;
+    }
+    const data = (await res.json()) as TokenResponse;
+    setTokens(data);
+    return true;
+  } catch {
+    clearTokens();
+    return false;
+  }
+}
+
+export async function apiRequest<T>(path: string, options: RequestOptions = {}): Promise<T> {
+  const { method = "GET", body, auth = true, skipRefresh = false } = options;
+  const headers: Record<string, string> = {};
+  if (body !== undefined) {
+    headers["Content-Type"] = "application/json";
+  }
+  if (auth) {
+    const token = getAccessToken();
+    if (token) {
+      headers.Authorization = `Bearer ${token}`;
+    }
+  }
+
+  const res = await fetch(`${getApiBaseUrl()}/api/v1${path}`, {
+    method,
+    headers,
+    body: body === undefined ? undefined : JSON.stringify(body),
+  });
+
+  if (res.status === 401 && auth && !skipRefresh) {
+    if (!refreshPromise) {
+      refreshPromise = refreshAccessToken().finally(() => {
+        refreshPromise = null;
+      });
+    }
+    const ok = await refreshPromise;
+    if (ok) {
+      return apiRequest<T>(path, { ...options, skipRefresh: true });
+    }
+  }
+
+  if (res.status === 204) {
+    return undefined as T;
+  }
+
+  const text = await res.text();
+  let parsed: unknown = null;
+  if (text) {
+    try {
+      parsed = JSON.parse(text) as unknown;
+    } catch {
+      parsed = text;
+    }
+  }
+
+  if (!res.ok) {
+    const detail =
+      typeof parsed === "object" &&
+      parsed !== null &&
+      "detail" in parsed &&
+      typeof (parsed as { detail: unknown }).detail === "string"
+        ? (parsed as { detail: string }).detail
+        : `Request failed (${res.status})`;
+    throw new ApiError(detail, res.status, parsed);
+  }
+
+  return parsed as T;
+}
