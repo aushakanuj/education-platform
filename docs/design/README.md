@@ -33,6 +33,8 @@ Start with the [HTML project overview](../project-overview.html) (open in a brow
 5. [Material lifecycle and source curriculum](./04-material-lifecycle-and-ai-artifacts.md)
 6. [Assessment: common subtopic mastery quizzes](./05-assessment-common-subtopic-mastery-quizzes.md)
 7. [Analytics and comparison insights](./06-analytics-and-comparison-insights.md)
+8. [Relational data model](./07-relational-data-model.md) —
+   [interactive HTML schema browser](./relational-schema.html)
 
 ## Future scope
 
@@ -45,7 +47,6 @@ Later design topics still to document:
 - AI assistant orchestration
 - Notifications, forums, and certifications
 - API and React / React Native client contract
-- Data model and event flows
 - Security, privacy, and auditability
 - Deployment, observability, and disaster recovery
 
