@@ -200,6 +200,44 @@ def test_immutable_reseed_preserves_attempts(
     assert fetched.json()["passed"] is True
 
 
+def test_quiz_summary_lists_all_attempts_in_history(
+    client: TestClient,
+    enrolled_student_headers: dict[str, str],
+    seeded_db: Session,
+) -> None:
+    directory = client.get("/api/v1/me/learning-directory", headers=enrolled_student_headers)
+    subtopic = next(
+        node
+        for subject in directory.json()["subjects"]
+        for topic in subject["topics"]
+        for node in topic["subtopics"]
+        if node["slug"] == "rectangles_squares_properties"
+    )
+    _complete_lesson(client, enrolled_student_headers, subtopic["id"])
+    quiz_id = subtopic["quiz"]["id"]
+
+    for _ in range(4):
+        start = client.post(f"/api/v1/quizzes/{quiz_id}/attempts", headers=enrolled_student_headers)
+        assert start.status_code == 200, start.text
+        submit = client.post(
+            f"/api/v1/attempts/{start.json()['id']}/submit",
+            headers=enrolled_student_headers,
+            json={"answers": _perfect_answers(seeded_db, start.json()["quiz_version_id"])},
+        )
+        assert submit.status_code == 200, submit.text
+
+    refreshed = client.get("/api/v1/me/learning-directory", headers=enrolled_student_headers)
+    quiz = next(
+        node["quiz"]
+        for subject in refreshed.json()["subjects"]
+        for topic in subject["topics"]
+        for node in topic["subtopics"]
+        if node["slug"] == "rectangles_squares_properties"
+    )
+    assert quiz["attempt_count"] == 4
+    assert len(quiz["recent_attempts"]) == 4
+
+
 def test_submit_rejects_incomplete_answers(
     client: TestClient,
     enrolled_student_headers: dict[str, str],

@@ -420,7 +420,7 @@ async def _quiz_summary(
             submitted_at=attempt.submitted_at,
             started_at=attempt.started_at,
         )
-        for attempt in attempts[:3]
+        for attempt in attempts
     ]
     return QuizSummaryOut(
         id=quiz.id,
