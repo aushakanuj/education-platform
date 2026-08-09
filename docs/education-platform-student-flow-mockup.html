@@ -1,0 +1,2545 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Education Platform — Student Flow Mockup</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link
+    href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=Source+Sans+3:wght@400;500;600;700&display=swap"
+    rel="stylesheet"
+  />
+  <style>
+    :root {
+      --bg: #f4f6f3;
+      --surface: #ffffff;
+      --surface-2: #e9eee8;
+      --ink: #1c2a22;
+      --ink-muted: #5d6f64;
+      --border: #d5ddd6;
+      --accent: #3f6f5a;
+      --accent-hover: #2f5645;
+      --accent-ink: #ffffff;
+      --accent-soft: #e7f0eb;
+      --success: #15803d;
+      --success-bg: #f0fdf4;
+      --success-border: #86efac;
+      --danger: #b91c1c;
+      --danger-bg: #fef2f2;
+      --danger-border: #fca5a5;
+      --warning: #a16207;
+      --warning-bg: #fefce8;
+      --warning-border: #fde68a;
+      --focus: #3f6f5a;
+      --shadow: 0 8px 22px -14px rgb(28 42 34 / 0.2);
+      --radius: 14px;
+      --radius-sm: 9px;
+      --radius-pill: 999px;
+      --font-body: "Source Sans 3", ui-sans-serif, system-ui, sans-serif;
+      --font-mono: "IBM Plex Mono", ui-monospace, monospace;
+      --rail-width: 15rem;
+      --page-max: 52rem;
+      --measure: 65ch;
+    }
+
+    *,
+    *::before,
+    *::after {
+      box-sizing: border-box;
+    }
+
+    html,
+    body {
+      margin: 0;
+      min-height: 100%;
+    }
+
+    body {
+      font-family: var(--font-body);
+      font-size: 1.0625rem;
+      line-height: 1.65;
+      background: var(--bg);
+      color: var(--ink);
+      -webkit-font-smoothing: antialiased;
+    }
+
+    button,
+    input {
+      font: inherit;
+    }
+
+    a {
+      color: var(--accent);
+    }
+
+    a:hover {
+      color: var(--accent-hover);
+    }
+
+    :focus-visible {
+      outline: 2px solid var(--focus);
+      outline-offset: 2px;
+    }
+
+    .sr-only {
+      position: absolute;
+      width: 1px;
+      height: 1px;
+      padding: 0;
+      margin: -1px;
+      overflow: hidden;
+      clip: rect(0, 0, 0, 0);
+      white-space: nowrap;
+      border: 0;
+    }
+
+    .demo-banner {
+      background: var(--warning-bg);
+      border-bottom: 1px solid var(--warning-border);
+      color: var(--warning);
+      font-family: var(--font-mono);
+      font-size: 0.75rem;
+      font-weight: 500;
+      text-align: center;
+      padding: 0.45rem 1rem;
+    }
+
+    /* —— Buttons —— */
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 0.4em;
+      padding: 0.65rem 1.1rem;
+      border-radius: var(--radius-sm);
+      border: 1px solid transparent;
+      background: var(--accent);
+      color: var(--accent-ink);
+      font-weight: 600;
+      cursor: pointer;
+      text-decoration: none;
+      white-space: nowrap;
+    }
+
+    .btn:hover:not(:disabled) {
+      background: var(--accent-hover);
+      color: var(--accent-ink);
+    }
+
+    .btn:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+    }
+
+    .btn--soft {
+      background: var(--surface);
+      color: var(--ink);
+      border-color: var(--border);
+    }
+
+    .btn--soft:hover:not(:disabled) {
+      background: var(--surface-2);
+      color: var(--ink);
+    }
+
+    .btn--outline {
+      background: transparent;
+      color: var(--ink);
+      border-color: var(--border);
+    }
+
+    .btn--outline:hover:not(:disabled) {
+      background: var(--surface);
+      color: var(--ink);
+    }
+
+    .btn--sm {
+      padding: 0.4rem 0.75rem;
+      font-size: 0.9rem;
+    }
+
+    .btn--lg {
+      padding: 0.8rem 1.35rem;
+      font-size: 1.1rem;
+    }
+
+    .btn.is-loading {
+      position: relative;
+      color: transparent !important;
+    }
+
+    .btn.is-loading::after {
+      content: "";
+      position: absolute;
+      width: 1em;
+      height: 1em;
+      border: 2px solid color-mix(in srgb, var(--accent-ink) 35%, transparent);
+      border-top-color: var(--accent-ink);
+      border-radius: 50%;
+      animation: spin 0.7s linear infinite;
+    }
+
+    @keyframes spin {
+      to {
+        transform: rotate(360deg);
+      }
+    }
+
+    /* —— Login —— */
+    .login {
+      min-height: 100dvh;
+      display: grid;
+      place-items: center;
+      padding: 1.5rem;
+    }
+
+    .login__card {
+      width: min(100%, 26rem);
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      box-shadow: var(--shadow);
+      padding: 1.75rem;
+      display: grid;
+      gap: 1.1rem;
+    }
+
+    .login__brand {
+      font-size: 1.75rem;
+      font-weight: 700;
+      letter-spacing: -0.03em;
+      line-height: 1.2;
+    }
+
+    .login__lede {
+      margin: 0;
+      color: var(--ink-muted);
+      font-size: 1rem;
+    }
+
+    .hint {
+      margin: 0;
+      padding: 0.7rem 0.85rem;
+      border-radius: var(--radius-sm);
+      background: var(--accent-soft);
+      border: 1px solid color-mix(in srgb, var(--accent) 25%, var(--border));
+      font-size: 0.9rem;
+      color: var(--ink);
+    }
+
+    .hint code {
+      font-family: var(--font-mono);
+      font-size: 0.82rem;
+    }
+
+    .form {
+      display: grid;
+      gap: 0.9rem;
+    }
+
+    .form__field {
+      display: grid;
+      gap: 0.3rem;
+    }
+
+    .form__label {
+      font-size: 0.9rem;
+      font-weight: 600;
+    }
+
+    .form__input {
+      padding: 0.65rem 0.85rem;
+      border-radius: var(--radius-sm);
+      border: 1px solid var(--border);
+      background: var(--surface);
+      color: var(--ink);
+    }
+
+    .form__input:focus-visible {
+      border-color: var(--accent);
+    }
+
+    .form__error {
+      margin: 0;
+      padding: 0.65rem 0.8rem;
+      border-radius: var(--radius-sm);
+      background: var(--danger-bg);
+      border: 1px solid var(--danger-border);
+      color: var(--danger);
+      font-size: 0.9rem;
+    }
+
+    .login__actions {
+      display: grid;
+      gap: 0.55rem;
+    }
+
+    /* —— App shell —— */
+    .app {
+      display: none;
+      min-height: 100dvh;
+      grid-template-columns: var(--rail-width) minmax(0, 1fr);
+    }
+
+    .app.is-visible {
+      display: grid;
+    }
+
+    .rail {
+      background: var(--surface);
+      border-right: 1px solid var(--border);
+      padding: 1.1rem 0.9rem;
+      display: flex;
+      flex-direction: column;
+      gap: 1rem;
+      position: sticky;
+      top: 0;
+      height: 100dvh;
+    }
+
+    .rail__brand {
+      font-weight: 700;
+      font-size: 1.05rem;
+      letter-spacing: -0.02em;
+      text-decoration: none;
+      color: var(--ink);
+      padding: 0.25rem 0.4rem;
+    }
+
+    .rail__nav {
+      display: grid;
+      gap: 0.25rem;
+    }
+
+    .rail__link {
+      display: block;
+      padding: 0.55rem 0.7rem;
+      border-radius: var(--radius-sm);
+      color: var(--ink-muted);
+      text-decoration: none;
+      font-weight: 550;
+      font-size: 0.95rem;
+      border: 0;
+      background: transparent;
+      text-align: left;
+      cursor: pointer;
+      width: 100%;
+    }
+
+    .rail__link:hover {
+      background: var(--bg);
+      color: var(--ink);
+    }
+
+    .rail__link.is-active {
+      background: var(--accent-soft);
+      color: var(--accent);
+      font-weight: 700;
+    }
+
+    .rail__user {
+      margin-top: auto;
+      padding-top: 0.85rem;
+      border-top: 1px solid var(--border);
+      display: grid;
+      gap: 0.45rem;
+    }
+
+    .rail__name {
+      font-weight: 650;
+      font-size: 0.95rem;
+    }
+
+    .rail__meta {
+      font-family: var(--font-mono);
+      font-size: 0.72rem;
+      color: var(--ink-muted);
+    }
+
+    .topbar {
+      display: none;
+      background: var(--surface);
+      border-bottom: 1px solid var(--border);
+      padding: 0.75rem 1rem;
+      gap: 0.65rem;
+      flex-direction: column;
+      position: sticky;
+      top: 0;
+      z-index: 10;
+    }
+
+    .topbar__row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 0.75rem;
+    }
+
+    .topbar__brand {
+      font-weight: 700;
+      color: var(--ink);
+      text-decoration: none;
+    }
+
+    .main {
+      min-width: 0;
+      padding: 1.5rem 1.25rem 3rem;
+    }
+
+    .main__inner {
+      max-width: var(--page-max);
+    }
+
+    .crumbs {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.35rem;
+      align-items: center;
+      font-family: var(--font-mono);
+      font-size: 0.72rem;
+      color: var(--ink-muted);
+      margin-bottom: 0.85rem;
+    }
+
+    .crumbs button {
+      border: 0;
+      background: transparent;
+      color: var(--accent);
+      font: inherit;
+      cursor: pointer;
+      padding: 0;
+    }
+
+    .crumbs span {
+      opacity: 0.55;
+    }
+
+    .page-head {
+      margin-bottom: 1.35rem;
+    }
+
+    .page-head h1 {
+      margin: 0;
+      font-size: clamp(1.6rem, 2vw + 1rem, 2.1rem);
+      line-height: 1.2;
+      letter-spacing: -0.03em;
+    }
+
+    .page-head p {
+      margin: 0.4rem 0 0;
+      color: var(--ink-muted);
+      max-width: 52ch;
+    }
+
+    .kicker {
+      font-family: var(--font-mono);
+      font-size: 0.72rem;
+      color: var(--ink-muted);
+      margin: 0 0 0.35rem;
+    }
+
+    .grid {
+      display: grid;
+      gap: 0.9rem;
+    }
+
+    .grid--2 {
+      grid-template-columns: repeat(auto-fit, minmax(min(100%, 14rem), 1fr));
+    }
+
+    .card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 1rem 1.05rem;
+      box-shadow: var(--shadow);
+      text-align: left;
+      color: inherit;
+      text-decoration: none;
+      display: grid;
+      gap: 0.45rem;
+      cursor: pointer;
+      width: 100%;
+    }
+
+    button.card {
+      font: inherit;
+    }
+
+    .card:hover {
+      border-color: color-mix(in srgb, var(--accent) 45%, var(--border));
+    }
+
+    .card:focus-visible {
+      outline: 2px solid var(--focus);
+      outline-offset: 2px;
+    }
+
+    .card h2,
+    .card h3 {
+      margin: 0;
+      font-size: 1.15rem;
+      line-height: 1.25;
+      letter-spacing: -0.02em;
+    }
+
+    .card p {
+      margin: 0;
+      color: var(--ink-muted);
+      font-size: 0.95rem;
+    }
+
+    .card.is-locked {
+      opacity: 0.72;
+      cursor: not-allowed;
+    }
+
+    .meta-row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.4rem;
+      align-items: center;
+      margin-top: 0.25rem;
+    }
+
+    .chip,
+    .badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.25rem;
+      font-family: var(--font-mono);
+      font-size: 0.68rem;
+      font-weight: 600;
+      padding: 0.18rem 0.5rem;
+      border-radius: var(--radius-pill);
+      border: 1px solid var(--border);
+      background: var(--surface-2);
+      color: var(--ink-muted);
+    }
+
+    .badge--ok {
+      background: var(--success-bg);
+      border-color: var(--success-border);
+      color: var(--success);
+    }
+
+    .badge--warn {
+      background: var(--warning-bg);
+      border-color: var(--warning-border);
+      color: var(--warning);
+    }
+
+    .badge--info {
+      background: var(--accent-soft);
+      border-color: color-mix(in srgb, var(--accent) 30%, var(--border));
+      color: var(--accent);
+    }
+
+    .badge--locked {
+      background: var(--surface-2);
+      color: var(--ink-muted);
+    }
+
+    .progress {
+      height: 0.45rem;
+      background: var(--surface-2);
+      border-radius: var(--radius-pill);
+      overflow: hidden;
+    }
+
+    .progress > span {
+      display: block;
+      height: 100%;
+      background: var(--accent);
+      border-radius: inherit;
+    }
+
+    .progress-label {
+      font-family: var(--font-mono);
+      font-size: 0.72rem;
+      color: var(--ink-muted);
+      margin-bottom: 0.35rem;
+    }
+
+    .panel {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 1.15rem;
+      box-shadow: var(--shadow);
+    }
+
+    .panel + .panel {
+      margin-top: 1rem;
+    }
+
+    .list {
+      display: grid;
+      gap: 0.65rem;
+      margin: 0;
+      padding: 0;
+      list-style: none;
+    }
+
+    .list-item {
+      display: grid;
+      grid-template-columns: auto 1fr auto;
+      gap: 0.75rem;
+      align-items: center;
+      padding: 0.85rem 0.95rem;
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+      background: var(--bg);
+    }
+
+    .list-item__num {
+      font-family: var(--font-mono);
+      font-size: 0.75rem;
+      color: var(--ink-muted);
+      width: 1.75rem;
+    }
+
+    .list-item__title {
+      font-weight: 650;
+      margin: 0;
+      font-size: 1rem;
+    }
+
+    .list-item__meta {
+      margin: 0.15rem 0 0;
+      color: var(--ink-muted);
+      font-size: 0.85rem;
+    }
+
+    .subtopic-card {
+      display: grid;
+      gap: 0.75rem;
+      padding: 1rem;
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+      background: var(--bg);
+    }
+
+    .subtopic-card__head {
+      display: grid;
+      grid-template-columns: auto 1fr auto;
+      gap: 0.75rem;
+      align-items: start;
+    }
+
+    .subtopic-card__hint {
+      margin: 0;
+      font-size: 0.85rem;
+      color: var(--ink-muted);
+    }
+
+    .action-boxes {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 0.65rem;
+    }
+
+    .action-box {
+      display: grid;
+      gap: 0.55rem;
+      align-content: start;
+      padding: 0.85rem;
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+      background: var(--surface);
+    }
+
+    .action-box.is-locked {
+      opacity: 0.72;
+      background: var(--surface-2);
+    }
+
+    .action-box__title {
+      margin: 0;
+      font-size: 1rem;
+      font-weight: 650;
+      letter-spacing: -0.01em;
+    }
+
+    .action-box__meta {
+      margin: 0;
+      font-size: 0.85rem;
+      color: var(--ink-muted);
+    }
+
+    .back-row {
+      margin: 0 0 0.85rem;
+    }
+
+    .history-toggle {
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+      background: var(--surface);
+      overflow: hidden;
+    }
+
+    .history-toggle__summary {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 0.75rem;
+      padding: 0.7rem 0.8rem;
+      cursor: pointer;
+      list-style: none;
+      user-select: none;
+    }
+
+    .history-toggle__summary::-webkit-details-marker {
+      display: none;
+    }
+
+    .history-toggle__summary::marker {
+      content: "";
+    }
+
+    .history-toggle__label {
+      display: grid;
+      gap: 0.15rem;
+      min-width: 0;
+    }
+
+    .history-toggle__title {
+      font-size: 0.9rem;
+      font-weight: 650;
+    }
+
+    .history-toggle__latest {
+      font-size: 0.85rem;
+      color: var(--ink-muted);
+    }
+
+    .history-toggle__latest strong {
+      color: var(--ink);
+      font-weight: 650;
+    }
+
+    .history-toggle__chevron {
+      flex: none;
+      width: 1.6rem;
+      height: 1.6rem;
+      border-radius: 50%;
+      border: 1px solid var(--border);
+      background: var(--surface-2);
+      display: grid;
+      place-items: center;
+      font-size: 0.7rem;
+      color: var(--ink-muted);
+      transition: transform 150ms cubic-bezier(0.4, 0, 0.2, 1);
+    }
+
+    .history-toggle[open] .history-toggle__chevron {
+      transform: rotate(180deg);
+    }
+
+    .history-toggle__body {
+      padding: 0 0.8rem 0.8rem;
+      border-top: 1px solid var(--border);
+      padding-top: 0.7rem;
+    }
+
+    .history {
+      display: grid;
+      gap: 0.45rem;
+      margin: 0;
+      padding: 0;
+      list-style: none;
+    }
+
+    .history-item {
+      display: grid;
+      grid-template-columns: auto 1fr auto;
+      gap: 0.55rem 0.75rem;
+      align-items: center;
+      padding: 0.65rem 0.75rem;
+      border-radius: var(--radius-sm);
+      border: 1px solid var(--border);
+      background: var(--bg);
+      font-size: 0.9rem;
+    }
+
+    .history-item__num {
+      font-family: var(--font-mono);
+      font-size: 0.72rem;
+      color: var(--ink-muted);
+    }
+
+    .history-item__meta {
+      margin: 0.15rem 0 0;
+      font-family: var(--font-mono);
+      font-size: 0.7rem;
+      color: var(--ink-muted);
+    }
+
+    .history-empty {
+      margin: 0;
+      padding: 0.65rem 0.75rem;
+      border-radius: var(--radius-sm);
+      border: 1px dashed var(--border);
+      color: var(--ink-muted);
+      font-size: 0.9rem;
+      background: var(--surface);
+    }
+
+    .actions {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.55rem;
+      margin-top: 1rem;
+    }
+
+    .alert {
+      padding: 0.75rem 0.9rem;
+      border-radius: var(--radius-sm);
+      border: 1px solid var(--border);
+      font-size: 0.95rem;
+      margin: 0 0 1rem;
+    }
+
+    .alert--info {
+      background: var(--accent-soft);
+      border-color: color-mix(in srgb, var(--accent) 28%, var(--border));
+    }
+
+    .alert--success {
+      background: var(--success-bg);
+      border-color: var(--success-border);
+      color: var(--success);
+    }
+
+    .alert--warning {
+      background: var(--warning-bg);
+      border-color: var(--warning-border);
+      color: var(--warning);
+    }
+
+    /* —— Lesson —— */
+    .reading {
+      max-width: var(--measure);
+    }
+
+    .reading h2 {
+      margin: 0 0 0.5rem;
+      font-size: 1.45rem;
+      line-height: 1.25;
+      letter-spacing: -0.02em;
+    }
+
+    .reading p {
+      margin: 0 0 0.9rem;
+    }
+
+    .reading ul {
+      margin: 0 0 0.9rem;
+      padding-left: 1.2rem;
+      display: grid;
+      gap: 0.35rem;
+    }
+
+    .slide-nav {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.5rem;
+      justify-content: space-between;
+      align-items: center;
+      margin-top: 1.1rem;
+      padding-top: 1rem;
+      border-top: 1px solid var(--border);
+    }
+
+    /* —— Quiz —— */
+    .quiz-progress {
+      font-family: var(--font-mono);
+      font-size: 0.8rem;
+      color: var(--ink-muted);
+      margin-bottom: 0.85rem;
+    }
+
+    .question-prompt {
+      margin: 0 0 1rem;
+      font-size: 1.15rem;
+      font-weight: 650;
+      line-height: 1.35;
+    }
+
+    .options {
+      display: grid;
+      gap: 0.6rem;
+    }
+
+    .option {
+      display: grid;
+      grid-template-columns: auto 1fr;
+      gap: 0.75rem;
+      align-items: start;
+      padding: 0.85rem 0.95rem;
+      border-radius: var(--radius-sm);
+      border: 1px solid var(--border);
+      background: var(--surface);
+      text-align: left;
+      cursor: pointer;
+      color: inherit;
+      transition:
+        border-color 150ms cubic-bezier(0.4, 0, 0.2, 1),
+        background-color 150ms cubic-bezier(0.4, 0, 0.2, 1),
+        transform 150ms cubic-bezier(0.4, 0, 0.2, 1),
+        box-shadow 150ms cubic-bezier(0.4, 0, 0.2, 1);
+    }
+
+    .option:hover:not(:disabled) {
+      border-color: var(--accent);
+      transform: translateY(-1px);
+      box-shadow: var(--shadow);
+    }
+
+    .option.is-selected {
+      border-color: var(--accent);
+      background: var(--accent-soft);
+      border-width: 2px;
+      padding: calc(0.85rem - 1px) calc(0.95rem - 1px);
+    }
+
+    .option.is-correct {
+      border-color: var(--success);
+      background: var(--success-bg);
+      border-width: 2px;
+      padding: calc(0.85rem - 1px) calc(0.95rem - 1px);
+    }
+
+    .option.is-incorrect {
+      border-color: var(--danger);
+      background: var(--danger-bg);
+      border-width: 2px;
+      padding: calc(0.85rem - 1px) calc(0.95rem - 1px);
+    }
+
+    .option:disabled {
+      cursor: default;
+      transform: none;
+      box-shadow: none;
+    }
+
+    .option__mark {
+      width: 1.6rem;
+      height: 1.6rem;
+      border-radius: 50%;
+      border: 1px solid var(--border);
+      display: grid;
+      place-items: center;
+      font-family: var(--font-mono);
+      font-size: 0.75rem;
+      font-weight: 700;
+      background: var(--surface-2);
+    }
+
+    .option.is-selected .option__mark {
+      background: var(--accent);
+      color: var(--accent-ink);
+      border-color: var(--accent);
+    }
+
+    .option.is-correct .option__mark {
+      background: var(--success);
+      color: #fff;
+      border-color: var(--success);
+    }
+
+    .option.is-incorrect .option__mark {
+      background: var(--danger);
+      color: #fff;
+      border-color: var(--danger);
+    }
+
+    .option__text {
+      font-size: 0.98rem;
+    }
+
+    .option__status {
+      grid-column: 2;
+      font-family: var(--font-mono);
+      font-size: 0.72rem;
+      font-weight: 600;
+      margin-top: 0.25rem;
+    }
+
+    .option.is-correct .option__status {
+      color: var(--success);
+    }
+
+    .option.is-incorrect .option__status {
+      color: var(--danger);
+    }
+
+    /* —— Result —— */
+    .score-hero {
+      padding: 1.15rem;
+      border-radius: var(--radius);
+      border: 1px solid var(--danger-border);
+      background: var(--danger-bg);
+      margin-bottom: 1rem;
+    }
+
+    .score-hero.is-pass {
+      border-color: var(--success-border);
+      background: var(--success-bg);
+    }
+
+    .score-hero__value {
+      font-size: clamp(2.2rem, 4vw + 1rem, 3rem);
+      font-weight: 700;
+      letter-spacing: -0.04em;
+      line-height: 1;
+      margin: 0 0 0.4rem;
+    }
+
+    .score-hero__status {
+      margin: 0;
+      font-weight: 650;
+      font-size: 1.05rem;
+    }
+
+    .score-hero__meta {
+      margin: 0.35rem 0 0;
+      font-family: var(--font-mono);
+      font-size: 0.75rem;
+      color: var(--ink-muted);
+    }
+
+    .answer-review {
+      display: grid;
+      gap: 0.5rem;
+    }
+
+    .answer-row {
+      display: grid;
+      grid-template-columns: auto 1fr auto;
+      gap: 0.75rem;
+      align-items: center;
+      padding: 0.7rem 0.85rem;
+      border-radius: var(--radius-sm);
+      border: 1px solid var(--border);
+      background: var(--surface);
+      font-size: 0.95rem;
+    }
+
+    .answer-row.is-correct {
+      background: var(--success-bg);
+      border-color: var(--success-border);
+    }
+
+    .answer-row.is-wrong {
+      background: var(--danger-bg);
+      border-color: var(--danger-border);
+    }
+
+    .answer-row__num {
+      font-family: var(--font-mono);
+      font-size: 0.78rem;
+    }
+
+    .answer-row__mark {
+      font-family: var(--font-mono);
+      font-size: 0.72rem;
+      font-weight: 700;
+    }
+
+    /* —— Dialog overlay —— */
+    .overlay {
+      position: fixed;
+      inset: 0;
+      background: rgb(28 42 34 / 0.4);
+      display: none;
+      place-items: center;
+      padding: 1rem;
+      z-index: 50;
+    }
+
+    .overlay.is-open {
+      display: grid;
+    }
+
+    .dialog {
+      width: min(100%, 26rem);
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      box-shadow: var(--shadow);
+      padding: 1.15rem;
+      display: grid;
+      gap: 0.65rem;
+    }
+
+    .dialog h2 {
+      margin: 0;
+      font-size: 1.2rem;
+    }
+
+    .dialog p {
+      margin: 0;
+      color: var(--ink-muted);
+      font-size: 0.95rem;
+    }
+
+    .dialog__actions {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.45rem;
+      justify-content: flex-end;
+      margin-top: 0.25rem;
+    }
+
+    .hidden {
+      display: none !important;
+    }
+
+    @media (max-width: 860px) {
+      .app {
+        grid-template-columns: 1fr;
+        grid-template-rows: auto 1fr;
+      }
+
+      .rail {
+        display: none;
+      }
+
+      .topbar {
+        display: flex;
+      }
+
+      .main {
+        padding: 1.1rem 1rem 2.5rem;
+      }
+
+      .subtopic-card__head {
+        grid-template-columns: auto 1fr;
+      }
+
+      .subtopic-card__head .badge {
+        grid-column: 2;
+        justify-self: start;
+      }
+
+      .action-boxes {
+        grid-template-columns: 1fr;
+      }
+
+      .history-item {
+        grid-template-columns: auto 1fr;
+      }
+
+      .history-item .badge {
+        grid-column: 2;
+        justify-self: start;
+      }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      *,
+      *::before,
+      *::after {
+        animation-duration: 0.01ms !important;
+        animation-iteration-count: 1 !important;
+        transition-duration: 0.01ms !important;
+      }
+
+      .option:hover:not(:disabled) {
+        transform: none;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="demo-banner" role="status">
+    Demo mockup only · Calm Humanist · Source Sans 3 + IBM Plex Mono · no API integration
+  </div>
+
+  <!-- LOGIN -->
+  <div id="screen-login" class="login">
+    <div class="login__card">
+      <div class="login__brand">Education Platform</div>
+      <p class="login__lede">Sign in to explore subjects, topics, and quizzes.</p>
+      <p class="hint">
+        Demo login: <code>student@demo.school</code> / <code>demo1234</code>
+      </p>
+      <form class="form" id="login-form" novalidate>
+        <div class="form__field">
+          <label class="form__label" for="email">Email</label>
+          <input
+            class="form__input"
+            id="email"
+            name="email"
+            type="email"
+            autocomplete="username"
+            value="student@demo.school"
+            required
+          />
+        </div>
+        <div class="form__field">
+          <label class="form__label" for="password">Password</label>
+          <input
+            class="form__input"
+            id="password"
+            name="password"
+            type="password"
+            autocomplete="current-password"
+            value="demo1234"
+            required
+            minlength="8"
+          />
+        </div>
+        <p id="login-error" class="form__error hidden" role="alert"></p>
+        <div class="login__actions">
+          <button type="submit" class="btn btn--lg" id="login-submit">Sign in</button>
+          <button type="button" class="btn btn--soft" id="quick-demo">
+            Quick demo (unlock topic quiz)
+          </button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- APP SHELL -->
+  <div id="app" class="app" aria-hidden="true">
+    <aside class="rail" aria-label="Primary">
+      <a href="#subjects" class="rail__brand" data-nav="subjects">Education Platform</a>
+      <nav class="rail__nav" aria-label="Study">
+        <button type="button" class="rail__link is-active" data-nav="subjects">Subjects</button>
+        <button type="button" class="rail__link" data-nav="current-topic" id="rail-topic" disabled>
+          Current topic
+        </button>
+      </nav>
+      <div class="rail__user">
+        <div class="rail__name" id="student-name">Asha Student</div>
+        <div class="rail__meta">Grade 8 · Demo School</div>
+        <button type="button" class="btn btn--outline btn--sm" id="reset-demo">Reset demo</button>
+        <button type="button" class="btn btn--soft btn--sm" id="sign-out">Sign out</button>
+      </div>
+    </aside>
+
+    <div>
+      <header class="topbar">
+        <div class="topbar__row">
+          <a href="#subjects" class="topbar__brand" data-nav="subjects">Education Platform</a>
+          <button type="button" class="btn btn--outline btn--sm" id="sign-out-mobile">Sign out</button>
+        </div>
+        <nav class="rail__nav" aria-label="Mobile study" style="grid-auto-flow: column; grid-template-columns: 1fr 1fr;">
+          <button type="button" class="rail__link is-active" data-nav="subjects">Subjects</button>
+          <button type="button" class="rail__link" data-nav="current-topic" id="rail-topic-mobile" disabled>
+            Topic
+          </button>
+        </nav>
+      </header>
+
+      <main class="main">
+        <div class="main__inner" id="view"></div>
+      </main>
+    </div>
+  </div>
+
+  <div class="overlay" id="overlay" role="presentation" aria-hidden="true">
+    <div
+      class="dialog"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="dialog-title"
+      aria-describedby="dialog-body"
+    >
+      <h2 id="dialog-title"></h2>
+      <p id="dialog-body"></p>
+      <div class="dialog__actions" id="dialog-actions"></div>
+    </div>
+  </div>
+
+  <script>
+    /* —— Mock curriculum: Subject → Topic → Subtopic → Lesson + Quiz —— */
+    const CURRICULUM = {
+      subjects: [
+        {
+          id: "math",
+          name: "Mathematics",
+          blurb: "Number sense, algebra foundations, and geometry basics.",
+          topicIds: ["linear-equations", "fractions"],
+        },
+        {
+          id: "science",
+          name: "Science",
+          blurb: "Living world, matter, and energy for Grade 8.",
+          topicIds: ["cell-structure"],
+        },
+        {
+          id: "english",
+          name: "English",
+          blurb: "Reading comprehension and writing craft.",
+          topicIds: [],
+        },
+        {
+          id: "social",
+          name: "Social Studies",
+          blurb: "Civics, geography, and local history.",
+          topicIds: [],
+        },
+      ],
+      topics: {
+        "linear-equations": {
+          id: "linear-equations",
+          subjectId: "math",
+          title: "Linear equations",
+          objectives: [
+            "Identify slope and intercept in y = mx + b",
+            "Solve one-step and two-step equations",
+            "Interpret graphs of linear relationships",
+          ],
+          subtopicIds: ["slope-intercept", "solving-equations"],
+          overallQuiz: {
+            title: "Linear equations — overall quiz",
+            passMark: 70,
+            questions: [
+              {
+                prompt: "In y = 3x + 2, what is the slope?",
+                options: [
+                  { label: "A", text: "2", correct: false },
+                  { label: "B", text: "3", correct: true },
+                  { label: "C", text: "5", correct: false },
+                  { label: "D", text: "x", correct: false },
+                ],
+              },
+              {
+                prompt: "Solve: x + 4 = 10",
+                options: [
+                  { label: "A", text: "x = 6", correct: true },
+                  { label: "B", text: "x = 14", correct: false },
+                  { label: "C", text: "x = 4", correct: false },
+                  { label: "D", text: "x = −6", correct: false },
+                ],
+              },
+              {
+                prompt: "A line with slope 0 is…",
+                options: [
+                  { label: "A", text: "Vertical", correct: false },
+                  { label: "B", text: "Horizontal", correct: true },
+                  { label: "C", text: "Diagonal only", correct: false },
+                  { label: "D", text: "Undefined", correct: false },
+                ],
+              },
+            ],
+          },
+        },
+        fractions: {
+          id: "fractions",
+          subjectId: "math",
+          title: "Fractions & ratios",
+          objectives: ["Compare fractions", "Convert between fractions and ratios"],
+          subtopicIds: ["comparing-fractions"],
+          overallQuiz: {
+            title: "Fractions — overall quiz",
+            passMark: 70,
+            questions: [
+              {
+                prompt: "Which is larger: 3/4 or 2/3?",
+                options: [
+                  { label: "A", text: "2/3", correct: false },
+                  { label: "B", text: "3/4", correct: true },
+                  { label: "C", text: "They are equal", correct: false },
+                  { label: "D", text: "Cannot tell", correct: false },
+                ],
+              },
+            ],
+          },
+        },
+        "cell-structure": {
+          id: "cell-structure",
+          subjectId: "science",
+          title: "Cell structure",
+          objectives: ["Name key organelles", "Compare plant and animal cells"],
+          subtopicIds: ["organelles"],
+          overallQuiz: {
+            title: "Cell structure — overall quiz",
+            passMark: 70,
+            questions: [
+              {
+                prompt: "Which organelle produces energy?",
+                options: [
+                  { label: "A", text: "Nucleus", correct: false },
+                  { label: "B", text: "Mitochondria", correct: true },
+                  { label: "C", text: "Ribosome", correct: false },
+                  { label: "D", text: "Vacuole", correct: false },
+                ],
+              },
+            ],
+          },
+        },
+      },
+      subtopics: {
+        "slope-intercept": {
+          id: "slope-intercept",
+          topicId: "linear-equations",
+          title: "Slope-intercept form",
+          slides: [
+            {
+              title: "What is slope?",
+              html: `<p>Slope measures how steep a line is. In <strong>y = mx + b</strong>, <em>m</em> is the slope and <em>b</em> is the y-intercept.</p><p>Positive slopes rise from left to right. Negative slopes fall.</p>`,
+            },
+            {
+              title: "Reading m and b",
+              html: `<p>For <code>y = 2x − 1</code>, the slope is 2 and the intercept is −1. The line crosses the y-axis at (0, −1).</p><ul><li>m = 2 means “up 2, right 1”</li><li>b = −1 shifts the line down by one unit</li></ul>`,
+            },
+            {
+              title: "Try it",
+              html: `<p>When you graph <code>y = −x + 3</code>, start at (0, 3) and move down 1, right 1 for each step.</p><p>Ready for a short check? Take the subtopic quiz next.</p>`,
+            },
+          ],
+          quiz: {
+            title: "Quiz · Slope-intercept",
+            passMark: 70,
+            questions: [
+              {
+                prompt: "In y = −4x + 7, what is the y-intercept?",
+                options: [
+                  { label: "A", text: "−4", correct: false },
+                  { label: "B", text: "7", correct: true },
+                  { label: "C", text: "4", correct: false },
+                  { label: "D", text: "−7", correct: false },
+                ],
+              },
+              {
+                prompt: "A slope of −2 means the line…",
+                options: [
+                  { label: "A", text: "Rises steeply", correct: false },
+                  { label: "B", text: "Falls as x increases", correct: true },
+                  { label: "C", text: "Is horizontal", correct: false },
+                  { label: "D", text: "Is vertical", correct: false },
+                ],
+              },
+            ],
+          },
+        },
+        "solving-equations": {
+          id: "solving-equations",
+          topicId: "linear-equations",
+          title: "Solving equations",
+          slides: [
+            {
+              title: "Balance both sides",
+              html: `<p>An equation is a balance. Whatever you do to one side, do to the other.</p><p>To solve <code>x + 5 = 12</code>, subtract 5 from both sides: <code>x = 7</code>.</p>`,
+            },
+            {
+              title: "Two-step equations",
+              html: `<p>For <code>2x − 3 = 9</code>, add 3 first, then divide by 2. Result: <code>x = 6</code>.</p>`,
+            },
+          ],
+          quiz: {
+            title: "Quiz · Solving equations",
+            passMark: 70,
+            questions: [
+              {
+                prompt: "Solve: 3x = 15",
+                options: [
+                  { label: "A", text: "x = 5", correct: true },
+                  { label: "B", text: "x = 12", correct: false },
+                  { label: "C", text: "x = 45", correct: false },
+                  { label: "D", text: "x = 3", correct: false },
+                ],
+              },
+              {
+                prompt: "Solve: x − 8 = 2",
+                options: [
+                  { label: "A", text: "x = 6", correct: false },
+                  { label: "B", text: "x = 10", correct: true },
+                  { label: "C", text: "x = −6", correct: false },
+                  { label: "D", text: "x = 16", correct: false },
+                ],
+              },
+            ],
+          },
+        },
+        "comparing-fractions": {
+          id: "comparing-fractions",
+          topicId: "fractions",
+          title: "Comparing fractions",
+          slides: [
+            {
+              title: "Common denominators",
+              html: `<p>To compare fractions, convert to a common denominator or use cross-multiplication.</p>`,
+            },
+          ],
+          quiz: {
+            title: "Quiz · Comparing fractions",
+            passMark: 70,
+            questions: [
+              {
+                prompt: "Which is smaller?",
+                options: [
+                  { label: "A", text: "5/6", correct: false },
+                  { label: "B", text: "1/2", correct: true },
+                  { label: "C", text: "They are equal", correct: false },
+                  { label: "D", text: "Cannot tell", correct: false },
+                ],
+              },
+            ],
+          },
+        },
+        organelles: {
+          id: "organelles",
+          topicId: "cell-structure",
+          title: "Organelles",
+          slides: [
+            {
+              title: "Powerhouse of the cell",
+              html: `<p>Mitochondria convert nutrients into usable energy (ATP). Plant cells also have chloroplasts for photosynthesis.</p>`,
+            },
+          ],
+          quiz: {
+            title: "Quiz · Organelles",
+            passMark: 70,
+            questions: [
+              {
+                prompt: "Where is genetic material stored?",
+                options: [
+                  { label: "A", text: "Nucleus", correct: true },
+                  { label: "B", text: "Cell wall", correct: false },
+                  { label: "C", text: "Lysosome", correct: false },
+                  { label: "D", text: "Cytoplasm only", correct: false },
+                ],
+              },
+            ],
+          },
+        },
+      },
+    };
+
+    const DEMO_USER = {
+      email: "student@demo.school",
+      password: "demo1234",
+      name: "Asha Student",
+    };
+
+    /**
+     * Progress store:
+     * subtopics[id] = { lessonDone, quizPassed, attempts: [{ attemptNumber, scorePercent, passed, answers, submittedAt }] }
+     * overall[topicId] = { passed, attempts: [...] }
+     */
+    const state = {
+      authenticated: false,
+      screen: "login",
+      subjectId: null,
+      topicId: null,
+      subtopicId: null,
+      slideIndex: 0,
+      quizMode: null, // 'subtopic' | 'overall'
+      quizIndex: 0,
+      answers: {},
+      reviewed: false,
+      lastResult: null,
+      progress: createEmptyProgress(),
+    };
+
+    function createEmptyProgress() {
+      return { subtopics: {}, overall: {} };
+    }
+
+    function $(id) {
+      return document.getElementById(id);
+    }
+
+    function escapeHtml(str) {
+      return String(str)
+        .replaceAll("&", "&amp;")
+        .replaceAll("<", "&lt;")
+        .replaceAll(">", "&gt;")
+        .replaceAll('"', "&quot;");
+    }
+
+    function ensureSubtopicProgress(subtopicId) {
+      if (!state.progress.subtopics[subtopicId]) {
+        state.progress.subtopics[subtopicId] = {
+          lessonDone: false,
+          quizPassed: false,
+          attempts: [],
+        };
+      }
+      return state.progress.subtopics[subtopicId];
+    }
+
+    function ensureOverallProgress(topicId) {
+      if (!state.progress.overall[topicId]) {
+        state.progress.overall[topicId] = {
+          passed: false,
+          attempts: [],
+        };
+      }
+      return state.progress.overall[topicId];
+    }
+
+    function formatAttemptTime(iso) {
+      try {
+        return new Date(iso).toLocaleString(undefined, {
+          dateStyle: "medium",
+          timeStyle: "short",
+        });
+      } catch {
+        return iso;
+      }
+    }
+
+    function subjectProgress(subject) {
+      const topics = subject.topicIds.map((id) => CURRICULUM.topics[id]);
+      if (!topics.length) return { done: 0, total: 0, pct: 0 };
+      let done = 0;
+      let total = 0;
+      topics.forEach((topic) => {
+        total += 1;
+        if (isTopicComplete(topic.id)) done += 1;
+      });
+      return { done, total, pct: total ? Math.round((done / total) * 100) : 0 };
+    }
+
+    /** Subtopic: 0% not started · 50% lesson finished · 100% quiz passed */
+    function subtopicProgress(subtopicId) {
+      const p = state.progress.subtopics[subtopicId];
+      if (p?.quizPassed) return { pct: 100, lessonDone: true, quizPassed: true };
+      if (p?.lessonDone) return { pct: 50, lessonDone: true, quizPassed: false };
+      return { pct: 0, lessonDone: false, quizPassed: false };
+    }
+
+    /**
+     * Topic progress averages each subtopic's % plus the overall quiz (0 or 100).
+     * Topic complete requires every subtopic quiz passed and overall quiz passed.
+     */
+    function topicProgress(topicId) {
+      const topic = CURRICULUM.topics[topicId];
+      const subtopicPcts = topic.subtopicIds.map((id) => subtopicProgress(id).pct);
+      const overallPassed = Boolean(state.progress.overall[topicId]?.passed);
+      const units = [...subtopicPcts, overallPassed ? 100 : 0];
+      const pct = units.length
+        ? Math.round(units.reduce((sum, value) => sum + value, 0) / units.length)
+        : 0;
+      const subtopicsComplete = topic.subtopicIds.filter(
+        (id) => state.progress.subtopics[id]?.quizPassed,
+      ).length;
+      return {
+        pct,
+        subtopicsComplete,
+        subtopicsTotal: topic.subtopicIds.length,
+        overallPassed,
+        complete: isTopicComplete(topicId),
+      };
+    }
+
+    function allSubtopicQuizzesDone(topicId) {
+      const topic = CURRICULUM.topics[topicId];
+      return topic.subtopicIds.every((id) => state.progress.subtopics[id]?.quizPassed);
+    }
+
+    function isTopicComplete(topicId) {
+      return Boolean(state.progress.overall[topicId]?.passed) && allSubtopicQuizzesDone(topicId);
+    }
+
+    function subtopicStatus(subtopicId) {
+      const p = subtopicProgress(subtopicId);
+      if (p.quizPassed) return { label: "Complete · 100%", cls: "badge--ok" };
+      if (p.lessonDone) return { label: "Lesson done · 50%", cls: "badge--info" };
+      return { label: "Not started · 0%", cls: "badge--locked" };
+    }
+
+    function renderAttemptHistory(attempts, title = "Quiz history") {
+      if (!attempts?.length) {
+        return `
+          <div class="history-toggle" aria-label="${escapeHtml(title)}">
+            <div class="history-toggle__summary" style="cursor:default">
+              <div class="history-toggle__label">
+                <div class="history-toggle__title">${escapeHtml(title)}</div>
+                <div class="history-toggle__latest">No attempts yet</div>
+              </div>
+            </div>
+          </div>
+        `;
+      }
+
+      const latest = attempts[attempts.length - 1];
+      const rows = [...attempts]
+        .slice()
+        .reverse()
+        .map(
+          (attempt) => `
+            <li class="history-item">
+              <span class="history-item__num">#${attempt.attemptNumber}</span>
+              <div>
+                <div><strong>${attempt.scorePercent}%</strong> · ${
+                  attempt.passed ? "Passed" : "Failed"
+                }</div>
+                <p class="history-item__meta">${escapeHtml(formatAttemptTime(attempt.submittedAt))}</p>
+              </div>
+              <span class="badge ${attempt.passed ? "badge--ok" : "badge--warn"}">${
+                attempt.passed ? "Pass" : "Fail"
+              }</span>
+            </li>
+          `,
+        )
+        .join("");
+
+      return `
+        <details class="history-toggle">
+          <summary class="history-toggle__summary">
+            <div class="history-toggle__label">
+              <div class="history-toggle__title">${escapeHtml(title)}</div>
+              <div class="history-toggle__latest">
+                Last attempt · <strong>${latest.scorePercent}%</strong>
+                (${latest.passed ? "Passed" : "Failed"}) · ${attempts.length} total
+              </div>
+            </div>
+            <span class="history-toggle__chevron" aria-hidden="true">▾</span>
+          </summary>
+          <div class="history-toggle__body">
+            <ul class="history" aria-label="${escapeHtml(title)}">${rows}</ul>
+          </div>
+        </details>
+      `;
+    }
+
+    function showOverlay({ title, body, actions }) {
+      $("dialog-title").textContent = title;
+      $("dialog-body").textContent = body;
+      const wrap = $("dialog-actions");
+      wrap.innerHTML = "";
+      actions.forEach((a) => {
+        const btn = document.createElement("button");
+        btn.type = "button";
+        btn.className = `btn ${a.className || ""}`.trim();
+        btn.textContent = a.label;
+        btn.addEventListener("click", () => {
+          closeOverlay();
+          a.onClick?.();
+        });
+        wrap.appendChild(btn);
+      });
+      $("overlay").classList.add("is-open");
+      $("overlay").setAttribute("aria-hidden", "false");
+      wrap.querySelector("button")?.focus();
+    }
+
+    function closeOverlay() {
+      $("overlay").classList.remove("is-open");
+      $("overlay").setAttribute("aria-hidden", "true");
+    }
+
+    function setAuthUI(authed) {
+      state.authenticated = authed;
+      $("screen-login").classList.toggle("hidden", authed);
+      $("app").classList.toggle("is-visible", authed);
+      $("app").setAttribute("aria-hidden", authed ? "false" : "true");
+    }
+
+    function updateRail() {
+      const hasTopic = Boolean(state.topicId);
+      ["rail-topic", "rail-topic-mobile"].forEach((id) => {
+        const el = $(id);
+        el.disabled = !hasTopic;
+        el.classList.toggle("is-active", state.screen === "topic" || state.screen.startsWith("sub") || state.screen.includes("quiz") || state.screen === "result");
+      });
+      document.querySelectorAll('[data-nav="subjects"]').forEach((el) => {
+        if (el.classList.contains("rail__link")) {
+          el.classList.toggle("is-active", state.screen === "subjects" || state.screen === "subject");
+        }
+      });
+    }
+
+    function crumbs(parts) {
+      return `<nav class="crumbs" aria-label="Breadcrumb">${parts
+        .map((p, i) => {
+          if (p.action) {
+            return `<button type="button" data-crumb="${escapeHtml(p.action)}">${escapeHtml(p.label)}</button>${
+              i < parts.length - 1 ? "<span>/</span>" : ""
+            }`;
+          }
+          return `<span aria-current="page">${escapeHtml(p.label)}</span>`;
+        })
+        .join("")}</nav>`;
+    }
+
+    function backButton(action, label = "Back") {
+      return `<div class="back-row"><button type="button" class="btn btn--outline btn--sm" data-back="${escapeHtml(
+        action,
+      )}">← ${escapeHtml(label)}</button></div>`;
+    }
+
+    /* —— Screens —— */
+    function renderSubjects() {
+      state.screen = "subjects";
+      updateRail();
+      const cards = CURRICULUM.subjects
+        .map((s) => {
+          const prog = subjectProgress(s);
+          const empty = s.topicIds.length === 0;
+          return `
+            <button type="button" class="card ${empty ? "is-locked" : ""}" data-open-subject="${s.id}" ${empty ? "disabled" : ""}>
+              <h2>${escapeHtml(s.name)}</h2>
+              <p>${escapeHtml(s.blurb)}</p>
+              <div class="progress-label">${empty ? "Coming soon" : `${prog.done}/${prog.total} topics complete · ${prog.pct}%`}</div>
+              ${empty ? "" : `<div class="progress" aria-hidden="true"><span style="width:${prog.pct}%"></span></div>`}
+              <div class="meta-row">
+                ${empty ? `<span class="badge badge--locked">Locked</span>` : `<span class="badge badge--info">${s.topicIds.length} topics</span>`}
+              </div>
+            </button>
+          `;
+        })
+        .join("");
+
+      $("view").innerHTML = `
+        ${crumbs([{ label: "Subjects" }])}
+        <header class="page-head">
+          <p class="kicker">Student dashboard · demo data</p>
+          <h1>Your subjects</h1>
+          <p>Pick a subject to browse topics and subtopics. Track lesson and quiz progress, review attempt history, and unlock the overall topic quiz after every subtopic quiz is passed.</p>
+        </header>
+        <div class="grid grid--2">${cards}</div>
+      `;
+    }
+
+    function renderSubject(subjectId) {
+      const subject = CURRICULUM.subjects.find((s) => s.id === subjectId);
+      if (!subject) return renderSubjects();
+      state.screen = "subject";
+      state.subjectId = subjectId;
+      updateRail();
+
+      const topics = subject.topicIds
+        .map((id) => CURRICULUM.topics[id])
+        .map((t) => {
+          const prog = topicProgress(t.id);
+          return `
+            <button type="button" class="card" data-open-topic="${t.id}">
+              <h3>${escapeHtml(t.title)}</h3>
+              <p>${t.subtopicIds.length} subtopics · overall quiz ${
+                allSubtopicQuizzesDone(t.id) ? "unlocked" : "locked"
+              }</p>
+              <div class="progress-label">${prog.subtopicsComplete}/${prog.subtopicsTotal} subtopics complete · topic ${prog.pct}%</div>
+              <div class="progress" aria-hidden="true"><span style="width:${prog.pct}%"></span></div>
+              <div class="meta-row">
+                ${
+                  prog.complete
+                    ? `<span class="badge badge--ok">Topic complete</span>`
+                    : `<span class="badge badge--info">In progress</span>`
+                }
+                ${
+                  prog.overallPassed
+                    ? `<span class="badge badge--ok">Overall quiz passed</span>`
+                    : ""
+                }
+              </div>
+            </button>
+          `;
+        })
+        .join("");
+
+      $("view").innerHTML = `
+        ${crumbs([
+          { label: "Subjects", action: "subjects" },
+          { label: subject.name },
+        ])}
+        ${backButton("subjects", "Back to subjects")}
+        <header class="page-head">
+          <p class="kicker">Subject overview</p>
+          <h1>${escapeHtml(subject.name)}</h1>
+          <p>${escapeHtml(subject.blurb)}</p>
+        </header>
+        <div class="grid grid--2">${topics || `<div class="alert alert--info">No topics published yet.</div>`}</div>
+      `;
+    }
+
+    function renderTopic(topicId) {
+      const topic = CURRICULUM.topics[topicId];
+      if (!topic) return renderSubjects();
+      const subject = CURRICULUM.subjects.find((s) => s.id === topic.subjectId);
+      state.screen = "topic";
+      state.topicId = topicId;
+      state.subjectId = topic.subjectId;
+      state.subtopicId = null;
+      updateRail();
+
+      const prog = topicProgress(topicId);
+      const unlocked = allSubtopicQuizzesDone(topicId);
+      const overall = ensureOverallProgress(topicId);
+
+      const objectives = topic.objectives
+        .map((o) => `<li>${escapeHtml(o)}</li>`)
+        .join("");
+
+      const subList = topic.subtopicIds
+        .map((id, i) => {
+          const st = CURRICULUM.subtopics[id];
+          const status = subtopicStatus(id);
+          const sp = subtopicProgress(id);
+          const attempts = state.progress.subtopics[id]?.attempts || [];
+          return `
+            <li class="subtopic-card">
+              <div class="subtopic-card__head">
+                <div class="list-item__num">${String(i + 1).padStart(2, "0")}</div>
+                <div>
+                  <p class="list-item__title">${escapeHtml(st.title)}</p>
+                  <p class="list-item__meta">${sp.pct}% complete</p>
+                </div>
+                <span class="badge ${status.cls}">${status.label}</span>
+              </div>
+              <div>
+                <div class="progress-label">Subtopic progress · ${sp.pct}%</div>
+                <div class="progress" aria-hidden="true"><span style="width:${sp.pct}%"></span></div>
+              </div>
+              <div class="action-boxes">
+                <div class="action-box">
+                  <h3 class="action-box__title">Lesson</h3>
+                  <p class="action-box__meta">${
+                    sp.lessonDone ? "Lesson completed. You can review it anytime." : "Work through every slide to finish the lesson."
+                  }</p>
+                  <div class="meta-row">
+                    <span class="badge ${sp.lessonDone ? "badge--ok" : "badge--info"}">${
+                      sp.lessonDone ? "Complete" : "Open"
+                    }</span>
+                  </div>
+                  <button type="button" class="btn btn--sm btn--soft" data-open-subtopic="${id}">
+                    ${sp.lessonDone ? "Review lesson" : "Start lesson"}
+                  </button>
+                </div>
+                <div class="action-box ${sp.lessonDone ? "" : "is-locked"}">
+                  <h3 class="action-box__title">Quiz</h3>
+                  <p class="action-box__meta">${
+                    sp.lessonDone
+                      ? sp.quizPassed
+                        ? "Quiz passed. Retake anytime to practice."
+                        : "Lesson complete. Take the quiz when you are ready."
+                      : "Locked until the lesson is completed."
+                  }</p>
+                  <div class="meta-row">
+                    <span class="badge ${
+                      sp.quizPassed
+                        ? "badge--ok"
+                        : sp.lessonDone
+                          ? "badge--info"
+                          : "badge--locked"
+                    }">${
+                      sp.quizPassed ? "Passed" : sp.lessonDone ? "Unlocked" : "Locked"
+                    }</span>
+                  </div>
+                  <button
+                    type="button"
+                    class="btn btn--sm"
+                    data-start-subquiz="${id}"
+                    ${sp.lessonDone ? "" : "disabled"}
+                    title="${sp.lessonDone ? "Start or retake the subtopic quiz" : "Finish the lesson first"}"
+                  >
+                    ${attempts.length ? "Retake quiz" : "Start quiz"}
+                  </button>
+                  ${
+                    sp.lessonDone
+                      ? ""
+                      : `<p class="subtopic-card__hint">Complete the lesson to enable this box.</p>`
+                  }
+                  <div>
+                    ${renderAttemptHistory(attempts, "Quiz history")}
+                  </div>
+                </div>
+              </div>
+            </li>
+          `;
+        })
+        .join("");
+
+      $("view").innerHTML = `
+        ${crumbs([
+          { label: "Subjects", action: "subjects" },
+          { label: subject.name, action: `subject:${subject.id}` },
+          { label: topic.title },
+        ])}
+        ${backButton(`subject:${subject.id}`, "Back to subject")}
+        <header class="page-head">
+          <p class="kicker">Topic overview</p>
+          <h1>${escapeHtml(topic.title)}</h1>
+          <p>Work through each subtopic lesson, then take its quiz. The overall topic quiz unlocks when every subtopic quiz is passed.</p>
+        </header>
+
+        <div class="panel">
+          <div class="progress-label">Topic completion · ${prog.pct}% · ${prog.subtopicsComplete}/${prog.subtopicsTotal} subtopics · overall quiz ${
+            prog.overallPassed ? "passed" : "pending"
+          }</div>
+          <div class="progress" aria-hidden="true"><span style="width:${prog.pct}%"></span></div>
+          <div class="meta-row" style="margin-top:0.65rem">
+            ${
+              prog.complete
+                ? `<span class="badge badge--ok">Topic complete</span>`
+                : `<span class="badge badge--info">In progress</span>`
+            }
+          </div>
+        </div>
+
+        <div class="panel" style="margin-top:1rem">
+          <h2 style="margin:0 0 0.5rem;font-size:1.1rem">Objectives</h2>
+          <ul style="margin:0;padding-left:1.2rem;display:grid;gap:0.35rem">${objectives}</ul>
+        </div>
+
+        <div class="panel" style="margin-top:1rem">
+          <h2 style="margin:0 0 0.75rem;font-size:1.1rem">Subtopics</h2>
+          <ul class="list">${subList}</ul>
+        </div>
+
+        <div class="panel" style="margin-top:1rem">
+          <h2 style="margin:0 0 0.35rem;font-size:1.1rem">Overall topic quiz</h2>
+          <p style="margin:0;color:var(--ink-muted);font-size:0.95rem">
+            ${
+              unlocked
+                ? "All subtopic quizzes passed. You can take the overall quiz."
+                : "Locked until every subtopic quiz is passed."
+            }
+          </p>
+          <div class="meta-row" style="margin-top:0.65rem">
+            ${
+              unlocked
+                ? overall.passed
+                  ? `<span class="badge badge--ok">Passed</span>`
+                  : `<span class="badge badge--info">Unlocked</span>`
+                : `<span class="badge badge--locked">Locked</span>`
+            }
+          </div>
+          <div class="actions">
+            <button
+              type="button"
+              class="btn"
+              data-start-overall="${topic.id}"
+              ${unlocked ? "" : "disabled"}
+            >
+              ${overall.attempts.length ? "Retake overall quiz" : "Start overall quiz"}
+            </button>
+          </div>
+          <div style="margin-top:1rem">
+            ${renderAttemptHistory(overall.attempts, "Overall quiz history")}
+          </div>
+        </div>
+      `;
+    }
+
+    function renderLesson(subtopicId, slideIndex = 0) {
+      const st = CURRICULUM.subtopics[subtopicId];
+      if (!st) return renderSubjects();
+      const topic = CURRICULUM.topics[st.topicId];
+      const subject = CURRICULUM.subjects.find((s) => s.id === topic.subjectId);
+      state.screen = "lesson";
+      state.subtopicId = subtopicId;
+      state.topicId = st.topicId;
+      state.subjectId = topic.subjectId;
+      state.slideIndex = Math.max(0, Math.min(slideIndex, st.slides.length - 1));
+      updateRail();
+
+      const slide = st.slides[state.slideIndex];
+      const pct = Math.round(((state.slideIndex + 1) / st.slides.length) * 100);
+      const atEnd = state.slideIndex === st.slides.length - 1;
+      const progress = ensureSubtopicProgress(subtopicId);
+
+      // Mark lesson complete when reaching last slide (100% of lesson content)
+      if (atEnd) {
+        progress.lessonDone = true;
+      }
+
+      const lessonComplete = progress.lessonDone;
+      const quizUnlocked = lessonComplete;
+
+      $("view").innerHTML = `
+        ${crumbs([
+          { label: "Subjects", action: "subjects" },
+          { label: subject.name, action: `subject:${subject.id}` },
+          { label: topic.title, action: `topic:${topic.id}` },
+          { label: st.title },
+        ])}
+        ${backButton(`topic:${topic.id}`, "Back to topic")}
+        <header class="page-head">
+          <p class="kicker">Subtopic lesson · slide ${state.slideIndex + 1} of ${st.slides.length}</p>
+          <h1>${escapeHtml(st.title)}</h1>
+          <p>Finish every slide to unlock the subtopic quiz. Subtopic completion reaches 100% after you pass the quiz.</p>
+        </header>
+        <div class="progress-label">Lesson slides · ${pct}%${
+          lessonComplete ? " · lesson complete" : ""
+        }</div>
+        <div class="progress" aria-hidden="true" style="margin-bottom:0.75rem"><span style="width:${pct}%"></span></div>
+        <div class="progress-label">Subtopic completion · ${subtopicProgress(subtopicId).pct}%</div>
+        <div class="progress" aria-hidden="true" style="margin-bottom:1rem"><span style="width:${
+          subtopicProgress(subtopicId).pct
+        }%"></span></div>
+        <article class="panel reading">
+          <h2>${escapeHtml(slide.title)}</h2>
+          ${slide.html}
+          <div class="slide-nav">
+            <button type="button" class="btn btn--outline" data-slide="prev" ${
+              state.slideIndex === 0 ? "disabled" : ""
+            }>Previous</button>
+            <div class="actions" style="margin:0">
+              ${
+                atEnd
+                  ? `
+                    <button type="button" class="btn btn--soft" data-open-topic="${topic.id}">Back to topic</button>
+                    <button
+                      type="button"
+                      class="btn"
+                      data-start-subquiz="${subtopicId}"
+                      ${quizUnlocked ? "" : "disabled"}
+                    >Start subtopic quiz</button>
+                  `
+                  : `<button type="button" class="btn" data-slide="next">Next slide</button>`
+              }
+            </div>
+          </div>
+          ${
+            atEnd && !quizUnlocked
+              ? `<p class="alert alert--warning" style="margin-top:1rem;margin-bottom:0">Reach the final slide to unlock the quiz.</p>`
+              : ""
+          }
+        </article>
+      `;
+    }
+
+    function currentQuiz() {
+      if (state.quizMode === "overall") {
+        return CURRICULUM.topics[state.topicId].overallQuiz;
+      }
+      return CURRICULUM.subtopics[state.subtopicId].quiz;
+    }
+
+    function renderQuiz() {
+      const quiz = currentQuiz();
+      const q = quiz.questions[state.quizIndex];
+      const answered = Object.keys(state.answers).length;
+      const selected = state.answers[state.quizIndex];
+      state.screen = state.quizMode === "overall" ? "overall-quiz" : "sub-quiz";
+      updateRail();
+
+      const topic = CURRICULUM.topics[state.topicId];
+      const subject = CURRICULUM.subjects.find((s) => s.id === topic.subjectId);
+      const title =
+        state.quizMode === "overall"
+          ? quiz.title
+          : CURRICULUM.subtopics[state.subtopicId].title;
+
+      const options = q.options
+        .map((opt) => {
+          const isSel = selected === opt.label;
+          return `
+            <button
+              type="button"
+              class="option ${isSel ? "is-selected" : ""}"
+              role="radio"
+              aria-checked="${isSel}"
+              data-pick="${opt.label}"
+              ${state.reviewed ? "disabled" : ""}
+            >
+              <span class="option__mark">${opt.label}</span>
+              <span class="option__text">${escapeHtml(opt.text)}</span>
+            </button>
+          `;
+        })
+        .join("");
+
+      const atLast = state.quizIndex === quiz.questions.length - 1;
+      const allAnswered = answered === quiz.questions.length;
+
+      $("view").innerHTML = `
+        ${crumbs([
+          { label: "Subjects", action: "subjects" },
+          { label: subject.name, action: `subject:${subject.id}` },
+          { label: topic.title, action: `topic:${topic.id}` },
+          { label: state.quizMode === "overall" ? "Overall quiz" : "Subtopic quiz" },
+        ])}
+        ${backButton(`topic:${topic.id}`, "Back to topic")}
+        <header class="page-head">
+          <p class="kicker">${escapeHtml(quiz.title)}</p>
+          <h1>${escapeHtml(title)}</h1>
+        </header>
+        <p class="quiz-progress">Question ${state.quizIndex + 1} of ${quiz.questions.length} · ${answered} answered · pass mark ${quiz.passMark}%</p>
+        <div class="panel">
+          <p class="question-prompt">${escapeHtml(q.prompt)}</p>
+          <div class="options" role="radiogroup" aria-label="Answer choices">${options}</div>
+          <div class="actions">
+            <button type="button" class="btn btn--outline" data-quiz-nav="prev" ${state.quizIndex === 0 ? "disabled" : ""}>Previous</button>
+            ${
+              atLast
+                ? `<button type="button" class="btn" data-quiz-submit="1" ${allAnswered ? "" : "disabled"}>Submit quiz</button>`
+                : `<button type="button" class="btn" data-quiz-nav="next" ${selected ? "" : "disabled"}>Next question</button>`
+            }
+          </div>
+          ${!allAnswered && atLast ? `<p class="alert alert--warning" style="margin-top:1rem;margin-bottom:0">Answer every question before you submit.</p>` : ""}
+        </div>
+      `;
+    }
+
+    function scoreQuiz(quiz, answers) {
+      let correct = 0;
+      const detail = quiz.questions.map((q, i) => {
+        const picked = answers[i];
+        const right = q.options.find((o) => o.correct);
+        const ok = picked === right.label;
+        if (ok) correct += 1;
+        return {
+          number: i + 1,
+          selected: picked || null,
+          correct: ok,
+        };
+      });
+      const percent = Math.round((correct / quiz.questions.length) * 100);
+      return {
+        correct,
+        total: quiz.questions.length,
+        percent,
+        passed: percent >= quiz.passMark,
+        detail,
+        passMark: quiz.passMark,
+      };
+    }
+
+    function submitQuiz() {
+      const quiz = currentQuiz();
+      const submitBtn = document.querySelector("[data-quiz-submit]");
+      if (submitBtn) submitBtn.classList.add("is-loading");
+
+      // Simulate brief scoring delay for loading state
+      setTimeout(() => {
+        const result = scoreQuiz(quiz, state.answers);
+        const submittedAt = new Date().toISOString();
+        state.lastResult = result;
+        state.reviewed = true;
+
+        if (state.quizMode === "subtopic") {
+          const progress = ensureSubtopicProgress(state.subtopicId);
+          progress.lessonDone = true;
+          if (result.passed) progress.quizPassed = true;
+          progress.attempts.push({
+            attemptNumber: progress.attempts.length + 1,
+            scorePercent: result.percent,
+            passed: result.passed,
+            answers: { ...state.answers },
+            submittedAt,
+          });
+        } else {
+          const progress = ensureOverallProgress(state.topicId);
+          if (result.passed) progress.passed = true;
+          progress.attempts.push({
+            attemptNumber: progress.attempts.length + 1,
+            scorePercent: result.percent,
+            passed: result.passed,
+            answers: { ...state.answers },
+            submittedAt,
+          });
+        }
+        renderResult();
+      }, 450);
+    }
+
+    function renderResult() {
+      const result = state.lastResult;
+      if (!result) return;
+      state.screen = "result";
+      updateRail();
+
+      const topic = CURRICULUM.topics[state.topicId];
+      const subject = CURRICULUM.subjects.find((s) => s.id === topic.subjectId);
+      const heading =
+        state.quizMode === "overall"
+          ? "Overall topic quiz result"
+          : "Subtopic quiz result";
+
+      const attemptCount =
+        state.quizMode === "overall"
+          ? ensureOverallProgress(state.topicId).attempts.length
+          : ensureSubtopicProgress(state.subtopicId).attempts.length;
+
+      const rows = result.detail
+        .map(
+          (d) => `
+          <div class="answer-row ${d.correct ? "is-correct" : "is-wrong"}">
+            <span class="answer-row__num">Q${d.number}</span>
+            <span>You chose <strong>${escapeHtml(d.selected || "—")}</strong></span>
+            <span class="answer-row__mark">${d.correct ? "Correct" : "Incorrect"}</span>
+          </div>
+        `,
+        )
+        .join("");
+
+      const unlockedNow =
+        state.quizMode === "subtopic" && allSubtopicQuizzesDone(state.topicId);
+      const topicCompleteNow = isTopicComplete(state.topicId);
+
+      $("view").innerHTML = `
+        ${crumbs([
+          { label: "Subjects", action: "subjects" },
+          { label: subject.name, action: `subject:${subject.id}` },
+          { label: topic.title, action: `topic:${topic.id}` },
+          { label: "Result" },
+        ])}
+        ${backButton(`topic:${topic.id}`, "Back to topic")}
+        <header class="page-head">
+          <p class="kicker">${escapeHtml(heading)} · attempt #${attemptCount} · demo scoring</p>
+          <h1>Your score</h1>
+        </header>
+        <div class="score-hero ${result.passed ? "is-pass" : ""}">
+          <p class="score-hero__value">${result.percent}%</p>
+          <p class="score-hero__status">${
+            result.passed ? "Passed — nice work." : "Not yet — review the lesson and try again."
+          }</p>
+          <p class="score-hero__meta">Raw ${result.correct}/${result.total} · Pass mark ${result.passMark}%</p>
+        </div>
+        ${
+          unlockedNow && state.quizMode === "subtopic"
+            ? `<div class="alert alert--success">All subtopic quizzes passed. The overall topic quiz is now unlocked.</div>`
+            : ""
+        }
+        ${
+          topicCompleteNow
+            ? `<div class="alert alert--success">Topic complete — every subtopic and the overall quiz are passed.</div>`
+            : ""
+        }
+        <h2 style="font-size:1.1rem;margin:0 0 0.5rem">Question review</h2>
+        <p style="margin:0 0 0.75rem;color:var(--ink-muted);font-size:0.95rem">
+          Correct answer keys stay hidden. You only see which items you got right.
+        </p>
+        <div class="answer-review">${rows}</div>
+        <div class="actions">
+          ${
+            state.quizMode === "subtopic"
+              ? `<button type="button" class="btn btn--soft" data-open-subtopic="${state.subtopicId}">Review lesson</button>
+                 <button type="button" class="btn btn--outline" data-start-subquiz="${state.subtopicId}">Retake quiz</button>`
+              : `<button type="button" class="btn btn--outline" data-start-overall="${state.topicId}">Retake overall quiz</button>`
+          }
+          <button type="button" class="btn" data-open-topic="${state.topicId}">Back to topic</button>
+        </div>
+      `;
+
+      if (unlockedNow && state.quizMode === "subtopic" && result.passed) {
+        showOverlay({
+          title: "Overall quiz unlocked",
+          body: "You finished every subtopic quiz. Take the overall topic quiz when you are ready.",
+          actions: [
+            { label: "Stay here", className: "btn--soft" },
+            {
+              label: "Go to topic",
+              onClick: () => renderTopic(state.topicId),
+            },
+          ],
+        });
+      }
+    }
+
+    /* —— Events —— */
+    function startQuiz(mode, subtopicId = null) {
+      if (mode === "subtopic") {
+        const id = subtopicId || state.subtopicId;
+        const st = CURRICULUM.subtopics[id];
+        if (!st) return;
+        const progress = ensureSubtopicProgress(id);
+        if (!progress.lessonDone) {
+          showOverlay({
+            title: "Quiz locked",
+            body: "Finish the lesson (reach the final slide) before starting this quiz.",
+            actions: [
+              { label: "Got it", className: "btn--soft" },
+              {
+                label: "Open lesson",
+                onClick: () => renderLesson(id, 0),
+              },
+            ],
+          });
+          return;
+        }
+        state.subtopicId = id;
+        state.topicId = st.topicId;
+        state.subjectId = CURRICULUM.topics[st.topicId].subjectId;
+      } else if (mode === "overall") {
+        if (!allSubtopicQuizzesDone(state.topicId)) return;
+      }
+
+      state.quizMode = mode;
+      state.quizIndex = 0;
+      state.answers = {};
+      state.reviewed = false;
+      state.lastResult = null;
+      renderQuiz();
+    }
+
+    $("login-form").addEventListener("submit", (e) => {
+      e.preventDefault();
+      const email = $("email").value.trim();
+      const password = $("password").value;
+      const err = $("login-error");
+      err.classList.add("hidden");
+
+      if (!email || !password) {
+        err.textContent = "Enter email and password.";
+        err.classList.remove("hidden");
+        return;
+      }
+      if (password.length < 8) {
+        err.textContent = "Password must be at least 8 characters.";
+        err.classList.remove("hidden");
+        return;
+      }
+      if (email !== DEMO_USER.email || password !== DEMO_USER.password) {
+        err.textContent = "Invalid demo credentials. Use student@demo.school / demo1234.";
+        err.classList.remove("hidden");
+        return;
+      }
+
+      const btn = $("login-submit");
+      btn.classList.add("is-loading");
+      btn.disabled = true;
+      setTimeout(() => {
+        btn.classList.remove("is-loading");
+        btn.disabled = false;
+        $("student-name").textContent = DEMO_USER.name;
+        setAuthUI(true);
+        renderSubjects();
+      }, 400);
+    });
+
+    $("quick-demo").addEventListener("click", () => {
+      state.progress = createEmptyProgress();
+      const now = new Date().toISOString();
+      // Complete Linear Equations subtopic quizzes so overall quiz is unlocked
+      ["slope-intercept", "solving-equations"].forEach((id) => {
+        state.progress.subtopics[id] = {
+          lessonDone: true,
+          quizPassed: true,
+          attempts: [
+            {
+              attemptNumber: 1,
+              scorePercent: 100,
+              passed: true,
+              answers: {},
+              submittedAt: now,
+            },
+          ],
+        };
+      });
+      state.progress.overall["linear-equations"] = {
+        passed: false,
+        attempts: [],
+      };
+      $("student-name").textContent = DEMO_USER.name;
+      setAuthUI(true);
+      renderTopic("linear-equations");
+      showOverlay({
+        title: "Quick demo ready",
+        body: "Both subtopics are marked complete with quiz history, so the overall topic quiz is unlocked on Linear equations.",
+        actions: [{ label: "Got it", className: "btn" }],
+      });
+    });
+
+    function resetDemo() {
+      state.progress = createEmptyProgress();
+      state.topicId = null;
+      state.subjectId = null;
+      state.subtopicId = null;
+      closeOverlay();
+      showOverlay({
+        title: "Demo reset",
+        body: "All quiz progress and attempt history cleared. Subjects start fresh.",
+        actions: [
+          {
+            label: "Back to subjects",
+            onClick: () => renderSubjects(),
+          },
+        ],
+      });
+      renderSubjects();
+    }
+
+    function signOut() {
+      closeOverlay();
+      setAuthUI(false);
+      state.progress = createEmptyProgress();
+      state.topicId = null;
+      state.subjectId = null;
+      state.subtopicId = null;
+      state.screen = "login";
+      $("login-error").classList.add("hidden");
+    }
+
+    $("reset-demo").addEventListener("click", resetDemo);
+    $("sign-out").addEventListener("click", signOut);
+    $("sign-out-mobile").addEventListener("click", signOut);
+
+    document.body.addEventListener("click", (e) => {
+      const t = e.target.closest("[data-nav], [data-crumb], [data-back], [data-open-subject], [data-open-topic], [data-open-subtopic], [data-slide], [data-start-subquiz], [data-start-overall], [data-pick], [data-quiz-nav], [data-quiz-submit]");
+      if (!t) return;
+
+      if (t.matches("[data-nav]")) {
+        const nav = t.getAttribute("data-nav");
+        if (nav === "subjects") renderSubjects();
+        if (nav === "current-topic" && state.topicId) renderTopic(state.topicId);
+        return;
+      }
+
+      if (t.matches("[data-crumb]") || t.matches("[data-back]")) {
+        const action = t.getAttribute("data-crumb") || t.getAttribute("data-back");
+        if (action === "subjects") renderSubjects();
+        else if (action.startsWith("subject:")) renderSubject(action.slice(8));
+        else if (action.startsWith("topic:")) renderTopic(action.slice(6));
+        return;
+      }
+
+      if (t.matches("[data-open-subject]")) {
+        renderSubject(t.getAttribute("data-open-subject"));
+        return;
+      }
+      if (t.matches("[data-open-topic]")) {
+        renderTopic(t.getAttribute("data-open-topic"));
+        return;
+      }
+      if (t.matches("[data-open-subtopic]")) {
+        renderLesson(t.getAttribute("data-open-subtopic"), 0);
+        return;
+      }
+      if (t.matches("[data-slide]")) {
+        const dir = t.getAttribute("data-slide");
+        const next = dir === "next" ? state.slideIndex + 1 : state.slideIndex - 1;
+        renderLesson(state.subtopicId, next);
+        return;
+      }
+      if (t.matches("[data-start-subquiz]")) {
+        if (t.hasAttribute("disabled") || t.disabled) return;
+        startQuiz("subtopic", t.getAttribute("data-start-subquiz"));
+        return;
+      }
+      if (t.matches("[data-start-overall]")) {
+        if (t.hasAttribute("disabled") || t.disabled) return;
+        const topicId = t.getAttribute("data-start-overall") || state.topicId;
+        state.topicId = topicId;
+        if (!allSubtopicQuizzesDone(topicId)) return;
+        startQuiz("overall");
+        return;
+      }
+      if (t.matches("[data-pick]")) {
+        state.answers[state.quizIndex] = t.getAttribute("data-pick");
+        renderQuiz();
+        return;
+      }
+      if (t.matches("[data-quiz-nav]")) {
+        const dir = t.getAttribute("data-quiz-nav");
+        state.quizIndex += dir === "next" ? 1 : -1;
+        renderQuiz();
+        return;
+      }
+      if (t.matches("[data-quiz-submit]")) {
+        submitQuiz();
+      }
+    });
+
+    $("overlay").addEventListener("click", (e) => {
+      if (e.target === $("overlay")) closeOverlay();
+    });
+
+    document.addEventListener("keydown", (e) => {
+      if (e.key === "Escape" && $("overlay").classList.contains("is-open")) {
+        closeOverlay();
+      }
+    });
+  </script>
+</body>
+</html>

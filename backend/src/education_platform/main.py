@@ -3,12 +3,11 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from sqlalchemy import create_engine, event, select
+from sqlalchemy import create_engine, event
 from sqlalchemy.orm import Session
 
 from education_platform.core.config import get_settings
 from education_platform.db import models as _models
-from education_platform.modules.academics.models import Subtopic
 from education_platform.modules.academics.router import router as academics_router
 from education_platform.modules.assessments.router import router as assessments_router
 from education_platform.modules.auth.router import router as auth_router
@@ -31,9 +30,7 @@ def _seed_if_empty() -> None:
             cursor.close()
 
     with Session(engine) as session:
-        has_topics = session.scalar(select(Subtopic.id).limit(1))
-        if has_topics is None:
-            seed_approved_materials(session, replace=True)
+        seed_approved_materials(session, replace=False)
     engine.dispose()
 
 

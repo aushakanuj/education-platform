@@ -10,6 +10,7 @@ from uuid import UUID
 
 from sqlalchemy import (
     Boolean,
+    CheckConstraint,
     DateTime,
     ForeignKey,
     Integer,
@@ -21,7 +22,7 @@ from sqlalchemy import (
 from sqlalchemy.orm import Mapped, mapped_column
 
 from education_platform.db.base import Base, UUIDTimestampMixin
-from education_platform.db.types import JsonDict, str_enum
+from education_platform.db.types import JsonDict, partial_unique_index, str_enum
 
 
 class QuestionType(str, enum.Enum):
@@ -41,6 +42,11 @@ class QuestionVersionStatus(str, enum.Enum):
     DRAFT = "draft"
     PUBLISHED = "published"
     ARCHIVED = "archived"
+
+
+class QuizScope(str, enum.Enum):
+    SUBTOPIC_MASTERY = "subtopic_mastery"
+    TOPIC_MASTERY = "topic_mastery"
 
 
 class QuizVersionStatus(str, enum.Enum):
@@ -84,6 +90,8 @@ class QuestionVersion(UUIDTimestampMixin, Base):
         UniqueConstraint(
             "question_id", "version_number", name="uq_question_versions_question_version"
         ),
+        CheckConstraint("version_number >= 1", name="ck_question_versions_version_number"),
+        CheckConstraint("marks >= 0", name="ck_question_versions_marks"),
     )
 
     question_id: Mapped[UUID] = mapped_column(ForeignKey("questions.id"), index=True)
@@ -151,10 +159,38 @@ class QuestionOutcomeTag(UUIDTimestampMixin, Base):
 
 
 class CommonMasteryQuiz(UUIDTimestampMixin, Base):
-    __tablename__ = "common_mastery_quizzes"
-    __table_args__ = (UniqueConstraint("subtopic_id", name="uq_common_mastery_quizzes_subtopic"),)
+    """Quiz identity targeting exactly one subtopic or topic."""
 
-    subtopic_id: Mapped[UUID] = mapped_column(ForeignKey("subtopics.id"), index=True)
+    __tablename__ = "common_mastery_quizzes"
+    __table_args__ = (
+        CheckConstraint(
+            "(quiz_scope = 'subtopic_mastery' AND subtopic_id IS NOT NULL AND topic_id IS NULL) OR "
+            "(quiz_scope = 'topic_mastery' AND topic_id IS NOT NULL AND subtopic_id IS NULL)",
+            name="ck_common_mastery_quizzes_exactly_one_target",
+        ),
+        partial_unique_index(
+            "uq_common_mastery_quizzes_subtopic",
+            "subtopic_id",
+            where="subtopic_id IS NOT NULL",
+        ),
+        partial_unique_index(
+            "uq_common_mastery_quizzes_topic",
+            "topic_id",
+            where="topic_id IS NOT NULL",
+        ),
+    )
+
+    quiz_scope: Mapped[QuizScope] = mapped_column(
+        str_enum(QuizScope, "quiz_scope"),
+        default=QuizScope.SUBTOPIC_MASTERY,
+        index=True,
+    )
+    subtopic_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("subtopics.id"), nullable=True, index=True
+    )
+    topic_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("topics.id"), nullable=True, index=True
+    )
     title: Mapped[str] = mapped_column(String(200))
 
 
@@ -162,6 +198,15 @@ class QuizVersion(UUIDTimestampMixin, Base):
     __tablename__ = "quiz_versions"
     __table_args__ = (
         UniqueConstraint("quiz_id", "version_number", name="uq_quiz_versions_quiz_version"),
+        CheckConstraint("version_number >= 1", name="ck_quiz_versions_version_number"),
+        CheckConstraint(
+            "duration_seconds IS NULL OR duration_seconds > 0",
+            name="ck_quiz_versions_duration_seconds",
+        ),
+        CheckConstraint(
+            "max_attempts IS NULL OR max_attempts > 0",
+            name="ck_quiz_versions_max_attempts",
+        ),
     )
 
     quiz_id: Mapped[UUID] = mapped_column(ForeignKey("common_mastery_quizzes.id"), index=True)
@@ -177,6 +222,7 @@ class QuizVersion(UUIDTimestampMixin, Base):
         str_enum(QuizResultReleaseMode, "quiz_result_release_mode"),
         default=QuizResultReleaseMode.IMMEDIATE,
     )
+    pass_threshold_percent: Mapped[Decimal] = mapped_column(Numeric(5, 2), default=Decimal("70.00"))
     released_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
 
@@ -189,6 +235,7 @@ class QuizItem(UUIDTimestampMixin, Base):
             "question_version_id",
             name="uq_quiz_items_version_question",
         ),
+        CheckConstraint("sequence >= 1", name="ck_quiz_items_sequence"),
     )
 
     quiz_version_id: Mapped[UUID] = mapped_column(ForeignKey("quiz_versions.id"), index=True)
@@ -216,13 +263,27 @@ class QuizMaterialBinding(UUIDTimestampMixin, Base):
 
 class QuizRelease(UUIDTimestampMixin, Base):
     __tablename__ = "quiz_releases"
+    __table_args__ = (
+        partial_unique_index(
+            "uq_quiz_releases_one_open_per_version",
+            "quiz_version_id",
+            where="status = 'open'",
+        ),
+        CheckConstraint(
+            "window_starts_at IS NULL OR window_ends_at IS NULL OR "
+            "window_starts_at <= window_ends_at",
+            name="ck_quiz_releases_window_order",
+        ),
+    )
 
     quiz_version_id: Mapped[UUID] = mapped_column(ForeignKey("quiz_versions.id"), index=True)
     window_starts_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
     )
     window_ends_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
-    released_by_user_id: Mapped[UUID] = mapped_column(ForeignKey("users.id"), index=True)
+    released_by_user_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("users.id"), nullable=True, index=True
+    )
     status: Mapped[QuizReleaseStatus] = mapped_column(
         str_enum(QuizReleaseStatus, "quiz_release_status"),
         default=QuizReleaseStatus.SCHEDULED,
@@ -239,10 +300,32 @@ class QuizAttempt(UUIDTimestampMixin, Base):
             "attempt_number",
             name="uq_quiz_attempts_student_version_number",
         ),
+        partial_unique_index(
+            "uq_quiz_attempts_one_in_progress",
+            "student_subject_enrollment_id",
+            "quiz_version_id",
+            where="status = 'in_progress'",
+        ),
+        CheckConstraint("attempt_number >= 1", name="ck_quiz_attempts_attempt_number"),
+        CheckConstraint(
+            "score_percent IS NULL OR (score_percent >= 0 AND score_percent <= 100)",
+            name="ck_quiz_attempts_score_percent",
+        ),
+        CheckConstraint(
+            "pass_threshold_percent IS NULL OR "
+            "(pass_threshold_percent >= 0 AND pass_threshold_percent <= 100)",
+            name="ck_quiz_attempts_pass_threshold",
+        ),
     )
 
     student_id: Mapped[UUID] = mapped_column(ForeignKey("student_profiles.id"), index=True)
+    student_subject_enrollment_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("student_subject_enrollments.id"), nullable=True, index=True
+    )
     quiz_version_id: Mapped[UUID] = mapped_column(ForeignKey("quiz_versions.id"), index=True)
+    quiz_release_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("quiz_releases.id"), nullable=True, index=True
+    )
     attempt_number: Mapped[int] = mapped_column(Integer)
     status: Mapped[QuizAttemptStatus] = mapped_column(
         str_enum(QuizAttemptStatus, "quiz_attempt_status"),
@@ -250,10 +333,12 @@ class QuizAttempt(UUIDTimestampMixin, Base):
         index=True,
     )
     started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    deadline_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     submitted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     scored_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     score_raw: Mapped[Decimal | None] = mapped_column(Numeric(10, 2), nullable=True)
     score_percent: Mapped[Decimal | None] = mapped_column(Numeric(5, 2), nullable=True)
+    pass_threshold_percent: Mapped[Decimal | None] = mapped_column(Numeric(5, 2), nullable=True)
     passed: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
 
 

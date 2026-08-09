@@ -80,6 +80,32 @@ def parse_lesson(markdown: str, topic_id: str) -> ParsedLesson:
     )
 
 
+_BULLET_LINE = re.compile(r"^\s*[-*]\s+(.+?)\s*$")
+_BOLD = re.compile(r"\*\*(.+?)\*\*")
+
+
+def parse_objectives_from_lesson(markdown: str) -> list[str]:
+    """Extract learning-objective bullets from the first objectives slide."""
+    slides = parse_slides(markdown)
+    objectives_slide = next(
+        (slide for slide in slides if "objective" in slide.title.lower()),
+        slides[0] if slides else None,
+    )
+    if objectives_slide is None:
+        return []
+
+    objectives: list[str] = []
+    for line in objectives_slide.content.splitlines():
+        match = _BULLET_LINE.match(line)
+        if not match:
+            continue
+        text = _BOLD.sub(r"\1", match.group(1)).strip()
+        text = re.sub(r"\s+", " ", text)
+        if text:
+            objectives.append(text)
+    return objectives
+
+
 def _strip_answer_key(markdown: str) -> str:
     parts = _ANSWER_KEY_SPLIT.split(markdown, maxsplit=1)
     return parts[0].rstrip()

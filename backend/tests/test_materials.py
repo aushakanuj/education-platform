@@ -1,3 +1,5 @@
+from uuid import UUID
+
 from fastapi.testclient import TestClient
 
 
@@ -6,8 +8,8 @@ def test_list_materials(client: TestClient, enrolled_student_headers: dict[str, 
     assert response.status_code == 200
     topics = response.json()
     ids = {topic["id"] for topic in topics}
-    assert "quadrilaterals" in ids
-    assert "squares_cubes_roots" in ids
+    assert "rectangles_squares_properties" in ids
+    assert "square_numbers_patterns" in ids
     for topic in topics:
         assert topic["has_lesson"] is True
         assert topic["has_quiz"] is True
@@ -17,11 +19,13 @@ def test_list_materials(client: TestClient, enrolled_student_headers: dict[str, 
 def test_get_lesson_includes_slides(
     client: TestClient, enrolled_student_headers: dict[str, str]
 ) -> None:
-    response = client.get("/api/v1/materials/quadrilaterals", headers=enrolled_student_headers)
+    response = client.get(
+        "/api/v1/materials/rectangles_squares_properties", headers=enrolled_student_headers
+    )
     assert response.status_code == 200
     payload = response.json()
-    assert payload["id"] == "quadrilaterals"
-    assert "Quadrilaterals" in payload["title"]
+    UUID(payload["id"])
+    assert "Rectangles" in payload["title"]
     assert "## Slide 1" in payload["markdown"]
     assert len(payload["slides"]) >= 1
     assert payload["slides"][0]["number"] == 1
@@ -33,11 +37,11 @@ def test_get_quiz_strips_answer_key(
     client: TestClient, enrolled_student_headers: dict[str, str]
 ) -> None:
     response = client.get(
-        "/api/v1/materials/squares_cubes_roots/quiz", headers=enrolled_student_headers
+        "/api/v1/materials/square_numbers_patterns/quiz", headers=enrolled_student_headers
     )
     assert response.status_code == 200
     payload = response.json()
-    assert payload["id"] == "squares_cubes_roots"
+    UUID(payload["id"])
     assert len(payload["questions"]) == 10
     first = payload["questions"][0]
     assert first["number"] == 1
@@ -47,7 +51,7 @@ def test_get_quiz_strips_answer_key(
     serialized = str(payload)
     assert "Answer Key" not in serialized
     assert "**B** —" not in serialized
-    assert "2048 ends in 8" not in serialized
+    assert "1027 ends in 7" not in serialized
     assert "correct_option_label" not in serialized
 
 
@@ -86,4 +90,7 @@ def test_unenrolled_student_cannot_see_materials(client: TestClient) -> None:
     listed = client.get("/api/v1/materials", headers=headers)
     assert listed.status_code == 200
     assert listed.json() == []
-    assert client.get("/api/v1/materials/quadrilaterals", headers=headers).status_code == 403
+    assert (
+        client.get("/api/v1/materials/rectangles_squares_properties", headers=headers).status_code
+        == 403
+    )

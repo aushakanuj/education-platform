@@ -25,8 +25,14 @@ from education_platform.modules.assessments.service import (
 )
 from education_platform.modules.auth.schemas import ProvisionStudentRequest
 from education_platform.modules.auth.service import provision_student
+from education_platform.modules.materials.schemas import MaterialProgressUpdate
 from education_platform.modules.materials.seed import seed_approved_materials
-from education_platform.modules.materials.service import get_lesson, get_quiz, list_topics
+from education_platform.modules.materials.service import (
+    get_lesson,
+    get_quiz,
+    list_topics,
+    update_material_progress,
+)
 
 
 def _seed(migrated_db: object) -> None:
@@ -66,17 +72,27 @@ async def test_materials_and_attempt_flow(
     principal = await _student_principal(async_db_session)
 
     topics = await list_topics(async_db_session, principal)
-    assert {topic.id for topic in topics} >= {"quadrilaterals", "squares_cubes_roots"}
+    assert {topic.id for topic in topics} >= {
+        "rectangles_squares_properties",
+        "square_numbers_patterns",
+    }
 
-    lesson = await get_lesson(async_db_session, principal, "quadrilaterals")
+    lesson = await get_lesson(async_db_session, principal, "rectangles_squares_properties")
     assert lesson.slides
-    quiz = await get_quiz(async_db_session, principal, "squares_cubes_roots")
+    quiz = await get_quiz(async_db_session, principal, "square_numbers_patterns")
     assert len(quiz.questions) == 10
+    lesson_for_quiz = await get_lesson(async_db_session, principal, "square_numbers_patterns")
+    await update_material_progress(
+        async_db_session,
+        principal,
+        UUID(lesson_for_quiz.id),
+        MaterialProgressUpdate(status="completed"),
+    )
 
     enrollments = await list_my_enrollments(async_db_session, principal)
     assert enrollments.subject_enrollments
 
-    started = await start_attempt(async_db_session, principal, "squares_cubes_roots")
+    started = await start_attempt(async_db_session, principal, quiz.id)
     assert started.status == "in_progress"
 
     items = (
@@ -148,10 +164,10 @@ async def test_unenrolled_student_blocked(
     topics = await list_topics(async_db_session, principal)
     assert topics == []
     with pytest.raises(HTTPException) as exc:
-        await get_lesson(async_db_session, principal, "quadrilaterals")
+        await get_lesson(async_db_session, principal, "rectangles_squares_properties")
     assert exc.value.status_code == 403
     with pytest.raises(HTTPException):
-        await start_attempt(async_db_session, principal, "quadrilaterals")
+        await start_attempt(async_db_session, principal, "rectangles_squares_properties")
 
 
 @pytest.mark.asyncio

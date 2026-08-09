@@ -2,8 +2,7 @@
 
 Vite + React + TypeScript student web client for the education platform POC.
 
-Designed in Hallmark **Hum** (playful-technical) with a **Narrative Workflow** study path:
-enroll → study → quiz → result.
+Student POC flow: enroll → study → quiz → result.
 
 ## Prerequisites
 
@@ -32,7 +31,7 @@ Open `http://localhost:5173`.
 
 ## POC flow
 
-1. **Create student** or **Sign in** on `/login`
-2. **Enroll** in Grade 8 Math (`POST /api/v1/me/enrollments/poc-math`)
+1. **Sign in** on `/login` (DEV demo: `student@demo.school` / `demo1234`)
+2. **Enroll** in Grade 8 Math (`POST /api/v1/me/enrollments/poc-math`), or use **Quick demo**
 3. Open a topic lesson, then **Start the quiz**
 4. Submit answers; review score (pass ≥ 70%). Correct option labels are never shown.

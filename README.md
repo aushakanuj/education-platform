@@ -3,7 +3,7 @@
 Monorepo for the education platform POC.
 
 - `backend/` — FastAPI API backed by SQLite
-- `frontend/` — Vite + React student web client (Hum / Narrative Workflow)
+- `frontend/` — Vite + React student web client
 - `docs/materials/` — admin-approved lesson and quiz markdown (seed source)
 
 ## Current POC slice

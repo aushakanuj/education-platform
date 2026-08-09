@@ -1,42 +1,53 @@
 import { useState, type FormEvent } from "react";
-import { Navigate } from "react-router-dom";
+import { Navigate, useNavigate } from "react-router-dom";
 
+import { bootstrapDemoProgress } from "../api/demo";
+import { enrollPocMath } from "../api/enrollments";
 import { ApiError } from "../api/types";
 import { useAuth } from "../auth/AuthContext";
+import { ConfirmDialog } from "../components/ConfirmDialog";
 import { PushButton } from "../components/PushButton";
-import { StudyBuddy } from "../components/StudyBuddy";
 
-type Mode = "login" | "create";
+const DEMO_EMAIL = "student@demo.school";
+const DEMO_PASSWORD = "demo1234";
+const LAST_EMAIL_KEY = "ep_last_email";
+const IS_DEV = import.meta.env.DEV;
+
+function initialEmail(): string {
+  const last = localStorage.getItem(LAST_EMAIL_KEY)?.trim();
+  if (last) return last;
+  return IS_DEV ? DEMO_EMAIL : "";
+}
+
+function initialPassword(email: string): string {
+  return IS_DEV && email === DEMO_EMAIL ? DEMO_PASSWORD : "";
+}
 
 export function WelcomePage() {
-  const { user, enrolled, loading, signIn, createStudent } = useAuth();
-  const [mode, setMode] = useState<Mode>("login");
-  const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
-  const [fullName, setFullName] = useState("");
-  const [studentId, setStudentId] = useState("");
+  const { user, enrolled, loading, signIn, setEnrollments } = useAuth();
+  const navigate = useNavigate();
+  const [email, setEmail] = useState(initialEmail);
+  const [password, setPassword] = useState(() => initialPassword(initialEmail()));
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [holdingForDemo, setHoldingForDemo] = useState(false);
+  const [quickDialog, setQuickDialog] = useState<{
+    title: string;
+    body: string;
+    topicPath: string;
+  } | null>(null);
 
-  if (!loading && user) {
+  if (!loading && user && !holdingForDemo && !quickDialog) {
     return <Navigate to={enrolled ? "/" : "/enroll"} replace />;
   }
 
-  async function onSubmit(e: FormEvent) {
-    e.preventDefault();
+  async function doSignIn(nextEmail: string, nextPassword: string) {
     setError(null);
     setBusy(true);
     try {
-      if (mode === "login") {
-        await signIn(email.trim(), password);
-      } else {
-        await createStudent({
-          email: email.trim(),
-          password,
-          full_name: fullName.trim(),
-          student_identifier: studentId.trim() || `S-${Date.now()}`,
-        });
-      }
+      const trimmed = nextEmail.trim();
+      await signIn(trimmed, nextPassword);
+      localStorage.setItem(LAST_EMAIL_KEY, trimmed);
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "Something went wrong. Try again.");
     } finally {
@@ -44,119 +55,117 @@ export function WelcomePage() {
     }
   }
 
+  async function onSubmit(e: FormEvent) {
+    e.preventDefault();
+    await doSignIn(email, password);
+  }
+
+  async function onQuickDemo() {
+    setError(null);
+    setBusy(true);
+    setHoldingForDemo(true);
+    try {
+      setEmail(DEMO_EMAIL);
+      setPassword(DEMO_PASSWORD);
+      await signIn(DEMO_EMAIL, DEMO_PASSWORD);
+      const summary = await enrollPocMath(true);
+      setEnrollments(summary);
+      const boot = await bootstrapDemoProgress();
+      const topicPath = `/subjects/${boot.subject_id}/topics/${boot.topic_id}`;
+      setQuickDialog({
+        title: "Quick demo ready",
+        body: boot.message,
+        topicPath,
+      });
+    } catch (err) {
+      setHoldingForDemo(false);
+      setError(err instanceof ApiError ? err.message : "Could not start quick demo.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  function finishQuickDemo() {
+    const path = quickDialog?.topicPath ?? "/";
+    setQuickDialog(null);
+    setHoldingForDemo(false);
+    navigate(path, { replace: true });
+  }
+
   return (
-    <div className="welcome">
-      <div className="welcome__inner">
-        <div className="welcome__brand">
-          <StudyBuddy size="lg" />
-          Education Platform
-        </div>
-        <p className="welcome__lede">Sign in, enroll, read a lesson, then take the quiz.</p>
-
-        <div className="tabs" role="tablist" aria-label="Account">
-          <button
-            type="button"
-            role="tab"
-            className={`tabs__btn ${mode === "login" ? "is-active" : ""}`}
-            aria-selected={mode === "login"}
-            onClick={() => setMode("login")}
-          >
-            Sign in
-          </button>
-          <button
-            type="button"
-            role="tab"
-            className={`tabs__btn ${mode === "create" ? "is-active" : ""}`}
-            aria-selected={mode === "create"}
-            onClick={() => setMode("create")}
-          >
-            Create student
-          </button>
-        </div>
-
-        <form className="form" onSubmit={(e) => void onSubmit(e)}>
-          {mode === "create" && (
-            <>
-              <div className="form__field">
-                <label className="form__label" htmlFor="full_name">
-                  Your name
-                </label>
-                <input
-                  id="full_name"
-                  className="form__input"
-                  value={fullName}
-                  onChange={(e) => setFullName(e.target.value)}
-                  required
-                  autoComplete="name"
-                />
-              </div>
-              <div className="form__field">
-                <label className="form__label" htmlFor="student_id">
-                  Student ID
-                </label>
-                <input
-                  id="student_id"
-                  className="form__input"
-                  value={studentId}
-                  onChange={(e) => setStudentId(e.target.value)}
-                  placeholder="S1"
-                  autoComplete="off"
-                />
-              </div>
-            </>
-          )}
-          <div className="form__field">
-            <label className="form__label" htmlFor="email">
-              Email
-            </label>
-            <input
-              id="email"
-              type="email"
-              className="form__input"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              required
-              autoComplete="email"
-            />
-          </div>
-          <div className="form__field">
-            <label className="form__label" htmlFor="password">
-              Password
-            </label>
-            <input
-              id="password"
-              type="password"
-              className="form__input"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              required
-              minLength={mode === "create" ? 8 : 1}
-              autoComplete={mode === "login" ? "current-password" : "new-password"}
-            />
-          </div>
-          {error && (
-            <p className="form__error" role="alert">
-              {error}
-            </p>
-          )}
-          <div className="form__actions">
-            <PushButton type="submit" loading={busy} color="pear">
-              {mode === "login" ? (
-                <>
-                  Sign in <span className="btn__arrow">→</span>
-                </>
-              ) : (
-                <>
-                  Create and sign in <span className="btn__arrow">→</span>
-                </>
-              )}
-            </PushButton>
-          </div>
-        </form>
+    <div className="app-frame">
+      <div className="demo-banner" role="status">
+        Demo mockup only · Calm Humanist · Source Sans 3 + IBM Plex Mono · live API
       </div>
-      <footer className="welcome__footer">
-        <strong>Soft, but exact.</strong> Study one topic at a time.
-      </footer>
+      <div className="login">
+        <div className="login__card">
+          <div className="login__brand">Education Platform</div>
+          <p className="login__lede">Sign in to explore subjects, topics, and quizzes.</p>
+          <p className="hint">
+            Demo login: <code>{DEMO_EMAIL}</code> / <code>{DEMO_PASSWORD}</code>
+          </p>
+
+          <form className="form" onSubmit={(e) => void onSubmit(e)} noValidate>
+            <div className="form__field">
+              <label className="form__label" htmlFor="email">
+                Email
+              </label>
+              <input
+                id="email"
+                type="email"
+                className="form__input"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                required
+                autoComplete="username"
+              />
+            </div>
+            <div className="form__field">
+              <label className="form__label" htmlFor="password">
+                Password
+              </label>
+              <input
+                id="password"
+                type="password"
+                className="form__input"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                required
+                minLength={8}
+                autoComplete="current-password"
+              />
+            </div>
+            {error && (
+              <p className="form__error" role="alert">
+                {error}
+              </p>
+            )}
+            <div className="login__actions">
+              <PushButton type="submit" size="lg" loading={busy}>
+                Sign in
+              </PushButton>
+              {IS_DEV && (
+                <PushButton
+                  type="button"
+                  variant="soft"
+                  disabled={busy}
+                  onClick={() => void onQuickDemo()}
+                >
+                  Quick demo (unlock topic quiz)
+                </PushButton>
+              )}
+            </div>
+          </form>
+        </div>
+      </div>
+
+      <ConfirmDialog
+        open={quickDialog != null}
+        title={quickDialog?.title ?? ""}
+        body={quickDialog?.body ?? ""}
+        onDismiss={finishQuickDemo}
+        actions={[{ label: "Got it" }]}
+      />
     </div>
   );
 }

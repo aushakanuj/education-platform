@@ -13,17 +13,27 @@ from education_platform.modules.assessments.schemas import (
     StartAttemptResponse,
     SubmitAttemptRequest,
 )
+from education_platform.modules.materials.schemas import AttemptHistoryItem
 
 router = APIRouter(tags=["attempts"])
 
 
-@router.post("/quizzes/{topic_id}/attempts", response_model=StartAttemptResponse)
+@router.post("/quizzes/{quiz_id}/attempts", response_model=StartAttemptResponse)
 async def start_quiz_attempt(
-    topic_id: str,
+    quiz_id: UUID,
     principal: Principal = Depends(get_current_user),
     session: AsyncSession = Depends(get_session),
 ) -> StartAttemptResponse:
-    return await service.start_attempt(session, principal, topic_id)
+    return await service.start_attempt(session, principal, quiz_id)
+
+
+@router.get("/quizzes/{quiz_id}/attempts", response_model=list[AttemptHistoryItem])
+async def list_quiz_attempts(
+    quiz_id: UUID,
+    principal: Principal = Depends(get_current_user),
+    session: AsyncSession = Depends(get_session),
+) -> list[AttemptHistoryItem]:
+    return await service.list_attempts_for_quiz(session, principal, quiz_id)
 
 
 @router.post("/attempts/{attempt_id}/submit", response_model=AttemptResult)
