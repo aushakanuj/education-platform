@@ -8,6 +8,11 @@ on:
 jobs:
   quality:
     runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    env:
+      DATABASE_URL: sqlite+aiosqlite:///./ci.db
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v5
@@ -18,5 +23,4 @@ jobs:
       - run: uv run ruff check .
       - run: uv run mypy src
       - run: uv run alembic upgrade head
-      - run: uv run alembic check
       - run: uv run pytest

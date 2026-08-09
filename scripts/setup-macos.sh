@@ -2,7 +2,8 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-cd "$ROOT_DIR"
+BACKEND_DIR="$ROOT_DIR/backend"
+cd "$BACKEND_DIR"
 
 log() {
   echo "==> $*"
@@ -17,44 +18,36 @@ fi
 log "Installing Python 3.12..."
 uv python install 3.12
 
-log "Syncing dependencies..."
-uv sync --all-groups --locked
+log "Syncing backend dependencies..."
+uv sync --all-groups
 
 log "Installing pre-commit hooks..."
-uv run pre-commit install
+uv run pre-commit install --config ../.pre-commit-config.yaml || uv run pre-commit install
 
 if [[ ! -f .env ]]; then
   cp .env.example .env
-  log "Created .env from .env.example; set JWT_SECRET_KEY before sharing the environment."
+  log "Created backend/.env from .env.example."
 else
-  log ".env already exists; leaving it unchanged."
+  log "backend/.env already exists; leaving it unchanged."
 fi
-
-mkdir -p .local-storage
-
-log "Applying database migrations (SQLite)..."
-uv run alembic upgrade head
 
 cat <<'EOF'
 
 Setup complete.
 
-Local development uses SQLite (education.db) by default.
-
 Next steps:
-  1. Review .env and set JWT_SECRET_KEY for non-local use
-  2. Start the API: uv run uvicorn education_platform.main:app --reload
-  3. Open API docs: http://127.0.0.1:8000/docs
+  1. Apply schema: cd backend && uv run alembic upgrade head
+  2. Seed materials: cd backend && uv run python -m education_platform.modules.materials.seed
+  3. Start the API: cd backend && uv run uvicorn education_platform.main:app --reload
+  4. Open API docs: http://127.0.0.1:8000/docs
 
-Optional PostgreSQL stack:
-  docker compose up -d
-  # then switch DATABASE_URL in .env to the PostgreSQL URL from .env.example
-
-Quality checks:
+Quality checks (from backend/):
   uv run ruff format --check .
   uv run ruff check .
   uv run mypy src
+  uv run alembic upgrade head
   uv run pytest
 
-Design docs: docs/project-overview.html (open in a browser)
+Approved materials live in docs/materials/.
+Schema browser: docs/design/relational-schema.html
 EOF

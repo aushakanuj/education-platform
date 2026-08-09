@@ -1,0 +1,1112 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Relational Schema — Education Platform</title>
+  <script type="module">
+    import mermaid from "https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs";
+    mermaid.initialize({
+      startOnLoad: true,
+      theme: "neutral",
+      securityLevel: "loose",
+      er: { layoutDirection: "TB" },
+    });
+  </script>
+  <style>
+    :root {
+      --bg: #f7f6f2;
+      --surface: #ffffff;
+      --ink: #1a1f1c;
+      --muted: #5a635c;
+      --line: #d8ddd8;
+      --accent: #0f5c4c;
+      --accent-soft: #e6f2ee;
+      --warn: #8a4b12;
+      --warn-soft: #fff4e8;
+      --pk: #0f5c4c;
+      --fk: #1d4e89;
+      --uq: #7a3e12;
+      --nav-w: 260px;
+      --serif: "Iowan Old Style", "Palatino Linotype", Palatino, Georgia, serif;
+      --sans: "Avenir Next", "Segoe UI", system-ui, sans-serif;
+      --mono: "SF Mono", Menlo, Consolas, monospace;
+    }
+
+    * { box-sizing: border-box; }
+    html { scroll-behavior: smooth; }
+    body {
+      margin: 0;
+      color: var(--ink);
+      background:
+        radial-gradient(1200px 600px at 10% -10%, #e8f0ec 0%, transparent 55%),
+        radial-gradient(900px 500px at 100% 0%, #f0ebe3 0%, transparent 50%),
+        var(--bg);
+      font-family: var(--sans);
+      line-height: 1.5;
+      font-size: 15px;
+    }
+
+    a { color: var(--accent); text-underline-offset: 2px; }
+    a:hover { color: #0a4036; }
+
+    .layout {
+      display: grid;
+      grid-template-columns: var(--nav-w) minmax(0, 1fr);
+      min-height: 100vh;
+    }
+
+    nav.toc {
+      position: sticky;
+      top: 0;
+      height: 100vh;
+      overflow: auto;
+      padding: 1.4rem 1.1rem 2rem;
+      border-right: 1px solid var(--line);
+      background: rgba(255, 255, 255, 0.78);
+      backdrop-filter: blur(8px);
+    }
+
+    nav.toc .brand {
+      font-family: var(--serif);
+      font-size: 1.1rem;
+      font-weight: 700;
+      margin: 0 0 0.25rem;
+      color: var(--ink);
+      text-decoration: none;
+      display: block;
+    }
+
+    nav.toc .sub {
+      color: var(--muted);
+      font-size: 0.78rem;
+      margin-bottom: 1rem;
+    }
+
+    nav.toc .group {
+      font-size: 0.72rem;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      color: var(--muted);
+      margin: 1rem 0 0.35rem;
+    }
+
+    nav.toc a.item {
+      display: block;
+      padding: 0.28rem 0.45rem;
+      border-radius: 6px;
+      color: var(--ink);
+      text-decoration: none;
+      font-size: 0.88rem;
+    }
+
+    nav.toc a.item:hover,
+    nav.toc a.item.active {
+      background: var(--accent-soft);
+      color: var(--accent);
+    }
+
+    main {
+      padding: 1.75rem 2rem 3rem;
+      max-width: 1180px;
+    }
+
+    header.page h1 {
+      font-family: var(--serif);
+      font-size: 2rem;
+      letter-spacing: -0.02em;
+      margin: 0 0 0.4rem;
+    }
+
+    header.page p {
+      color: var(--muted);
+      margin: 0 0 1.25rem;
+      max-width: 62ch;
+    }
+
+    .toolbar {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.6rem;
+      align-items: center;
+      margin-bottom: 1.25rem;
+      position: sticky;
+      top: 0;
+      z-index: 5;
+      padding: 0.65rem 0;
+      background: linear-gradient(var(--bg) 70%, transparent);
+    }
+
+    .toolbar input[type="search"] {
+      flex: 1 1 220px;
+      min-width: 180px;
+      padding: 0.55rem 0.75rem;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: var(--surface);
+      font: inherit;
+    }
+
+    .chips {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.4rem;
+    }
+
+    .chip {
+      border: 1px solid var(--line);
+      background: var(--surface);
+      border-radius: 999px;
+      padding: 0.3rem 0.7rem;
+      font-size: 0.82rem;
+      cursor: pointer;
+      color: var(--muted);
+    }
+
+    .chip.active,
+    .chip:hover {
+      border-color: var(--accent);
+      color: var(--accent);
+      background: var(--accent-soft);
+    }
+
+    .legend {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.75rem 1.1rem;
+      margin: 0 0 1.25rem;
+      font-size: 0.82rem;
+      color: var(--muted);
+    }
+
+    .legend span::before {
+      content: "";
+      display: inline-block;
+      width: 0.65rem;
+      height: 0.65rem;
+      border-radius: 2px;
+      margin-right: 0.35rem;
+      vertical-align: middle;
+    }
+
+    .legend .pk::before { background: var(--pk); }
+    .legend .fk::before { background: var(--fk); }
+    .legend .uq::before { background: var(--uq); }
+
+    section.domain {
+      margin-bottom: 2.25rem;
+    }
+
+    section.domain > h2 {
+      font-family: var(--serif);
+      font-size: 1.35rem;
+      margin: 0 0 0.35rem;
+      scroll-margin-top: 4rem;
+    }
+
+    section.domain > .note {
+      color: var(--muted);
+      font-size: 0.9rem;
+      margin: 0 0 0.9rem;
+    }
+
+    .diagram {
+      background: var(--surface);
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      padding: 1rem;
+      overflow: auto;
+      margin-bottom: 1.25rem;
+    }
+
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+      gap: 0.9rem;
+    }
+
+    article.table-card {
+      background: var(--surface);
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      overflow: hidden;
+      scroll-margin-top: 4.5rem;
+    }
+
+    article.table-card.hidden { display: none; }
+
+    article.table-card header {
+      padding: 0.75rem 0.9rem;
+      border-bottom: 1px solid var(--line);
+      background: var(--accent-soft);
+    }
+
+    article.table-card header h3 {
+      margin: 0;
+      font-size: 1rem;
+      font-family: var(--mono);
+      font-weight: 650;
+    }
+
+    article.table-card header .meta {
+      margin-top: 0.2rem;
+      font-size: 0.78rem;
+      color: var(--muted);
+    }
+
+    table.fields {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 0.82rem;
+    }
+
+    table.fields th,
+    table.fields td {
+      text-align: left;
+      padding: 0.4rem 0.7rem;
+      border-bottom: 1px solid var(--line);
+      vertical-align: top;
+    }
+
+    table.fields th {
+      color: var(--muted);
+      font-weight: 600;
+      font-size: 0.72rem;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+      background: #fafaf7;
+    }
+
+    table.fields tr:last-child td { border-bottom: none; }
+
+    code, .mono {
+      font-family: var(--mono);
+      font-size: 0.9em;
+    }
+
+    .badge {
+      display: inline-block;
+      font-size: 0.68rem;
+      font-weight: 700;
+      letter-spacing: 0.03em;
+      padding: 0.1rem 0.35rem;
+      border-radius: 4px;
+      margin-right: 0.2rem;
+      vertical-align: middle;
+    }
+
+    .badge.pk { background: #d8efe8; color: var(--pk); }
+    .badge.fk { background: #dde8f6; color: var(--fk); }
+    .badge.uq { background: #f6e5d4; color: var(--uq); }
+    .badge.nn { background: #eee; color: #444; }
+
+    .constraints {
+      padding: 0.65rem 0.9rem 0.85rem;
+      border-top: 1px solid var(--line);
+      background: #fbfbf8;
+      font-size: 0.78rem;
+      color: var(--muted);
+    }
+
+    .constraints ul {
+      margin: 0.25rem 0 0;
+      padding-left: 1.1rem;
+    }
+
+    .warn-box {
+      background: var(--warn-soft);
+      border: 1px solid #efd4b5;
+      color: var(--warn);
+      border-radius: 10px;
+      padding: 0.75rem 0.9rem;
+      font-size: 0.88rem;
+      margin-bottom: 1.25rem;
+    }
+
+    footer.page {
+      margin-top: 2rem;
+      padding-top: 1rem;
+      border-top: 1px solid var(--line);
+      color: var(--muted);
+      font-size: 0.85rem;
+    }
+
+    @media (max-width: 900px) {
+      .layout { grid-template-columns: 1fr; }
+      nav.toc {
+        position: relative;
+        height: auto;
+        border-right: none;
+        border-bottom: 1px solid var(--line);
+      }
+      main { padding: 1.25rem; }
+    }
+  </style>
+</head>
+<body>
+  <div class="layout">
+    <nav class="toc" aria-label="Schema navigation">
+      <a class="brand" href="#top">Relational Schema</a>
+      <div class="sub">Education Platform POC · validate fields &amp; relationships</div>
+
+      <div class="group">Overview</div>
+      <a class="item" href="#er">ER diagram</a>
+      <a class="item" href="#invariants">Invariants</a>
+
+      <div class="group">Identity</div>
+      <a class="item" href="#institutions">institutions</a>
+      <a class="item" href="#users">users</a>
+      <a class="item" href="#user_roles">user_roles</a>
+      <a class="item" href="#student_profiles">student_profiles</a>
+      <a class="item" href="#refresh_sessions">refresh_sessions</a>
+      <a class="item" href="#audit_events">audit_events</a>
+
+      <div class="group">Academics</div>
+      <a class="item" href="#grades">grades</a>
+      <a class="item" href="#subjects">subjects</a>
+      <a class="item" href="#academic_periods">academic_periods</a>
+      <a class="item" href="#period_grades">period_grades</a>
+      <a class="item" href="#sections">sections</a>
+      <a class="item" href="#grade_subject_offerings">grade_subject_offerings</a>
+      <a class="item" href="#topics">topics</a>
+      <a class="item" href="#subtopics">subtopics</a>
+      <a class="item" href="#learning_outcomes">learning_outcomes</a>
+      <a class="item" href="#student_grade_enrollments">student_grade_enrollments</a>
+      <a class="item" href="#student_subject_enrollments">student_subject_enrollments</a>
+      <a class="item" href="#teaching_assignments">teaching_assignments</a>
+
+      <div class="group">Materials</div>
+      <a class="item" href="#source_materials">source_materials</a>
+      <a class="item" href="#source_material_versions">source_material_versions</a>
+
+      <div class="group">Assessments</div>
+      <a class="item" href="#questions">questions</a>
+      <a class="item" href="#question_versions">question_versions</a>
+      <a class="item" href="#question_options">question_options</a>
+      <a class="item" href="#question_answer_keys">question_answer_keys</a>
+      <a class="item" href="#question_outcome_tags">question_outcome_tags</a>
+      <a class="item" href="#common_mastery_quizzes">common_mastery_quizzes</a>
+      <a class="item" href="#quiz_versions">quiz_versions</a>
+      <a class="item" href="#quiz_items">quiz_items</a>
+      <a class="item" href="#quiz_material_bindings">quiz_material_bindings</a>
+      <a class="item" href="#quiz_releases">quiz_releases</a>
+      <a class="item" href="#quiz_attempts">quiz_attempts</a>
+      <a class="item" href="#attempt_answers">attempt_answers</a>
+    </nav>
+
+    <main id="top">
+      <header class="page">
+        <h1>Relational schema browser</h1>
+        <p>
+          Interactive view of the evaluation POC data model. Use this to validate table names,
+          fields, enums, uniqueness rules, and foreign-key relationships before or while reviewing
+          the Alembic migration.
+        </p>
+      </header>
+
+      <div class="warn-box">
+        Source of truth: <a href="./07-relational-data-model.md"><code>07-relational-data-model.md</code></a>
+        and ORM modules under <code>backend/src/education_platform/modules/*/models.py</code>.
+        Materials API remains file-backed until a later persistence slice.
+        POC persistence engine: <strong>SQLite</strong> (<code>backend/education.db</code>).
+      </div>
+
+      <div class="toolbar">
+        <input id="search" type="search" placeholder="Filter tables or columns…" aria-label="Filter schema" />
+        <div class="chips" role="group" aria-label="Domain filter">
+          <button type="button" class="chip active" data-domain="all">All</button>
+          <button type="button" class="chip" data-domain="identity">Identity</button>
+          <button type="button" class="chip" data-domain="academics">Academics</button>
+          <button type="button" class="chip" data-domain="materials">Materials</button>
+          <button type="button" class="chip" data-domain="assessments">Assessments</button>
+        </div>
+      </div>
+
+      <div class="legend">
+        <span class="pk">Primary key</span>
+        <span class="fk">Foreign key</span>
+        <span class="uq">Unique / partial unique</span>
+      </div>
+
+      <section class="domain" id="er">
+        <h2>Entity-relationship overview</h2>
+        <p class="note">High-level cardinality. Field-level detail is in the table cards below.</p>
+        <div class="diagram">
+          <pre class="mermaid">
+erDiagram
+    Institution ||--o{ User : owns
+    User ||--o{ UserRole : has
+    User ||--o| StudentProfile : links
+    User ||--o{ RefreshSession : sessions
+    Institution ||--o{ AuditEvent : records
+    Institution ||--o{ AcademicPeriod : runs
+    Institution ||--o{ Grade : defines
+    Institution ||--o{ Subject : defines
+    AcademicPeriod ||--o{ PeriodGrade : offers
+    Grade ||--o{ PeriodGrade : referenced
+    PeriodGrade ||--o{ Section : groups
+    PeriodGrade ||--o{ GradeSubjectOffering : contains
+    Subject ||--o{ GradeSubjectOffering : referenced
+    GradeSubjectOffering ||--o{ Topic : organizes
+    Topic ||--o{ Subtopic : contains
+    Subtopic ||--o{ LearningOutcome : measures
+    StudentProfile ||--o{ StudentGradeEnrollment : enrolls
+    PeriodGrade ||--o{ StudentGradeEnrollment : hosts
+    StudentGradeEnrollment ||--o{ StudentSubjectEnrollment : permits
+    GradeSubjectOffering ||--o{ StudentSubjectEnrollment : opens
+    User ||--o{ TeachingAssignment : teaches
+    GradeSubjectOffering ||--o{ TeachingAssignment : scopes
+    Subtopic ||--o{ SourceMaterial : owns
+    SourceMaterial ||--o{ SourceMaterialVersion : versions
+    Subtopic ||--o{ CommonMasteryQuiz : assesses
+    CommonMasteryQuiz ||--o{ QuizVersion : versions
+    QuizVersion ||--o{ QuizItem : orders
+    Question ||--o{ QuestionVersion : versions
+    QuestionVersion ||--o{ QuestionOption : options
+    QuestionVersion ||--o| QuestionAnswerKey : key
+    QuizVersion ||--o{ QuizAttempt : receives
+    QuizAttempt ||--o{ AttemptAnswer : records
+          </pre>
+        </div>
+      </section>
+
+      <section class="domain" id="invariants">
+        <h2>Integrity invariants</h2>
+        <div class="grid">
+          <article class="table-card" data-domain="all" data-search="active period email enrollment answer key">
+            <header>
+              <h3>Database-enforced</h3>
+              <div class="meta">Partial unique indexes &amp; constraints</div>
+            </header>
+            <div class="constraints">
+              <ul>
+                <li>Email unique per institution</li>
+                <li>One role row per (user, role)</li>
+                <li>Student identifier unique per institution; one profile per user</li>
+                <li>At most one <strong>active</strong> academic period per institution</li>
+                <li>Unique period-grade, offering, topic/subtopic slug &amp; sequence</li>
+                <li>One active grade enrollment per student/period</li>
+                <li>One active subject enrollment per student/offering</li>
+                <li>Unique material &amp; quiz version numbers; one published material version</li>
+                <li>Answer keys 1:1 with question versions (isolated table)</li>
+                <li>Attempt uniqueness per (student, quiz_version, attempt_number)</li>
+              </ul>
+            </div>
+          </article>
+          <article class="table-card" data-domain="all" data-search="service release enrollment section teacher">
+            <header>
+              <h3>Service-enforced</h3>
+              <div class="meta">Transactional application rules</div>
+            </header>
+            <div class="constraints">
+              <ul>
+                <li>Subject enrollment offering shares grade enrollment’s period grade</li>
+                <li>Section (if set) belongs to enrollment’s period grade</li>
+                <li>Teaching assignments require teacher role</li>
+                <li>Quiz release requires published material + bindings</li>
+                <li>Published questions have ≥1 learning-outcome tag</li>
+                <li>Student APIs never join <code>question_answer_keys</code></li>
+                <li>Deactivating a user revokes refresh sessions</li>
+              </ul>
+            </div>
+          </article>
+        </div>
+      </section>
+
+      <div id="tables"></div>
+
+      <footer class="page">
+        Open this file in a browser:
+        <code>docs/design/relational-schema.html</code>.
+        Linked from the design README.
+      </footer>
+    </main>
+  </div>
+
+  <script>
+    const TIMESTAMP = [
+      { name: "created_at", type: "timestamptz", flags: ["nn"], notes: "UTC" },
+      { name: "updated_at", type: "timestamptz", flags: ["nn"], notes: "UTC" },
+    ];
+    const PK = { name: "id", type: "uuid", flags: ["pk", "nn"], notes: "UUID v4" };
+
+    const SCHEMA = [
+      {
+        domain: "identity",
+        title: "Identity & tenancy",
+        note: "One account per institution. Teachers are users with role + assignments; students also have a profile.",
+        tables: [
+          {
+            name: "institutions",
+            purpose: "Tenant boundary",
+            columns: [
+              PK,
+              { name: "name", type: "varchar(200)", flags: ["uq", "nn"], notes: "Globally unique" },
+              { name: "timezone", type: "varchar(64)", flags: ["nn"], notes: "IANA, default UTC" },
+              { name: "status", type: "enum institution_status", flags: ["nn"], notes: "active | archived" },
+              ...TIMESTAMP,
+            ],
+            constraints: ["UNIQUE (name)"],
+          },
+          {
+            name: "users",
+            purpose: "Login accounts",
+            columns: [
+              PK,
+              { name: "institution_id", type: "uuid → institutions", flags: ["fk", "nn"], notes: "Indexed" },
+              { name: "email", type: "varchar(320)", flags: ["nn"], notes: "Unique within institution" },
+              { name: "full_name", type: "varchar(200)", flags: ["nn"], notes: "" },
+              { name: "password_hash", type: "text", flags: ["nn"], notes: "Hash when auth is wired" },
+              { name: "status", type: "enum user_status", flags: ["nn"], notes: "provisioned | active | deactivated | archived" },
+              ...TIMESTAMP,
+            ],
+            constraints: ["UNIQUE (institution_id, email)"],
+          },
+          {
+            name: "user_roles",
+            purpose: "Multi-role membership",
+            columns: [
+              PK,
+              { name: "user_id", type: "uuid → users", flags: ["fk", "nn"], notes: "Indexed" },
+              { name: "role", type: "enum role_name", flags: ["nn"], notes: "administrator | teacher | student" },
+              ...TIMESTAMP,
+            ],
+            constraints: ["UNIQUE (user_id, role)"],
+          },
+          {
+            name: "student_profiles",
+            purpose: "Roster identity (1:1 with student user when provisioned)",
+            columns: [
+              PK,
+              { name: "institution_id", type: "uuid → institutions", flags: ["fk", "nn"], notes: "Indexed" },
+              { name: "user_id", type: "uuid → users", flags: ["fk", "uq"], notes: "Nullable until login provisioned; unique when set" },
+              { name: "student_identifier", type: "varchar(100)", flags: ["nn"], notes: "Institution roster id" },
+              { name: "full_name", type: "varchar(200)", flags: ["nn"], notes: "" },
+              { name: "status", type: "enum student_profile_status", flags: ["nn"], notes: "active | inactive | archived" },
+              ...TIMESTAMP,
+            ],
+            constraints: [
+              "UNIQUE (institution_id, student_identifier)",
+              "Partial UNIQUE (user_id) WHERE user_id IS NOT NULL",
+            ],
+          },
+          {
+            name: "refresh_sessions",
+            purpose: "Auth refresh tokens (future JWT slice)",
+            columns: [
+              PK,
+              { name: "user_id", type: "uuid → users", flags: ["fk", "nn"], notes: "Indexed" },
+              { name: "token_hash", type: "varchar(64)", flags: ["uq", "nn"], notes: "Unique" },
+              { name: "expires_at", type: "timestamptz", flags: ["nn"], notes: "" },
+              { name: "revoked_at", type: "timestamptz", flags: [], notes: "Nullable" },
+              ...TIMESTAMP,
+            ],
+            constraints: ["UNIQUE (token_hash)"],
+          },
+          {
+            name: "audit_events",
+            purpose: "Append-only audit trail",
+            columns: [
+              PK,
+              { name: "institution_id", type: "uuid → institutions", flags: ["fk", "nn"], notes: "Indexed" },
+              { name: "actor_user_id", type: "uuid → users", flags: ["fk"], notes: "Nullable for system actions" },
+              { name: "event_type", type: "varchar(100)", flags: ["nn"], notes: "Indexed" },
+              { name: "entity_type", type: "varchar(100)", flags: ["nn"], notes: "" },
+              { name: "entity_id", type: "uuid", flags: [], notes: "Nullable" },
+              { name: "payload", type: "jsonb", flags: ["nn"], notes: "Structured details" },
+              { name: "created_at", type: "timestamptz", flags: ["nn"], notes: "No updated_at" },
+            ],
+            constraints: ["Insert-only from application code"],
+          },
+        ],
+      },
+      {
+        domain: "academics",
+        title: "Academic structure & access scope",
+        note: "Period-scoped curriculum folders and dual enrollments gate learner content.",
+        tables: [
+          {
+            name: "grades",
+            purpose: "Reusable grade labels (e.g. Grade 8)",
+            columns: [
+              PK,
+              { name: "institution_id", type: "uuid → institutions", flags: ["fk", "nn"], notes: "" },
+              { name: "name", type: "varchar(100)", flags: ["nn"], notes: "" },
+              { name: "sort_order", type: "int", flags: ["nn"], notes: "Default 0" },
+              ...TIMESTAMP,
+            ],
+            constraints: ["UNIQUE (institution_id, name)"],
+          },
+          {
+            name: "subjects",
+            purpose: "Reusable disciplines (e.g. Mathematics)",
+            columns: [
+              PK,
+              { name: "institution_id", type: "uuid → institutions", flags: ["fk", "nn"], notes: "" },
+              { name: "name", type: "varchar(200)", flags: ["nn"], notes: "" },
+              { name: "code", type: "varchar(50)", flags: ["nn"], notes: "" },
+              ...TIMESTAMP,
+            ],
+            constraints: ["UNIQUE (institution_id, code)"],
+          },
+          {
+            name: "academic_periods",
+            purpose: "Operational year/term container",
+            columns: [
+              PK,
+              { name: "institution_id", type: "uuid → institutions", flags: ["fk", "nn"], notes: "" },
+              { name: "name", type: "varchar(200)", flags: ["nn"], notes: "e.g. 2026–27" },
+              { name: "start_date", type: "date", flags: ["nn"], notes: "" },
+              { name: "end_date", type: "date", flags: ["nn"], notes: "" },
+              { name: "status", type: "enum academic_period_status", flags: ["nn"], notes: "planned | active | closed | archived" },
+              ...TIMESTAMP,
+            ],
+            constraints: [
+              "UNIQUE (institution_id, name)",
+              "Partial UNIQUE (institution_id) WHERE status = 'active'",
+            ],
+          },
+          {
+            name: "period_grades",
+            purpose: "Grade offered in a period",
+            columns: [
+              PK,
+              { name: "academic_period_id", type: "uuid → academic_periods", flags: ["fk", "nn"], notes: "" },
+              { name: "grade_id", type: "uuid → grades", flags: ["fk", "nn"], notes: "" },
+              ...TIMESTAMP,
+            ],
+            constraints: ["UNIQUE (academic_period_id, grade_id)"],
+          },
+          {
+            name: "sections",
+            purpose: "Optional reporting group only (does not gate materials)",
+            columns: [
+              PK,
+              { name: "period_grade_id", type: "uuid → period_grades", flags: ["fk", "nn"], notes: "" },
+              { name: "name", type: "varchar(100)", flags: ["nn"], notes: "e.g. 8-A" },
+              ...TIMESTAMP,
+            ],
+            constraints: ["UNIQUE (period_grade_id, name)"],
+          },
+          {
+            name: "grade_subject_offerings",
+            purpose: "Curriculum + enrollment context",
+            columns: [
+              PK,
+              { name: "period_grade_id", type: "uuid → period_grades", flags: ["fk", "nn"], notes: "" },
+              { name: "subject_id", type: "uuid → subjects", flags: ["fk", "nn"], notes: "" },
+              ...TIMESTAMP,
+            ],
+            constraints: ["UNIQUE (period_grade_id, subject_id)"],
+          },
+          {
+            name: "topics",
+            purpose: "Teachable unit under an offering",
+            columns: [
+              PK,
+              { name: "grade_subject_offering_id", type: "uuid → grade_subject_offerings", flags: ["fk", "nn"], notes: "" },
+              { name: "name", type: "varchar(200)", flags: ["nn"], notes: "" },
+              { name: "slug", type: "varchar(100)", flags: ["nn"], notes: "" },
+              { name: "sequence", type: "int", flags: ["nn"], notes: "" },
+              ...TIMESTAMP,
+            ],
+            constraints: [
+              "UNIQUE (grade_subject_offering_id, slug)",
+              "UNIQUE (grade_subject_offering_id, sequence)",
+            ],
+          },
+          {
+            name: "subtopics",
+            purpose: "Owns materials + common mastery quiz",
+            columns: [
+              PK,
+              { name: "topic_id", type: "uuid → topics", flags: ["fk", "nn"], notes: "" },
+              { name: "name", type: "varchar(200)", flags: ["nn"], notes: "" },
+              { name: "slug", type: "varchar(100)", flags: ["nn"], notes: "" },
+              { name: "sequence", type: "int", flags: ["nn"], notes: "" },
+              ...TIMESTAMP,
+            ],
+            constraints: [
+              "UNIQUE (topic_id, slug)",
+              "UNIQUE (topic_id, sequence)",
+            ],
+          },
+          {
+            name: "learning_outcomes",
+            purpose: "Measurable expectations for questions",
+            columns: [
+              PK,
+              { name: "subtopic_id", type: "uuid → subtopics", flags: ["fk", "nn"], notes: "" },
+              { name: "code", type: "varchar(50)", flags: ["nn"], notes: "" },
+              { name: "statement", type: "text", flags: ["nn"], notes: "" },
+              { name: "sequence", type: "int", flags: ["nn"], notes: "Default 0" },
+              ...TIMESTAMP,
+            ],
+            constraints: ["UNIQUE (subtopic_id, code)"],
+          },
+          {
+            name: "student_grade_enrollments",
+            purpose: "Required before any learner access",
+            columns: [
+              PK,
+              { name: "student_id", type: "uuid → student_profiles", flags: ["fk", "nn"], notes: "" },
+              { name: "academic_period_id", type: "uuid → academic_periods", flags: ["fk", "nn"], notes: "Denormalized for queries" },
+              { name: "period_grade_id", type: "uuid → period_grades", flags: ["fk", "nn"], notes: "" },
+              { name: "section_id", type: "uuid → sections", flags: ["fk"], notes: "Optional reporting only" },
+              { name: "status", type: "enum enrollment_status", flags: ["nn"], notes: "active | withdrawn" },
+              ...TIMESTAMP,
+            ],
+            constraints: [
+              "Partial UNIQUE (student_id, academic_period_id) WHERE status = 'active'",
+              "Service: period_grade.academic_period_id must match academic_period_id",
+            ],
+          },
+          {
+            name: "student_subject_enrollments",
+            purpose: "Required before material/quiz access for a subject",
+            columns: [
+              PK,
+              { name: "student_id", type: "uuid → student_profiles", flags: ["fk", "nn"], notes: "" },
+              { name: "grade_enrollment_id", type: "uuid → student_grade_enrollments", flags: ["fk", "nn"], notes: "" },
+              { name: "grade_subject_offering_id", type: "uuid → grade_subject_offerings", flags: ["fk", "nn"], notes: "" },
+              { name: "status", type: "enum enrollment_status", flags: ["nn"], notes: "active | withdrawn" },
+              ...TIMESTAMP,
+            ],
+            constraints: [
+              "Partial UNIQUE (student_id, grade_subject_offering_id) WHERE status = 'active'",
+              "Service: offering.period_grade_id matches grade enrollment’s period_grade_id",
+            ],
+          },
+          {
+            name: "teaching_assignments",
+            purpose: "Teacher class-insight scope",
+            columns: [
+              PK,
+              { name: "teacher_user_id", type: "uuid → users", flags: ["fk", "nn"], notes: "" },
+              { name: "academic_period_id", type: "uuid → academic_periods", flags: ["fk", "nn"], notes: "" },
+              { name: "grade_subject_offering_id", type: "uuid → grade_subject_offerings", flags: ["fk", "nn"], notes: "" },
+              { name: "section_id", type: "uuid → sections", flags: ["fk"], notes: "Optional" },
+              { name: "status", type: "enum teaching_assignment_status", flags: ["nn"], notes: "active | ended" },
+              ...TIMESTAMP,
+            ],
+            constraints: [
+              "Partial UNIQUE (teacher, offering, section) WHERE section_id IS NOT NULL",
+              "Partial UNIQUE (teacher, offering) WHERE section_id IS NULL",
+              "Service: user must hold teacher role",
+            ],
+          },
+        ],
+      },
+      {
+        domain: "materials",
+        title: "Source materials",
+        note: "Inline markdown supported now; blob_* columns reserved. Live API still reads docs/materials/.",
+        tables: [
+          {
+            name: "source_materials",
+            purpose: "Leaf under a subtopic",
+            columns: [
+              PK,
+              { name: "subtopic_id", type: "uuid → subtopics", flags: ["fk", "nn"], notes: "" },
+              { name: "title", type: "varchar(200)", flags: ["nn"], notes: "" },
+              { name: "slug", type: "varchar(100)", flags: ["nn"], notes: "" },
+              { name: "status", type: "enum source_material_status", flags: ["nn"], notes: "draft | published | archived" },
+              ...TIMESTAMP,
+            ],
+            constraints: ["UNIQUE (subtopic_id, slug)"],
+          },
+          {
+            name: "source_material_versions",
+            purpose: "Immutable once published",
+            columns: [
+              PK,
+              { name: "source_material_id", type: "uuid → source_materials", flags: ["fk", "nn"], notes: "" },
+              { name: "version_number", type: "int", flags: ["nn"], notes: "Positive" },
+              { name: "lifecycle_status", type: "enum source_material_version_status", flags: ["nn"], notes: "draft | processing | ready | published | failed | superseded | archived" },
+              { name: "title", type: "varchar(200)", flags: ["nn"], notes: "" },
+              { name: "content_markdown", type: "text", flags: [], notes: "Approved inline content" },
+              { name: "content_format", type: "varchar(50)", flags: ["nn"], notes: "Default markdown" },
+              { name: "blob_object_key", type: "varchar(500)", flags: [], notes: "Deferred object storage" },
+              { name: "blob_content_type", type: "varchar(100)", flags: [], notes: "" },
+              { name: "checksum", type: "varchar(64)", flags: [], notes: "" },
+              { name: "failure_reason", type: "text", flags: [], notes: "" },
+              { name: "published_at", type: "timestamptz", flags: [], notes: "" },
+              ...TIMESTAMP,
+            ],
+            constraints: [
+              "UNIQUE (source_material_id, version_number)",
+              "Partial UNIQUE (source_material_id) WHERE lifecycle_status = 'published'",
+            ],
+          },
+        ],
+      },
+      {
+        domain: "assessments",
+        title: "Questions, quizzes & attempts",
+        note: "Answer keys live only in question_answer_keys — never joined on student reads.",
+        tables: [
+          {
+            name: "questions",
+            purpose: "Stable question identity under a subtopic",
+            columns: [
+              PK,
+              { name: "subtopic_id", type: "uuid → subtopics", flags: ["fk", "nn"], notes: "" },
+              { name: "code", type: "varchar(50)", flags: [], notes: "Optional authoring code" },
+              ...TIMESTAMP,
+            ],
+            constraints: [],
+          },
+          {
+            name: "question_versions",
+            purpose: "Immutable item content",
+            columns: [
+              PK,
+              { name: "question_id", type: "uuid → questions", flags: ["fk", "nn"], notes: "" },
+              { name: "version_number", type: "int", flags: ["nn"], notes: "" },
+              { name: "prompt", type: "text", flags: ["nn"], notes: "" },
+              { name: "question_type", type: "enum question_type", flags: ["nn"], notes: "multiple_choice | true_false | matching | numeric" },
+              { name: "difficulty", type: "enum question_difficulty", flags: [], notes: "easy | medium | hard" },
+              { name: "marks", type: "numeric(8,2)", flags: ["nn"], notes: "Default 1.00" },
+              { name: "explanation", type: "text", flags: [], notes: "Student-safe" },
+              { name: "lifecycle_status", type: "enum question_version_status", flags: ["nn"], notes: "draft | published | archived" },
+              ...TIMESTAMP,
+            ],
+            constraints: ["UNIQUE (question_id, version_number)"],
+          },
+          {
+            name: "question_options",
+            purpose: "MC option labels/text",
+            columns: [
+              PK,
+              { name: "question_version_id", type: "uuid → question_versions", flags: ["fk", "nn"], notes: "" },
+              { name: "label", type: "varchar(10)", flags: ["nn"], notes: "A–D etc." },
+              { name: "text", type: "text", flags: ["nn"], notes: "" },
+              { name: "sequence", type: "int", flags: ["nn"], notes: "" },
+              ...TIMESTAMP,
+            ],
+            constraints: ["UNIQUE (question_version_id, label)"],
+          },
+          {
+            name: "question_answer_keys",
+            purpose: "SERVER-ONLY correct answers",
+            columns: [
+              PK,
+              { name: "question_version_id", type: "uuid → question_versions", flags: ["fk", "uq", "nn"], notes: "1:1" },
+              { name: "correct_option_label", type: "varchar(10)", flags: [], notes: "MC" },
+              { name: "correct_boolean", type: "boolean", flags: [], notes: "T/F" },
+              { name: "correct_numeric", type: "numeric(18,6)", flags: [], notes: "Numeric" },
+              { name: "correct_mapping", type: "jsonb", flags: [], notes: "Matching" },
+              { name: "scoring_rubric", type: "jsonb", flags: [], notes: "Optional" },
+              ...TIMESTAMP,
+            ],
+            constraints: ["UNIQUE (question_version_id)", "Never join from student-facing queries"],
+          },
+          {
+            name: "question_outcome_tags",
+            purpose: "Question version ↔ learning outcome",
+            columns: [
+              PK,
+              { name: "question_version_id", type: "uuid → question_versions", flags: ["fk", "nn"], notes: "" },
+              { name: "learning_outcome_id", type: "uuid → learning_outcomes", flags: ["fk", "nn"], notes: "" },
+              ...TIMESTAMP,
+            ],
+            constraints: [
+              "UNIQUE (question_version_id, learning_outcome_id)",
+              "Service: published versions need ≥1 tag",
+            ],
+          },
+          {
+            name: "common_mastery_quizzes",
+            purpose: "One quiz identity per subtopic (POC)",
+            columns: [
+              PK,
+              { name: "subtopic_id", type: "uuid → subtopics", flags: ["fk", "uq", "nn"], notes: "" },
+              { name: "title", type: "varchar(200)", flags: ["nn"], notes: "" },
+              ...TIMESTAMP,
+            ],
+            constraints: ["UNIQUE (subtopic_id)"],
+          },
+          {
+            name: "quiz_versions",
+            purpose: "Immutable released question set",
+            columns: [
+              PK,
+              { name: "quiz_id", type: "uuid → common_mastery_quizzes", flags: ["fk", "nn"], notes: "" },
+              { name: "version_number", type: "int", flags: ["nn"], notes: "" },
+              { name: "lifecycle_status", type: "enum quiz_version_status", flags: ["nn"], notes: "draft | ready | released | archived" },
+              { name: "duration_seconds", type: "int", flags: [], notes: "" },
+              { name: "max_attempts", type: "int", flags: [], notes: "" },
+              { name: "result_release_mode", type: "enum quiz_result_release_mode", flags: ["nn"], notes: "immediate | admin_release" },
+              { name: "released_at", type: "timestamptz", flags: [], notes: "" },
+              ...TIMESTAMP,
+            ],
+            constraints: ["UNIQUE (quiz_id, version_number)"],
+          },
+          {
+            name: "quiz_items",
+            purpose: "Ordered question versions in a quiz",
+            columns: [
+              PK,
+              { name: "quiz_version_id", type: "uuid → quiz_versions", flags: ["fk", "nn"], notes: "" },
+              { name: "question_version_id", type: "uuid → question_versions", flags: ["fk", "nn"], notes: "" },
+              { name: "sequence", type: "int", flags: ["nn"], notes: "" },
+              ...TIMESTAMP,
+            ],
+            constraints: [
+              "UNIQUE (quiz_version_id, sequence)",
+              "UNIQUE (quiz_version_id, question_version_id)",
+            ],
+          },
+          {
+            name: "quiz_material_bindings",
+            purpose: "Material versions covered by a quiz release",
+            columns: [
+              PK,
+              { name: "quiz_version_id", type: "uuid → quiz_versions", flags: ["fk", "nn"], notes: "" },
+              { name: "source_material_version_id", type: "uuid → source_material_versions", flags: ["fk", "nn"], notes: "" },
+              ...TIMESTAMP,
+            ],
+            constraints: ["UNIQUE (quiz_version_id, source_material_version_id)"],
+          },
+          {
+            name: "quiz_releases",
+            purpose: "Optional release window record",
+            columns: [
+              PK,
+              { name: "quiz_version_id", type: "uuid → quiz_versions", flags: ["fk", "nn"], notes: "" },
+              { name: "window_starts_at", type: "timestamptz", flags: [], notes: "" },
+              { name: "window_ends_at", type: "timestamptz", flags: [], notes: "" },
+              { name: "released_by_user_id", type: "uuid → users", flags: ["fk", "nn"], notes: "" },
+              { name: "status", type: "enum quiz_release_status", flags: ["nn"], notes: "scheduled | open | closed" },
+              ...TIMESTAMP,
+            ],
+            constraints: ["Service: release requires published material + bindings"],
+          },
+          {
+            name: "quiz_attempts",
+            purpose: "Student timed attempt history",
+            columns: [
+              PK,
+              { name: "student_id", type: "uuid → student_profiles", flags: ["fk", "nn"], notes: "" },
+              { name: "quiz_version_id", type: "uuid → quiz_versions", flags: ["fk", "nn"], notes: "" },
+              { name: "attempt_number", type: "int", flags: ["nn"], notes: "Positive" },
+              { name: "status", type: "enum quiz_attempt_status", flags: ["nn"], notes: "not_started | in_progress | submitted | expired | scored | released | held" },
+              { name: "started_at", type: "timestamptz", flags: [], notes: "" },
+              { name: "submitted_at", type: "timestamptz", flags: [], notes: "" },
+              { name: "scored_at", type: "timestamptz", flags: [], notes: "" },
+              { name: "score_raw", type: "numeric(10,2)", flags: [], notes: "" },
+              { name: "score_percent", type: "numeric(5,2)", flags: [], notes: "" },
+              { name: "passed", type: "boolean", flags: [], notes: "" },
+              ...TIMESTAMP,
+            ],
+            constraints: ["UNIQUE (student_id, quiz_version_id, attempt_number)"],
+          },
+          {
+            name: "attempt_answers",
+            purpose: "Per-question responses on an attempt",
+            columns: [
+              PK,
+              { name: "attempt_id", type: "uuid → quiz_attempts", flags: ["fk", "nn"], notes: "" },
+              { name: "question_version_id", type: "uuid → question_versions", flags: ["fk", "nn"], notes: "" },
+              { name: "selected_option_label", type: "varchar(10)", flags: [], notes: "" },
+              { name: "selected_boolean", type: "boolean", flags: [], notes: "" },
+              { name: "selected_numeric", type: "numeric(18,6)", flags: [], notes: "" },
+              { name: "selected_mapping", type: "jsonb", flags: [], notes: "" },
+              { name: "is_correct", type: "boolean", flags: [], notes: "Null until scored" },
+              { name: "marks_awarded", type: "numeric(8,2)", flags: [], notes: "" },
+              ...TIMESTAMP,
+            ],
+            constraints: ["UNIQUE (attempt_id, question_version_id)"],
+          },
+        ],
+      },
+    ];
+
+    function badge(flag) {
+      const labels = { pk: "PK", fk: "FK", uq: "UQ", nn: "NOT NULL" };
+      return `<span class="badge ${flag}">${labels[flag] || flag}</span>`;
+    }
+
+    function renderColumn(col) {
+      const flags = (col.flags || []).map(badge).join("");
+      return `<tr>
+        <td class="mono">${col.name}</td>
+        <td class="mono">${col.type}</td>
+        <td>${flags}</td>
+        <td>${col.notes || ""}</td>
+      </tr>`;
+    }
+
+    function renderTable(table, domain) {
+      const constraints = (table.constraints || [])
+        .map((c) => `<li>${c}</li>`)
+        .join("");
+      const searchBlob = [
+        table.name,
+        table.purpose,
+        ...(table.columns || []).map((c) => `${c.name} ${c.type} ${c.notes || ""}`),
+        ...(table.constraints || []),
+      ].join(" ").toLowerCase();
+
+      return `<article class="table-card" id="${table.name}" data-domain="${domain}" data-search="${searchBlob.replace(/"/g, "")}">
+        <header>
+          <h3>${table.name}</h3>
+          <div class="meta">${table.purpose}</div>
+        </header>
+        <table class="fields">
+          <thead>
+            <tr><th>Column</th><th>Type</th><th>Flags</th><th>Notes</th></tr>
+          </thead>
+          <tbody>
+            ${table.columns.map(renderColumn).join("")}
+          </tbody>
+        </table>
+        ${constraints ? `<div class="constraints"><strong>Constraints</strong><ul>${constraints}</ul></div>` : ""}
+      </article>`;
+    }
+
+    function render() {
+      const root = document.getElementById("tables");
+      root.innerHTML = SCHEMA.map((domain) => `
+        <section class="domain" data-domain-section="${domain.domain}" id="domain-${domain.domain}">
+          <h2>${domain.title}</h2>
+          <p class="note">${domain.note}</p>
+          <div class="grid">
+            ${domain.tables.map((t) => renderTable(t, domain.domain)).join("")}
+          </div>
+        </section>
+      `).join("");
+    }
+
+    function applyFilters() {
+      const q = document.getElementById("search").value.trim().toLowerCase();
+      const activeChip = document.querySelector(".chip.active");
+      const domain = activeChip ? activeChip.dataset.domain : "all";
+
+      document.querySelectorAll("article.table-card[data-domain]").forEach((card) => {
+        const domainOk = domain === "all" || card.dataset.domain === domain;
+        const searchOk = !q || (card.dataset.search || "").includes(q);
+        card.classList.toggle("hidden", !(domainOk && searchOk));
+      });
+
+      document.querySelectorAll("[data-domain-section]").forEach((section) => {
+        const visible = [...section.querySelectorAll("article.table-card")].some(
+          (c) => !c.classList.contains("hidden")
+        );
+        section.style.display = visible ? "" : "none";
+      });
+    }
+
+    render();
+
+    document.getElementById("search").addEventListener("input", applyFilters);
+    document.querySelectorAll(".chip").forEach((chip) => {
+      chip.addEventListener("click", () => {
+        document.querySelectorAll(".chip").forEach((c) => c.classList.remove("active"));
+        chip.classList.add("active");
+        applyFilters();
+      });
+    });
+  </script>
+</body>
+</html>

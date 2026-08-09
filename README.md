@@ -1,51 +1,24 @@
-# Education Agentic Platform
+# Education Platform
 
-FastAPI backend for an institution-aware education platform. The first product POC is a
-common-curriculum student-evaluation loop:
+Monorepo for the education platform POC.
 
-- administrators publish a shared SourceCurriculum by Grade → Subject → Topic → Subtopic;
-- enrolled students open a private StudentLearningDirectory that references those published
-  sources;
-- after each subtopic, students take the same common mastery quiz and review four performance
-  pillars—marks, anonymized peer context, weak subtopics, and progress over time;
-- teachers use assigned-group evidence to support students.
+- `backend/` — FastAPI API backed by SQLite
+- `frontend/` — web client (placeholder for now)
+- `docs/materials/` — admin-approved lesson and quiz markdown (seed source)
 
-## Product design
+## Current POC slice
 
-The design covers academic periods, Grade and Grade–Subject enrollments, administrator-published
-source materials, common subtopic mastery quizzes with automatic objective scoring, and learner
-evaluation snapshots. Parent views, teacher-authored material, adaptive practice, and private
-dynamic materials are documented as later phases.
+Approved markdown under `docs/materials/` is seeded into SQLite. Authenticated students with
+active Grade + Grade–Subject enrollments can list topics, read lessons/quizzes (no answer keys),
+and start/submit scored quiz attempts. Auth uses JWT access/refresh tokens.
 
-See the [HTML project overview](docs/project-overview.html) (open in a browser),
-[architecture diagrams](docs/architecture.md), and
-[design documentation](docs/design/README.md) for the current source of truth, especially the
-[abstract system view](docs/design/00-abstract-system-view.md) and
-[student learning experience](docs/design/01-student-learning-experience.md). These documents
-describe the planned product; the implementation below currently covers only the initial backend
-foundation.
-
-## Current implementation capabilities
-
-- JWT authentication for administrators and teachers
-- Administrator-managed teacher accounts, curriculum collections, assignments, documents, and
-  publication
-- Text, PDF, and DOCX document parsing with source chunks
-- Assignment-scoped teacher Q&A with citations and structured lesson-plan generation
-
-## Planned POC capabilities
-
-- Student accounts with Grade and Grade–Subject enrollment-scoped access
-- Administrator-published SourceCurriculum folders and materials
-- Common mastery quizzes after each subtopic, attempts, and automatic scoring
-- Private StudentLearningDirectory progress, attempts, and evaluation snapshots
-- Marks, anonymized peer context, subtopic struggle analysis, and progress trends
-- Teacher class insights
+Browse the schema visually:
+[docs/design/relational-schema.html](docs/design/relational-schema.html).
 
 ## Prerequisites
 
 - macOS/Linux: `bash` and `curl`; Windows: PowerShell
-- Docker Desktop is optional for local development (SQLite is the default database)
+- Python 3.12 via `uv`
 
 ## Setup
 
@@ -55,35 +28,55 @@ foundation.
 
 # Windows PowerShell
 ./scripts/setup-windows.ps1
+```
 
+Prepare the database and seed curriculum from `backend/`:
+
+```bash
+cd backend
+uv run alembic upgrade head
+uv run python -m education_platform.modules.materials.seed
+```
+
+The API also auto-seeds on startup when the database has no topics yet.
+
+Start the API:
+
+```bash
 uv run uvicorn education_platform.main:app --reload
 ```
 
-The setup scripts create `.env` from `.env.example`, apply Alembic migrations, and use
-**SQLite** (`education.db`) by default. Replace the development JWT secret before sharing an
-environment. The API documentation is then available at `http://127.0.0.1:8000/docs`.
+Open API docs at `http://127.0.0.1:8000/docs`.
 
-To exercise the optional PostgreSQL/pgvector, Redis, and MinIO stack:
+### Example requests
 
 ```bash
-docker compose up -d
-# switch DATABASE_URL in .env to the PostgreSQL URL shown in .env.example
-uv run alembic upgrade head
+# Provision a student (POC helper), login, enroll in seeded Grade 8 Math, then study/attempt
+curl -X POST http://127.0.0.1:8000/api/v1/auth/provision-student \
+  -H 'Content-Type: application/json' \
+  -d '{"email":"student@example.com","password":"password123","full_name":"Asha","student_identifier":"S1"}'
+TOKEN=$(curl -s -X POST http://127.0.0.1:8000/api/v1/auth/login \
+  -H 'Content-Type: application/json' \
+  -d '{"email":"student@example.com","password":"password123"}' | python -c 'import sys,json; print(json.load(sys.stdin)["access_token"])')
+curl -X POST http://127.0.0.1:8000/api/v1/me/enrollments/poc-math -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' -d '{"confirm":true}'
+curl http://127.0.0.1:8000/api/v1/materials -H "Authorization: Bearer $TOKEN"
+curl http://127.0.0.1:8000/health
 ```
 
 ## Quality checks
 
 ```bash
+cd backend
 uv run ruff format --check .
 uv run ruff check .
 uv run mypy src
+uv run alembic upgrade head
 uv run pytest
 ```
 
-## Current constraints
+## Later
 
-The current implementation uses local object storage and in-process document processing for a
-simple developer experience. The Docker stack is ready for planned S3-compatible storage and
-Redis-backed worker adapters. The broader product design—SourceCurriculum folders,
-Grade–Subject enrollment, common subtopic quizzes, and evaluation snapshots—has not yet been
-implemented.
+MinIO/S3 (for binary uploads), JWT auth, quiz attempt scoring, and a React app under `frontend/`
+will follow as needed.
+
+Product design docs remain under [docs/design/](docs/design/README.md).

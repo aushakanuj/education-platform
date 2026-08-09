@@ -1,0 +1,80 @@
+"""Source material persistence models.
+
+The current materials API remains file-backed. These tables define the target relational shape.
+"""
+
+from __future__ import annotations
+
+import enum
+from datetime import datetime
+from uuid import UUID
+
+from sqlalchemy import DateTime, ForeignKey, Integer, String, Text, UniqueConstraint
+from sqlalchemy.orm import Mapped, mapped_column
+
+from education_platform.db.base import Base, UUIDTimestampMixin
+from education_platform.db.types import partial_unique_index, str_enum
+
+
+class SourceMaterialStatus(str, enum.Enum):
+    DRAFT = "draft"
+    PUBLISHED = "published"
+    ARCHIVED = "archived"
+
+
+class SourceMaterialVersionStatus(str, enum.Enum):
+    DRAFT = "draft"
+    PROCESSING = "processing"
+    READY = "ready"
+    PUBLISHED = "published"
+    FAILED = "failed"
+    SUPERSEDED = "superseded"
+    ARCHIVED = "archived"
+
+
+class SourceMaterial(UUIDTimestampMixin, Base):
+    __tablename__ = "source_materials"
+    __table_args__ = (
+        UniqueConstraint("subtopic_id", "slug", name="uq_source_materials_subtopic_slug"),
+    )
+
+    subtopic_id: Mapped[UUID] = mapped_column(ForeignKey("subtopics.id"), index=True)
+    title: Mapped[str] = mapped_column(String(200))
+    slug: Mapped[str] = mapped_column(String(100))
+    status: Mapped[SourceMaterialStatus] = mapped_column(
+        str_enum(SourceMaterialStatus, "source_material_status"),
+        default=SourceMaterialStatus.DRAFT,
+        index=True,
+    )
+
+
+class SourceMaterialVersion(UUIDTimestampMixin, Base):
+    __tablename__ = "source_material_versions"
+    __table_args__ = (
+        UniqueConstraint(
+            "source_material_id",
+            "version_number",
+            name="uq_source_material_versions_material_version",
+        ),
+        partial_unique_index(
+            "uq_source_material_versions_one_published",
+            "source_material_id",
+            where="lifecycle_status = 'published'",
+        ),
+    )
+
+    source_material_id: Mapped[UUID] = mapped_column(ForeignKey("source_materials.id"), index=True)
+    version_number: Mapped[int] = mapped_column(Integer)
+    lifecycle_status: Mapped[SourceMaterialVersionStatus] = mapped_column(
+        str_enum(SourceMaterialVersionStatus, "source_material_version_status"),
+        default=SourceMaterialVersionStatus.DRAFT,
+        index=True,
+    )
+    title: Mapped[str] = mapped_column(String(200))
+    content_markdown: Mapped[str | None] = mapped_column(Text, nullable=True)
+    content_format: Mapped[str] = mapped_column(String(50), default="markdown")
+    blob_object_key: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    blob_content_type: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    checksum: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    failure_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+    published_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
