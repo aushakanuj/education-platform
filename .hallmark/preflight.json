@@ -1,0 +1,10 @@
+{
+  "scanned_at": "2026-08-09",
+  "font_stack": "none prior — introduced Plus Jakarta Sans + JetBrains Mono (Hum)",
+  "palette": "none prior — introduced Hum OKLCH tokens",
+  "motion": "none prior — Hum push / lift / star-burst / reduced-motion",
+  "spacing": "4pt semantic scale in tokens.css",
+  "framework": "Vite + React + TypeScript (frontend/)",
+  "preserve": [],
+  "introduce": ["Hum tokens", "Narrative Workflow app shell", "student POC screens"]
+}

@@ -3,7 +3,7 @@
 Monorepo for the education platform POC.
 
 - `backend/` — FastAPI API backed by SQLite
-- `frontend/` — web client (placeholder for now)
+- `frontend/` — Vite + React student web client (Hum / Narrative Workflow)
 - `docs/materials/` — admin-approved lesson and quiz markdown (seed source)
 
 ## Current POC slice
@@ -48,6 +48,18 @@ uv run uvicorn education_platform.main:app --reload
 
 Open API docs at `http://127.0.0.1:8000/docs`.
 
+### Frontend
+
+```bash
+cd frontend
+cp .env.example .env   # VITE_API_BASE_URL=http://127.0.0.1:8000
+npm install
+npm run dev
+```
+
+Open `http://localhost:5173`. Create a student (or sign in), enroll in Grade 8 Math, then
+study topics and take quizzes.
+
 ### Example requests
 
 ```bash
@@ -76,7 +88,6 @@ uv run pytest
 
 ## Later
 
-MinIO/S3 (for binary uploads), JWT auth, quiz attempt scoring, and a React app under `frontend/`
-will follow as needed.
+MinIO/S3 (for binary uploads) and richer analytics views will follow as needed.
 
 Product design docs remain under [docs/design/](docs/design/README.md).
