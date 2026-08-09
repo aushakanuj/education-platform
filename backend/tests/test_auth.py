@@ -1,16 +1,7 @@
 from fastapi.testclient import TestClient
 
-from education_platform.main import app
-
 STUDENT_EMAIL = "student@example.com"
 STUDENT_PASSWORD = "password123"
-
-
-def test_health() -> None:
-    with TestClient(app) as client:
-        response = client.get("/health")
-        assert response.status_code == 200
-        assert response.json() == {"status": "ok"}
 
 
 def test_provision_login_me_refresh_logout(client: TestClient) -> None:

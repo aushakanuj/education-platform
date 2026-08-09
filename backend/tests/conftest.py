@@ -38,6 +38,8 @@ def sqlite_path(tmp_path: Path) -> Path:
 @pytest.fixture()
 def migrated_db(sqlite_path: Path) -> Iterator[Path]:
     database_url = f"sqlite+aiosqlite:///{sqlite_path}"
+    previous_database_url = os.environ.get("DATABASE_URL")
+    previous_jwt_secret = os.environ.get("JWT_SECRET")
     os.environ["DATABASE_URL"] = database_url
     os.environ["JWT_SECRET"] = "test-secret-key-at-least-32-bytes-long!!"
     get_settings.cache_clear()
@@ -67,8 +69,14 @@ def migrated_db(sqlite_path: Path) -> Iterator[Path]:
 
     reset_engine()
     get_settings.cache_clear()
-    os.environ.pop("DATABASE_URL", None)
-    os.environ.pop("JWT_SECRET", None)
+    if previous_database_url is None:
+        os.environ.pop("DATABASE_URL", None)
+    else:
+        os.environ["DATABASE_URL"] = previous_database_url
+    if previous_jwt_secret is None:
+        os.environ.pop("JWT_SECRET", None)
+    else:
+        os.environ["JWT_SECRET"] = previous_jwt_secret
 
 
 @pytest.fixture()
