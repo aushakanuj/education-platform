@@ -4,7 +4,12 @@ from fastapi.testclient import TestClient
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from education_platform.modules.assessments.models import QuestionAnswerKey, QuizItem
+from education_platform.modules.academics.models import Subtopic
+from education_platform.modules.assessments.models import (
+    CommonMasteryQuiz,
+    QuestionAnswerKey,
+    QuizItem,
+)
 from education_platform.modules.materials.seed import POC_INSTITUTION_NAME
 
 
@@ -25,13 +30,30 @@ def test_quiz_attempt_scores_without_leaking_keys(
     seeded_db: Session,
 ) -> None:
     quiz = client.get(
-        "/api/v1/materials/squares_cubes_roots/quiz", headers=enrolled_student_headers
+        "/api/v1/materials/square_numbers_patterns/quiz", headers=enrolled_student_headers
     )
     assert quiz.status_code == 200
     questions = quiz.json()["questions"]
+    quiz_id = quiz.json()["id"]
+
+    directory = client.get("/api/v1/me/learning-directory", headers=enrolled_student_headers)
+    assert directory.status_code == 200
+    subtopic_id = next(
+        subtopic["id"]
+        for subject in directory.json()["subjects"]
+        for topic in subject["topics"]
+        for subtopic in topic["subtopics"]
+        if subtopic["slug"] == "square_numbers_patterns"
+    )
+    progress = client.put(
+        f"/api/v1/subtopics/{subtopic_id}/material-progress",
+        headers=enrolled_student_headers,
+        json={"status": "completed"},
+    )
+    assert progress.status_code == 200, progress.text
 
     start = client.post(
-        "/api/v1/quizzes/squares_cubes_roots/attempts",
+        f"/api/v1/quizzes/{quiz_id}/attempts",
         headers=enrolled_student_headers,
     )
     assert start.status_code == 200
@@ -87,7 +109,7 @@ def test_quiz_attempt_scores_without_leaking_keys(
     assert again.status_code == 409
 
 
-def test_unenrolled_cannot_start_attempt(client: TestClient) -> None:
+def test_unenrolled_cannot_start_attempt(client: TestClient, seeded_db: Session) -> None:
     provision = client.post(
         "/api/v1/auth/provision-student",
         json={
@@ -104,5 +126,13 @@ def test_unenrolled_cannot_start_attempt(client: TestClient) -> None:
         json={"email": "locked@example.com", "password": "password123"},
     )
     headers = {"Authorization": f"Bearer {login.json()['access_token']}"}
-    start = client.post("/api/v1/quizzes/quadrilaterals/attempts", headers=headers)
+    subtopic = seeded_db.scalar(
+        select(Subtopic).where(Subtopic.slug == "rectangles_squares_properties")
+    )
+    assert subtopic is not None
+    quiz = seeded_db.scalar(
+        select(CommonMasteryQuiz).where(CommonMasteryQuiz.subtopic_id == subtopic.id)
+    )
+    assert quiz is not None
+    start = client.post(f"/api/v1/quizzes/{quiz.id}/attempts", headers=headers)
     assert start.status_code == 403

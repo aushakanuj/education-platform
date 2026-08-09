@@ -2,53 +2,73 @@ import { useEffect, useMemo, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 
 import { buildSubmitPayload, startAttempt, submitAttempt } from "../api/attempts";
-import { getQuiz } from "../api/materials";
-import type { QuizMaterial, StartAttemptResponse } from "../api/types";
+import { fetchLearningDirectory } from "../api/materials";
+import type { StartAttemptResponse } from "../api/types";
 import { ApiError } from "../api/types";
 import { AppShell } from "../components/AppShell";
+import { ConfirmDialog } from "../components/ConfirmDialog";
+import { Crumbs } from "../components/Crumbs";
+import { MarkdownContent } from "../components/MarkdownContent";
 import { PushButton } from "../components/PushButton";
+import { resolvePathFromAttempt, resolvePathFromQuizId, type LearningPath } from "../lib/learningPath";
 
 export function QuizPage() {
-  const { topicId = "" } = useParams();
+  const { quizId = "" } = useParams();
   const navigate = useNavigate();
-  const [quiz, setQuiz] = useState<QuizMaterial | null>(null);
   const [attempt, setAttempt] = useState<StartAttemptResponse | null>(null);
+  const [path, setPath] = useState<LearningPath | null>(null);
   const [index, setIndex] = useState(0);
   const [answers, setAnswers] = useState<Record<number, string>>({});
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [starting, setStarting] = useState(true);
+  const [lockDialog, setLockDialog] = useState<{ title: string; body: string } | null>(null);
+
+  const question = attempt?.questions[index];
+  const answeredCount = useMemo(() => Object.keys(answers).length, [answers]);
+  const allAnswered = attempt ? answeredCount === attempt.questions.length : false;
+  const passMark = attempt ? Math.round(attempt.pass_threshold_percent) : 70;
 
   useEffect(() => {
     let cancelled = false;
-    setQuiz(null);
-    setAttempt(null);
-    setAnswers({});
-    setIndex(0);
-    setError(null);
     void (async () => {
+      setStarting(true);
+      setError(null);
+      setAttempt(null);
+      setAnswers({});
+      setIndex(0);
       try {
-        const [quizData, attemptData] = await Promise.all([
-          getQuiz(topicId),
-          startAttempt(topicId),
+        const [data, directory] = await Promise.all([
+          startAttempt(quizId),
+          fetchLearningDirectory().catch(() => null),
         ]);
-        if (!cancelled) {
-          setQuiz(quizData);
-          setAttempt(attemptData);
-        }
+        if (cancelled) return;
+        setAttempt(data);
+        setPath(directory ? resolvePathFromAttempt(directory, data) : null);
       } catch (err) {
-        if (!cancelled) {
-          setError(err instanceof ApiError ? err.message : "Could not start quiz.");
+        if (cancelled) return;
+        const message = err instanceof ApiError ? err.message : "Could not start quiz.";
+        setError(message);
+        try {
+          const directory = await fetchLearningDirectory();
+          if (!cancelled) setPath(resolvePathFromQuizId(directory, quizId));
+        } catch {
+          /* ignore */
         }
+        if (err instanceof ApiError && err.status === 403) {
+          setLockDialog({
+            title: "Quiz locked",
+            body: message || "Finish the lesson before starting this quiz.",
+          });
+        }
+      } finally {
+        if (!cancelled) setStarting(false);
       }
     })();
     return () => {
       cancelled = true;
     };
-  }, [topicId]);
-
-  const question = quiz?.questions[index];
-  const answeredCount = useMemo(() => Object.keys(answers).length, [answers]);
-  const allAnswered = quiz ? answeredCount === quiz.questions.length : false;
+  }, [quizId]);
 
   function selectOption(label: string) {
     if (!question) return;
@@ -56,58 +76,94 @@ export function QuizPage() {
   }
 
   async function onSubmit() {
-    if (!attempt || !quiz || !allAnswered) return;
+    if (!attempt || !allAnswered) return;
     setBusy(true);
     setError(null);
     try {
       const result = await submitAttempt(attempt.id, buildSubmitPayload(answers));
-      navigate(`/attempts/${result.id}`, { replace: true, state: { result } });
+      navigate(`/attempts/${result.id}`, {
+        replace: true,
+        state: { result, path },
+      });
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "Could not submit quiz.");
       setBusy(false);
     }
   }
 
+  const topicPath = path?.topicPath ?? "/";
+  const lessonPath = path?.lessonPath;
+
   return (
-    <AppShell>
-      {!quiz && !error && (
+    <AppShell topicTitle={path?.topicTitle}>
+      {starting && (
         <div className="center-state" role="status">
           Starting quiz…
         </div>
       )}
 
-      {error && !quiz && (
+      {!starting && error && !attempt && (
         <div className="center-state">
           <p className="form__error" role="alert">
             {error}
           </p>
-          <Link to={`/topics/${topicId}`}>
-            <PushButton variant="soft">Back to lesson</PushButton>
-          </Link>
+          <div className="actions" style={{ justifyContent: "center" }}>
+            {lessonPath && (
+              <Link to={lessonPath} className="btn btn--soft">
+                Open lesson
+              </Link>
+            )}
+            <Link to={topicPath} className="btn">
+              Back to topic
+            </Link>
+          </div>
         </div>
       )}
 
-      {quiz && question && (
+      {!starting && attempt && question && (
         <div className="stack-gap">
+          {path && (
+            <>
+              <Crumbs
+                parts={[
+                  { label: "Subjects", to: "/" },
+                  { label: path.subjectName, to: `/subjects/${path.subjectId}` },
+                  { label: path.topicTitle, to: path.topicPath },
+                  { label: attempt.title },
+                ]}
+              />
+              <div className="back-row">
+                <Link to={path.topicPath} className="btn btn--outline btn--sm">
+                  ← Back to topic
+                </Link>
+              </div>
+            </>
+          )}
+
           <header className="page-head">
-            <div>
-              <p className="muted" style={{ fontFamily: "var(--font-mono)", fontSize: "var(--text-xs)" }}>
-                3.0 Quiz · Attempt {attempt?.attempt_number ?? "—"}
-              </p>
-              <h1 className="page-head__title">{quiz.title}</h1>
-            </div>
+            <p className="kicker">
+              Quiz · Attempt {attempt.attempt_number}
+              {attempt.scope === "topic_mastery" ? " · overall" : " · subtopic"}
+            </p>
+            <h1>{attempt.title}</h1>
           </header>
 
           <p className="quiz-progress">
-            Question {index + 1} of {quiz.questions.length} · {answeredCount} answered
+            Question {index + 1} of {attempt.questions.length} · {answeredCount} answered · pass
+            mark {passMark}%
           </p>
 
-          <article className="question-card">
-            {question.difficulty && (
-              <span className="difficulty">{question.difficulty}</span>
-            )}
-            <h2 className="question-card__prompt">{question.prompt}</h2>
-            <div className="option-list" role="radiogroup" aria-label={`Question ${question.number}`}>
+          <article className="panel">
+            {question.difficulty && <span className="difficulty">{question.difficulty}</span>}
+            <h2 className="question-prompt">
+              <MarkdownContent inline>{question.prompt}</MarkdownContent>
+            </h2>
+            <div
+              className="options"
+              role="radiogroup"
+              aria-required="true"
+              aria-label={`Question ${question.number}`}
+            >
               {question.options.map((opt) => {
                 const selected = answers[question.number] === opt.label;
                 return (
@@ -118,9 +174,12 @@ export function QuizPage() {
                     aria-checked={selected}
                     className={`option ${selected ? "is-selected" : ""}`}
                     onClick={() => selectOption(opt.label)}
+                    disabled={busy}
                   >
-                    <span className="option__label">{opt.label}</span>
-                    <span>{opt.text}</span>
+                    <span className="option__mark">{opt.label}</span>
+                    <span className="option__text">
+                      <MarkdownContent inline>{opt.text}</MarkdownContent>
+                    </span>
                   </button>
                 );
               })}
@@ -133,39 +192,53 @@ export function QuizPage() {
             </p>
           )}
 
-          <div className="form__actions">
+          <div className="actions" style={{ marginTop: 0 }}>
             <PushButton
               variant="outline"
-              disabled={index === 0}
+              disabled={index === 0 || busy}
               onClick={() => setIndex((i) => Math.max(0, i - 1))}
             >
               Previous
             </PushButton>
-            {index < quiz.questions.length - 1 ? (
+            {index < attempt.questions.length - 1 ? (
               <PushButton
-                color="pear"
-                disabled={!answers[question.number]}
+                disabled={!answers[question.number] || busy}
                 onClick={() => setIndex((i) => i + 1)}
               >
-                Next question <span className="btn__arrow">→</span>
+                Next question
               </PushButton>
             ) : (
-              <PushButton
-                color="coral"
-                loading={busy}
-                disabled={!allAnswered}
-                onClick={() => void onSubmit()}
-              >
-                Submit quiz <span className="btn__arrow">→</span>
+              <PushButton loading={busy} disabled={!allAnswered} onClick={() => void onSubmit()}>
+                Submit quiz
               </PushButton>
             )}
           </div>
 
-          {!allAnswered && index === quiz.questions.length - 1 && (
-            <p className="muted">Answer every question before you submit.</p>
+          {!allAnswered && index === attempt.questions.length - 1 && (
+            <p className="alert alert--warning" role="status">
+              Answer every question before you submit.
+            </p>
           )}
         </div>
       )}
+
+      <ConfirmDialog
+        open={lockDialog != null}
+        title={lockDialog?.title ?? ""}
+        body={lockDialog?.body ?? ""}
+        onDismiss={() => setLockDialog(null)}
+        actions={[
+          { label: "Got it", variant: "soft" },
+          ...(lessonPath
+            ? [
+                {
+                  label: "Open lesson",
+                  onClick: () => navigate(lessonPath),
+                },
+              ]
+            : []),
+        ]}
+      />
     </AppShell>
   );
 }

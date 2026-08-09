@@ -2,20 +2,24 @@
 
 from __future__ import annotations
 
+import hashlib
 from datetime import UTC, date, datetime
 from pathlib import Path
 
-from sqlalchemy import delete, select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from education_platform.core.config import get_settings
 from education_platform.modules.academics.models import (
     AcademicPeriod,
     AcademicPeriodStatus,
+    EnrollmentStatus,
     Grade,
     GradeSubjectOffering,
     LearningOutcome,
     PeriodGrade,
+    StudentGradeEnrollment,
+    StudentSubjectEnrollment,
     Subject,
     Subtopic,
     Topic,
@@ -30,14 +34,33 @@ from education_platform.modules.assessments.models import (
     QuestionType,
     QuestionVersion,
     QuestionVersionStatus,
+    QuizAttempt,
     QuizItem,
     QuizMaterialBinding,
+    QuizRelease,
+    QuizReleaseStatus,
     QuizResultReleaseMode,
+    QuizScope,
     QuizVersion,
     QuizVersionStatus,
 )
-from education_platform.modules.auth.models import Institution, InstitutionStatus
-from education_platform.modules.materials.markdown_parser import parse_lesson, parse_quiz
+from education_platform.modules.auth.models import (
+    Institution,
+    InstitutionStatus,
+    RoleName,
+    StudentProfile,
+    StudentProfileStatus,
+    User,
+    UserRole,
+    UserStatus,
+)
+from education_platform.modules.auth.security import hash_password
+from education_platform.modules.materials.markdown_parser import (
+    ParsedQuiz,
+    parse_lesson,
+    parse_objectives_from_lesson,
+    parse_quiz,
+)
 from education_platform.modules.materials.models import (
     SourceMaterial,
     SourceMaterialStatus,
@@ -59,6 +82,10 @@ _DIFFICULTY = {
     "medium": QuestionDifficulty.MEDIUM,
     "hard": QuestionDifficulty.HARD,
 }
+
+
+def _checksum(content: str) -> str:
+    return hashlib.sha256(content.encode("utf-8")).hexdigest()
 
 
 def discover_topic_ids(materials_dir: Path) -> list[str]:
@@ -171,66 +198,271 @@ def _ensure_curriculum_root(session: Session) -> Topic:
     return topic
 
 
-def _clear_subtopic_content(session: Session, subtopic: Subtopic) -> None:
-    quiz = session.scalar(
-        select(CommonMasteryQuiz).where(CommonMasteryQuiz.subtopic_id == subtopic.id)
+def _ensure_open_release(session: Session, quiz_version: QuizVersion) -> None:
+    release = session.scalar(
+        select(QuizRelease).where(
+            QuizRelease.quiz_version_id == quiz_version.id,
+            QuizRelease.status == QuizReleaseStatus.OPEN,
+        )
     )
-    if quiz is not None:
-        quiz_versions = session.scalars(
-            select(QuizVersion).where(QuizVersion.quiz_id == quiz.id)
-        ).all()
-        for quiz_version in quiz_versions:
-            session.execute(delete(QuizItem).where(QuizItem.quiz_version_id == quiz_version.id))
-            session.execute(
-                delete(QuizMaterialBinding).where(
-                    QuizMaterialBinding.quiz_version_id == quiz_version.id
-                )
+    if release is None:
+        session.add(
+            QuizRelease(
+                quiz_version_id=quiz_version.id,
+                status=QuizReleaseStatus.OPEN,
+                released_by_user_id=None,
             )
-            session.delete(quiz_version)
-        session.delete(quiz)
+        )
 
-    questions = session.scalars(select(Question).where(Question.subtopic_id == subtopic.id)).all()
-    for question in questions:
-        question_versions = session.scalars(
-            select(QuestionVersion).where(QuestionVersion.question_id == question.id)
-        ).all()
-        for question_version in question_versions:
-            session.execute(
-                delete(QuestionOption).where(
-                    QuestionOption.question_version_id == question_version.id
-                )
-            )
-            session.execute(
-                delete(QuestionAnswerKey).where(
-                    QuestionAnswerKey.question_version_id == question_version.id
-                )
-            )
-            session.execute(
-                delete(QuestionOutcomeTag).where(
-                    QuestionOutcomeTag.question_version_id == question_version.id
-                )
-            )
-            session.delete(question_version)
-        session.delete(question)
 
-    materials = session.scalars(
-        select(SourceMaterial).where(SourceMaterial.subtopic_id == subtopic.id)
+def _ensure_outcomes(
+    session: Session,
+    subtopic: Subtopic,
+    statements: list[str],
+    *,
+    display_title: str,
+) -> LearningOutcome:
+    cleaned = [item.strip() for item in statements if item.strip()]
+    if not cleaned:
+        cleaned = [f"Demonstrate understanding of {display_title}"]
+
+    primary: LearningOutcome | None = None
+    for index, statement in enumerate(cleaned, start=1):
+        code = f"LO{index}"
+        outcome = session.scalar(
+            select(LearningOutcome).where(
+                LearningOutcome.subtopic_id == subtopic.id,
+                LearningOutcome.code == code,
+            )
+        )
+        if outcome is None:
+            outcome = LearningOutcome(
+                subtopic_id=subtopic.id,
+                code=code,
+                statement=statement,
+                sequence=index,
+            )
+            session.add(outcome)
+            session.flush()
+        else:
+            outcome.statement = statement
+            outcome.sequence = index
+        if primary is None:
+            primary = outcome
+
+    assert primary is not None
+    return primary
+
+
+def _upsert_material_version(
+    session: Session,
+    subtopic: Subtopic,
+    *,
+    title: str,
+    markdown: str,
+) -> SourceMaterialVersion:
+    material = session.scalar(
+        select(SourceMaterial).where(
+            SourceMaterial.subtopic_id == subtopic.id,
+            SourceMaterial.slug == "lesson",
+        )
+    )
+    if material is None:
+        material = SourceMaterial(
+            subtopic_id=subtopic.id,
+            title=title,
+            slug="lesson",
+            status=SourceMaterialStatus.PUBLISHED,
+        )
+        session.add(material)
+        session.flush()
+    else:
+        material.title = title
+        material.status = SourceMaterialStatus.PUBLISHED
+
+    checksum = _checksum(markdown)
+    published = session.scalar(
+        select(SourceMaterialVersion).where(
+            SourceMaterialVersion.source_material_id == material.id,
+            SourceMaterialVersion.lifecycle_status == SourceMaterialVersionStatus.PUBLISHED,
+        )
+    )
+    if published is not None and published.checksum == checksum:
+        return published
+    if published is not None:
+        published.lifecycle_status = SourceMaterialVersionStatus.SUPERSEDED
+
+    next_version = (
+        int(
+            session.scalar(
+                select(func.max(SourceMaterialVersion.version_number)).where(
+                    SourceMaterialVersion.source_material_id == material.id
+                )
+            )
+            or 0
+        )
+        + 1
+    )
+    version = SourceMaterialVersion(
+        source_material_id=material.id,
+        version_number=next_version,
+        lifecycle_status=SourceMaterialVersionStatus.PUBLISHED,
+        title=title,
+        content_markdown=markdown,
+        content_format="markdown",
+        checksum=checksum,
+        published_at=datetime.now(UTC),
+    )
+    session.add(version)
+    session.flush()
+    return version
+
+
+def _latest_released_quiz_version(session: Session, quiz_id: object) -> QuizVersion | None:
+    return session.scalar(
+        select(QuizVersion)
+        .where(
+            QuizVersion.quiz_id == quiz_id,
+            QuizVersion.lifecycle_status == QuizVersionStatus.RELEASED,
+        )
+        .order_by(QuizVersion.version_number.desc())
+    )
+
+
+def _quiz_version_matches(
+    session: Session, quiz_version: QuizVersion, quiz_data: ParsedQuiz
+) -> bool:
+    items = session.scalars(
+        select(QuizItem)
+        .where(QuizItem.quiz_version_id == quiz_version.id)
+        .order_by(QuizItem.sequence)
     ).all()
-    for material in materials:
-        material_versions = session.scalars(
-            select(SourceMaterialVersion).where(
-                SourceMaterialVersion.source_material_id == material.id
-            )
+    questions = quiz_data.questions
+    if len(items) != len(questions):
+        return False
+    for item, parsed in zip(items, questions, strict=True):
+        version = session.get(QuestionVersion, item.question_version_id)
+        if version is None or version.prompt != parsed.prompt:
+            return False
+        options = session.scalars(
+            select(QuestionOption)
+            .where(QuestionOption.question_version_id == version.id)
+            .order_by(QuestionOption.sequence)
         ).all()
-        for material_version in material_versions:
-            session.delete(material_version)
-        session.delete(material)
+        if [(o.label, o.text) for o in options] != [(o.label, o.text) for o in parsed.options]:
+            return False
+        key = session.scalar(
+            select(QuestionAnswerKey).where(QuestionAnswerKey.question_version_id == version.id)
+        )
+        if key is None or key.correct_option_label != parsed.correct_option_label:
+            return False
+    return True
 
-    outcomes = session.scalars(
-        select(LearningOutcome).where(LearningOutcome.subtopic_id == subtopic.id)
-    ).all()
-    for outcome in outcomes:
-        session.delete(outcome)
+
+def _upsert_subtopic_quiz(
+    session: Session,
+    subtopic: Subtopic,
+    outcome: LearningOutcome,
+    quiz_data: ParsedQuiz,
+    material_version: SourceMaterialVersion | None,
+) -> QuizVersion:
+    mastery_quiz = session.scalar(
+        select(CommonMasteryQuiz).where(
+            CommonMasteryQuiz.subtopic_id == subtopic.id,
+            CommonMasteryQuiz.quiz_scope == QuizScope.SUBTOPIC_MASTERY,
+        )
+    )
+    if mastery_quiz is None:
+        mastery_quiz = CommonMasteryQuiz(
+            quiz_scope=QuizScope.SUBTOPIC_MASTERY,
+            subtopic_id=subtopic.id,
+            title=quiz_data.title,
+        )
+        session.add(mastery_quiz)
+        session.flush()
+    else:
+        mastery_quiz.title = quiz_data.title
+
+    existing = _latest_released_quiz_version(session, mastery_quiz.id)
+    if existing is not None and _quiz_version_matches(session, existing, quiz_data):
+        _ensure_open_release(session, existing)
+        return existing
+
+    next_version = (
+        int(
+            session.scalar(
+                select(func.max(QuizVersion.version_number)).where(
+                    QuizVersion.quiz_id == mastery_quiz.id
+                )
+            )
+            or 0
+        )
+        + 1
+    )
+    quiz_version = QuizVersion(
+        quiz_id=mastery_quiz.id,
+        version_number=next_version,
+        lifecycle_status=QuizVersionStatus.RELEASED,
+        result_release_mode=QuizResultReleaseMode.IMMEDIATE,
+        pass_threshold_percent=get_settings().mastery_pass_percent,
+        released_at=datetime.now(UTC),
+    )
+    session.add(quiz_version)
+    session.flush()
+    _ensure_open_release(session, quiz_version)
+
+    if material_version is not None:
+        session.add(
+            QuizMaterialBinding(
+                quiz_version_id=quiz_version.id,
+                source_material_version_id=material_version.id,
+            )
+        )
+
+    for question_data in quiz_data.questions:
+        question = Question(subtopic_id=subtopic.id, code=f"Q{question_data.number}")
+        session.add(question)
+        session.flush()
+        difficulty = None
+        if question_data.difficulty:
+            difficulty = _DIFFICULTY.get(question_data.difficulty.lower())
+        version = QuestionVersion(
+            question_id=question.id,
+            version_number=1,
+            prompt=question_data.prompt,
+            question_type=QuestionType.MULTIPLE_CHOICE,
+            difficulty=difficulty,
+            explanation=question_data.explanation,
+            lifecycle_status=QuestionVersionStatus.PUBLISHED,
+        )
+        session.add(version)
+        session.flush()
+        for index, option in enumerate(question_data.options, start=1):
+            session.add(
+                QuestionOption(
+                    question_version_id=version.id,
+                    label=option.label,
+                    text=option.text,
+                    sequence=index,
+                )
+            )
+        session.add(
+            QuestionAnswerKey(
+                question_version_id=version.id,
+                correct_option_label=question_data.correct_option_label,
+            )
+        )
+        session.add(
+            QuestionOutcomeTag(question_version_id=version.id, learning_outcome_id=outcome.id)
+        )
+        session.add(
+            QuizItem(
+                quiz_version_id=quiz_version.id,
+                question_version_id=version.id,
+                sequence=question_data.number,
+            )
+        )
+    return quiz_version
 
 
 def _seed_subtopic(
@@ -267,117 +499,248 @@ def _seed_subtopic(
     else:
         subtopic.name = display_title
         subtopic.sequence = sequence
-        _clear_subtopic_content(session, subtopic)
         session.flush()
 
-    outcome = LearningOutcome(
-        subtopic_id=subtopic.id,
-        code="LO1",
-        statement=f"Demonstrate understanding of {display_title}",
-        sequence=1,
-    )
-    session.add(outcome)
-    session.flush()
-
+    outcome_statements: list[str] = []
     published_material_version: SourceMaterialVersion | None = None
     if lesson_path.is_file():
         lesson = parse_lesson(lesson_path.read_text(encoding="utf-8"), topic_id)
-        material = SourceMaterial(
-            subtopic_id=subtopic.id,
-            title=lesson.title,
-            slug="lesson",
-            status=SourceMaterialStatus.PUBLISHED,
+        outcome_statements = parse_objectives_from_lesson(lesson.markdown)
+        published_material_version = _upsert_material_version(
+            session, subtopic, title=lesson.title, markdown=lesson.markdown
         )
-        session.add(material)
-        session.flush()
-        published_material_version = SourceMaterialVersion(
-            source_material_id=material.id,
-            version_number=1,
-            lifecycle_status=SourceMaterialVersionStatus.PUBLISHED,
-            title=lesson.title,
-            content_markdown=lesson.markdown,
-            content_format="markdown",
-            published_at=datetime.now(UTC),
-        )
-        session.add(published_material_version)
-        session.flush()
+
+    outcome = _ensure_outcomes(session, subtopic, outcome_statements, display_title=display_title)
 
     if quiz_path.is_file():
         quiz = parse_quiz(quiz_path.read_text(encoding="utf-8"), topic_id)
-        mastery_quiz = CommonMasteryQuiz(subtopic_id=subtopic.id, title=quiz.title)
-        session.add(mastery_quiz)
-        session.flush()
-        quiz_version = QuizVersion(
-            quiz_id=mastery_quiz.id,
-            version_number=1,
-            lifecycle_status=QuizVersionStatus.RELEASED,
-            result_release_mode=QuizResultReleaseMode.IMMEDIATE,
-            released_at=datetime.now(UTC),
+        _upsert_subtopic_quiz(session, subtopic, outcome, quiz, published_material_version)
+
+
+def _seed_topic_mastery_quiz(session: Session, parent_topic: Topic) -> None:
+    subtopics = session.scalars(
+        select(Subtopic)
+        .where(Subtopic.topic_id == parent_topic.id)
+        .order_by(Subtopic.sequence, Subtopic.slug)
+    ).all()
+    source_items: list[QuizItem] = []
+    for subtopic in subtopics:
+        quiz = session.scalar(
+            select(CommonMasteryQuiz).where(
+                CommonMasteryQuiz.subtopic_id == subtopic.id,
+                CommonMasteryQuiz.quiz_scope == QuizScope.SUBTOPIC_MASTERY,
+            )
         )
-        session.add(quiz_version)
+        if quiz is None:
+            continue
+        version = _latest_released_quiz_version(session, quiz.id)
+        if version is None:
+            continue
+        source_items.extend(
+            session.scalars(
+                select(QuizItem)
+                .where(QuizItem.quiz_version_id == version.id)
+                .order_by(QuizItem.sequence)
+            ).all()
+        )
+    if not source_items:
+        return
+
+    quiz = session.scalar(
+        select(CommonMasteryQuiz).where(
+            CommonMasteryQuiz.topic_id == parent_topic.id,
+            CommonMasteryQuiz.quiz_scope == QuizScope.TOPIC_MASTERY,
+        )
+    )
+    if quiz is None:
+        quiz = CommonMasteryQuiz(
+            quiz_scope=QuizScope.TOPIC_MASTERY,
+            topic_id=parent_topic.id,
+            title="Approved Materials Overall Quiz",
+        )
+        session.add(quiz)
         session.flush()
+    else:
+        quiz.title = "Approved Materials Overall Quiz"
 
-        if published_material_version is not None:
-            session.add(
-                QuizMaterialBinding(
-                    quiz_version_id=quiz_version.id,
-                    source_material_version_id=published_material_version.id,
-                )
-            )
+    latest = _latest_released_quiz_version(session, quiz.id)
+    latest_ids = []
+    if latest is not None:
+        latest_ids = [
+            item.question_version_id
+            for item in session.scalars(
+                select(QuizItem)
+                .where(QuizItem.quiz_version_id == latest.id)
+                .order_by(QuizItem.sequence)
+            ).all()
+        ]
+    source_ids = [item.question_version_id for item in source_items]
+    if latest is not None and latest_ids == source_ids:
+        _ensure_open_release(session, latest)
+        return
 
-        for question_data in quiz.questions:
-            question = Question(subtopic_id=subtopic.id, code=f"Q{question_data.number}")
-            session.add(question)
-            session.flush()
-            difficulty = None
-            if question_data.difficulty:
-                difficulty = _DIFFICULTY.get(question_data.difficulty.lower())
-            version = QuestionVersion(
-                question_id=question.id,
-                version_number=1,
-                prompt=question_data.prompt,
-                question_type=QuestionType.MULTIPLE_CHOICE,
-                difficulty=difficulty,
-                explanation=question_data.explanation,
-                lifecycle_status=QuestionVersionStatus.PUBLISHED,
+    next_version = (
+        int(
+            session.scalar(
+                select(func.max(QuizVersion.version_number)).where(QuizVersion.quiz_id == quiz.id)
             )
-            session.add(version)
-            session.flush()
-            for index, option in enumerate(question_data.options, start=1):
-                session.add(
-                    QuestionOption(
-                        question_version_id=version.id,
-                        label=option.label,
-                        text=option.text,
-                        sequence=index,
-                    )
-                )
-            session.add(
-                QuestionAnswerKey(
-                    question_version_id=version.id,
-                    correct_option_label=question_data.correct_option_label,
-                )
+            or 0
+        )
+        + 1
+    )
+    version = QuizVersion(
+        quiz_id=quiz.id,
+        version_number=next_version,
+        lifecycle_status=QuizVersionStatus.RELEASED,
+        result_release_mode=QuizResultReleaseMode.IMMEDIATE,
+        pass_threshold_percent=get_settings().mastery_pass_percent,
+        released_at=datetime.now(UTC),
+    )
+    session.add(version)
+    session.flush()
+    _ensure_open_release(session, version)
+    for sequence, item in enumerate(source_items, start=1):
+        session.add(
+            QuizItem(
+                quiz_version_id=version.id,
+                question_version_id=item.question_version_id,
+                sequence=sequence,
             )
-            session.add(
-                QuestionOutcomeTag(
-                    question_version_id=version.id,
-                    learning_outcome_id=outcome.id,
-                )
+        )
+
+
+def _attempts_exist(session: Session) -> bool:
+    return bool(session.scalar(select(QuizAttempt.id).limit(1)))
+
+
+def seed_demo_student(session: Session) -> None:
+    settings = get_settings()
+    if not settings.is_development:
+        return
+    institution = session.scalar(
+        select(Institution).where(Institution.name == POC_INSTITUTION_NAME)
+    )
+    if institution is None:
+        return
+    email = settings.demo_student_email.lower()
+    user = session.scalar(
+        select(User).where(User.institution_id == institution.id, User.email == email)
+    )
+    if user is None:
+        user = User(
+            institution_id=institution.id,
+            email=email,
+            full_name="Asha Student",
+            password_hash=hash_password(settings.demo_student_password),
+            status=UserStatus.ACTIVE,
+        )
+        session.add(user)
+        session.flush()
+    else:
+        user.status = UserStatus.ACTIVE
+        user.full_name = "Asha Student"
+        user.password_hash = hash_password(settings.demo_student_password)
+    if (
+        session.scalar(
+            select(UserRole).where(UserRole.user_id == user.id, UserRole.role == RoleName.STUDENT)
+        )
+        is None
+    ):
+        session.add(UserRole(user_id=user.id, role=RoleName.STUDENT))
+
+    profile = session.scalar(
+        select(StudentProfile).where(
+            StudentProfile.institution_id == institution.id,
+            StudentProfile.student_identifier == "DEMO-001",
+        )
+    )
+    if profile is None:
+        profile = StudentProfile(
+            institution_id=institution.id,
+            user_id=user.id,
+            student_identifier="DEMO-001",
+            full_name="Demo Student",
+            status=StudentProfileStatus.ACTIVE,
+        )
+        session.add(profile)
+        session.flush()
+    else:
+        profile.user_id = user.id
+        profile.status = StudentProfileStatus.ACTIVE
+
+    period = session.scalar(
+        select(AcademicPeriod).where(
+            AcademicPeriod.institution_id == institution.id,
+            AcademicPeriod.name == POC_PERIOD_NAME,
+        )
+    )
+    grade = session.scalar(
+        select(Grade).where(Grade.institution_id == institution.id, Grade.name == POC_GRADE_NAME)
+    )
+    subject = session.scalar(
+        select(Subject).where(
+            Subject.institution_id == institution.id, Subject.code == POC_SUBJECT_CODE
+        )
+    )
+    if period is None or grade is None or subject is None:
+        return
+    period_grade = session.scalar(
+        select(PeriodGrade).where(
+            PeriodGrade.academic_period_id == period.id,
+            PeriodGrade.grade_id == grade.id,
+        )
+    )
+    if period_grade is None:
+        return
+    offering = session.scalar(
+        select(GradeSubjectOffering).where(
+            GradeSubjectOffering.period_grade_id == period_grade.id,
+            GradeSubjectOffering.subject_id == subject.id,
+        )
+    )
+    if offering is None:
+        return
+    grade_enrollment = session.scalar(
+        select(StudentGradeEnrollment).where(
+            StudentGradeEnrollment.student_id == profile.id,
+            StudentGradeEnrollment.academic_period_id == period.id,
+            StudentGradeEnrollment.status == EnrollmentStatus.ACTIVE,
+        )
+    )
+    if grade_enrollment is None:
+        grade_enrollment = StudentGradeEnrollment(
+            student_id=profile.id,
+            academic_period_id=period.id,
+            period_grade_id=period_grade.id,
+            status=EnrollmentStatus.ACTIVE,
+        )
+        session.add(grade_enrollment)
+        session.flush()
+    if (
+        session.scalar(
+            select(StudentSubjectEnrollment).where(
+                StudentSubjectEnrollment.student_id == profile.id,
+                StudentSubjectEnrollment.grade_subject_offering_id == offering.id,
+                StudentSubjectEnrollment.status == EnrollmentStatus.ACTIVE,
             )
-            session.add(
-                QuizItem(
-                    quiz_version_id=quiz_version.id,
-                    question_version_id=version.id,
-                    sequence=question_data.number,
-                )
+        )
+        is None
+    ):
+        session.add(
+            StudentSubjectEnrollment(
+                student_id=profile.id,
+                grade_enrollment_id=grade_enrollment.id,
+                grade_subject_offering_id=offering.id,
+                status=EnrollmentStatus.ACTIVE,
             )
+        )
 
 
 def seed_approved_materials(
     session: Session,
     materials_dir: Path | None = None,
     *,
-    replace: bool = True,
+    replace: bool = False,
 ) -> list[str]:
     """Load markdown curriculum into the relational schema.
 
@@ -393,19 +756,13 @@ def seed_approved_materials(
 
     parent_topic = _ensure_curriculum_root(session)
 
-    if not replace:
-        existing = {
-            slug
-            for slug in session.scalars(
-                select(Subtopic.slug).where(Subtopic.topic_id == parent_topic.id)
-            ).all()
-        }
-        topic_ids = [topic_id for topic_id in topic_ids if topic_id not in existing]
-        if not topic_ids:
-            return []
+    if replace and _attempts_exist(session):
+        raise RuntimeError("Cannot destructively replace seeded content after attempts exist")
 
     for sequence, topic_id in enumerate(topic_ids, start=1):
         _seed_subtopic(session, parent_topic, topic_id, sequence, directory)
+    _seed_topic_mastery_quiz(session, parent_topic)
+    seed_demo_student(session)
 
     session.commit()
     return topic_ids
@@ -426,7 +783,7 @@ def main() -> None:
         cursor.close()
 
     with SyncSession(engine) as session:
-        seeded = seed_approved_materials(session, replace=True)
+        seeded = seed_approved_materials(session, replace=False)
     engine.dispose()
     print(f"Seeded topics: {', '.join(seeded) if seeded else '(none)'}")
 

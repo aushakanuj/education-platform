@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from uuid import UUID
 
 from fastapi import HTTPException, status
@@ -27,7 +28,23 @@ from education_platform.modules.academics.schemas import (
     GradeEnrollmentOut,
     SubjectEnrollmentOut,
 )
-from education_platform.modules.auth.models import Institution, InstitutionStatus
+from education_platform.modules.auth.models import (
+    Institution,
+    InstitutionStatus,
+    StudentProfile,
+    StudentProfileStatus,
+)
+
+
+@dataclass(frozen=True, slots=True)
+class AccessContext:
+    institution: Institution
+    period: AcademicPeriod
+    offering: GradeSubjectOffering
+    topic: Topic
+    subtopic: Subtopic | None
+    grade_enrollment: StudentGradeEnrollment | None
+    subject_enrollment: StudentSubjectEnrollment | None
 
 
 async def list_my_enrollments(session: AsyncSession, principal: Principal) -> EnrollmentSummary:
@@ -79,7 +96,11 @@ async def list_my_enrollments(session: AsyncSession, principal: Principal) -> En
         )
     ).all()
 
+    eligible = bool(grade_rows and subject_rows)
+    blocked_reason = None if eligible else "Active Grade 8 Mathematics enrollment required"
     return EnrollmentSummary(
+        eligible=eligible,
+        blocked_reason=blocked_reason,
         grade_enrollments=[
             GradeEnrollmentOut(
                 id=enrollment.id,
@@ -115,16 +136,17 @@ async def assert_can_access_subtopic(
     subtopic_id: UUID,
 ) -> None:
     """Enforce institution + active period + dual enrollment for students."""
-    if principal.is_administrator:
-        return
+    await resolve_subtopic_access(session, principal, subtopic_id)
 
-    subtopic = await session.get(Subtopic, subtopic_id)
-    if subtopic is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Topic not found")
 
+async def resolve_subtopic_access(
+    session: AsyncSession,
+    principal: Principal,
+    subtopic_id: UUID,
+) -> AccessContext:
     row = (
         await session.execute(
-            select(Topic, GradeSubjectOffering, PeriodGrade, AcademicPeriod, Institution)
+            select(Subtopic, Topic, GradeSubjectOffering, PeriodGrade, AcademicPeriod, Institution)
             .select_from(Subtopic)
             .join(Topic, Topic.id == Subtopic.topic_id)
             .join(
@@ -140,7 +162,102 @@ async def assert_can_access_subtopic(
     if row is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Topic not found")
 
-    _topic, offering, period_grade, period, institution = row
+    subtopic, topic, offering, period_grade, period, institution = row
+    return await _build_access_context(
+        session,
+        principal,
+        institution=institution,
+        period=period,
+        period_grade=period_grade,
+        offering=offering,
+        topic=topic,
+        subtopic=subtopic,
+    )
+
+
+async def resolve_topic_access(
+    session: AsyncSession,
+    principal: Principal,
+    topic_id: UUID,
+) -> AccessContext:
+    row = (
+        await session.execute(
+            select(Topic, GradeSubjectOffering, PeriodGrade, AcademicPeriod, Institution)
+            .select_from(Topic)
+            .join(
+                GradeSubjectOffering,
+                GradeSubjectOffering.id == Topic.grade_subject_offering_id,
+            )
+            .join(PeriodGrade, PeriodGrade.id == GradeSubjectOffering.period_grade_id)
+            .join(AcademicPeriod, AcademicPeriod.id == PeriodGrade.academic_period_id)
+            .join(Institution, Institution.id == AcademicPeriod.institution_id)
+            .where(Topic.id == topic_id)
+        )
+    ).one_or_none()
+    if row is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Topic not found")
+
+    topic, offering, period_grade, period, institution = row
+    return await _build_access_context(
+        session,
+        principal,
+        institution=institution,
+        period=period,
+        period_grade=period_grade,
+        offering=offering,
+        topic=topic,
+        subtopic=None,
+    )
+
+
+async def resolve_offering_access(
+    session: AsyncSession,
+    principal: Principal,
+    offering_id: UUID,
+) -> AccessContext:
+    row = (
+        await session.execute(
+            select(GradeSubjectOffering, PeriodGrade, AcademicPeriod, Institution)
+            .select_from(GradeSubjectOffering)
+            .join(PeriodGrade, PeriodGrade.id == GradeSubjectOffering.period_grade_id)
+            .join(AcademicPeriod, AcademicPeriod.id == PeriodGrade.academic_period_id)
+            .join(Institution, Institution.id == AcademicPeriod.institution_id)
+            .where(GradeSubjectOffering.id == offering_id)
+        )
+    ).one_or_none()
+    if row is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Offering not found")
+
+    offering, period_grade, period, institution = row
+    pseudo_topic = Topic(
+        grade_subject_offering_id=offering.id,
+        name="",
+        slug="",
+        sequence=0,
+    )
+    return await _build_access_context(
+        session,
+        principal,
+        institution=institution,
+        period=period,
+        period_grade=period_grade,
+        offering=offering,
+        topic=pseudo_topic,
+        subtopic=None,
+    )
+
+
+async def _build_access_context(
+    session: AsyncSession,
+    principal: Principal,
+    *,
+    institution: Institution,
+    period: AcademicPeriod,
+    period_grade: PeriodGrade,
+    offering: GradeSubjectOffering,
+    topic: Topic,
+    subtopic: Subtopic | None,
+) -> AccessContext:
     if institution.id != principal.institution_id:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Topic not found")
     if institution.status != InstitutionStatus.ACTIVE:
@@ -150,9 +267,29 @@ async def assert_can_access_subtopic(
             status_code=status.HTTP_403_FORBIDDEN, detail="Academic period inactive"
         )
 
+    if principal.is_administrator:
+        return AccessContext(
+            institution=institution,
+            period=period,
+            offering=offering,
+            topic=topic,
+            subtopic=subtopic,
+            grade_enrollment=None,
+            subject_enrollment=None,
+        )
+
     if not principal.is_student or principal.student_profile_id is None:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN, detail="Student enrollment required"
+        )
+    student = await session.get(StudentProfile, principal.student_profile_id)
+    if (
+        student is None
+        or student.institution_id != principal.institution_id
+        or student.status != StudentProfileStatus.ACTIVE
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN, detail="Active student profile required"
         )
 
     grade_enrollment = await session.scalar(
@@ -172,6 +309,7 @@ async def assert_can_access_subtopic(
     subject_enrollment = await session.scalar(
         select(StudentSubjectEnrollment).where(
             StudentSubjectEnrollment.student_id == principal.student_profile_id,
+            StudentSubjectEnrollment.grade_enrollment_id == grade_enrollment.id,
             StudentSubjectEnrollment.grade_subject_offering_id == offering.id,
             StudentSubjectEnrollment.status == EnrollmentStatus.ACTIVE,
         )
@@ -181,6 +319,15 @@ async def assert_can_access_subtopic(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Active subject enrollment required",
         )
+    return AccessContext(
+        institution=institution,
+        period=period,
+        offering=offering,
+        topic=topic,
+        subtopic=subtopic,
+        grade_enrollment=grade_enrollment,
+        subject_enrollment=subject_enrollment,
+    )
 
 
 async def enroll_student_in_poc_math(
@@ -201,6 +348,12 @@ async def enroll_student_in_poc_math(
     )
     if institution is None:
         raise HTTPException(status_code=404, detail="Seed curriculum first")
+    student = await session.get(StudentProfile, student_profile_id)
+    if student is None or student.institution_id != institution.id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Student must belong to the POC institution",
+        )
     period = await session.scalar(
         select(AcademicPeriod).where(
             AcademicPeriod.institution_id == institution.id,

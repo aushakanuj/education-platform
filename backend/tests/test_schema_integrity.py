@@ -74,9 +74,11 @@ def test_migration_creates_core_tables(migrated_db: object) -> None:
         "student_subject_enrollments",
         "source_materials",
         "source_material_versions",
+        "student_material_progress",
         "question_answer_keys",
         "quiz_attempts",
         "attempt_answers",
+        "quiz_releases",
     }:
         assert required in names
 
@@ -207,7 +209,9 @@ def test_one_published_material_version(db_session: Session) -> None:
     )
     db_session.add(topic)
     db_session.flush()
-    subtopic = Subtopic(topic_id=topic.id, name="Quadrilaterals", slug="quadrilaterals", sequence=1)
+    subtopic = Subtopic(
+        topic_id=topic.id, name="Quadrilaterals", slug="rectangles_squares_properties", sequence=1
+    )
     db_session.add(subtopic)
     db_session.flush()
     material = SourceMaterial(subtopic_id=subtopic.id, title="Lesson", slug="lesson")

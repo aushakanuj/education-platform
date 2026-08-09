@@ -30,6 +30,8 @@ class SubjectEnrollmentOut(BaseModel):
 
 
 class EnrollmentSummary(BaseModel):
+    eligible: bool = True
+    blocked_reason: str | None = None
     grade_enrollments: list[GradeEnrollmentOut]
     subject_enrollments: list[SubjectEnrollmentOut]
 
@@ -38,3 +40,15 @@ class EnrollMeRequest(BaseModel):
     """POC helper: enroll current student into seeded Grade 8 Mathematics."""
 
     confirm: bool = True
+
+
+class DemoBootstrapOut(BaseModel):
+    subject_id: UUID
+    topic_id: UUID
+    topic_title: str
+    message: str
+
+
+class DemoResetOut(BaseModel):
+    status: str
+    message: str

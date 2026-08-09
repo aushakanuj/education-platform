@@ -4,12 +4,13 @@ from __future__ import annotations
 
 import pytest
 from fastapi import HTTPException
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Session
 
 from education_platform.api.deps import Principal
 from education_platform.modules.academics.service import assert_can_access_subtopic
+from education_platform.modules.auth.models import Institution
 from education_platform.modules.auth.schemas import LoginRequest, ProvisionStudentRequest
 from education_platform.modules.auth.service import login, provision_student
 from education_platform.modules.materials.seed import seed_approved_materials
@@ -28,10 +29,12 @@ async def test_assert_access_admin_bypasses_enrollment(
     async_db_session: AsyncSession, migrated_db: object
 ) -> None:
     _seed(migrated_db)
-    subtopic = await get_subtopic_by_slug(async_db_session, "quadrilaterals")
+    subtopic = await get_subtopic_by_slug(async_db_session, "rectangles_squares_properties")
+    institution = await async_db_session.scalar(select(Institution))
+    assert institution is not None
     admin = Principal(
         user_id=subtopic.id,
-        institution_id=subtopic.id,
+        institution_id=institution.id,
         email="admin@example.com",
         roles=frozenset({"administrator"}),
         student_profile_id=None,

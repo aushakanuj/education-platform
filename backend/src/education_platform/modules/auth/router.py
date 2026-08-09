@@ -1,9 +1,10 @@
 """Auth HTTP routes."""
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from education_platform.api.deps import Principal, get_current_user
+from education_platform.core.config import Settings, get_settings
 from education_platform.db.session import get_session
 from education_platform.modules.auth import service
 from education_platform.modules.auth.schemas import (
@@ -46,7 +47,14 @@ async def read_me(
 
 @router.post("/provision-student", response_model=MeResponse)
 async def provision_student(
-    payload: ProvisionStudentRequest, session: AsyncSession = Depends(get_session)
+    payload: ProvisionStudentRequest,
+    session: AsyncSession = Depends(get_session),
+    settings: Settings = Depends(get_settings),
 ) -> MeResponse:
     """POC-only account provisioning until admin roster APIs exist."""
+    if not settings.is_development:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Development-only student provisioning disabled",
+        )
     return await service.provision_student(session, payload)

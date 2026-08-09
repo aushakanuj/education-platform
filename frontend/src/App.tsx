@@ -7,6 +7,7 @@ import { HomePage } from "./pages/HomePage";
 import { LessonPage } from "./pages/LessonPage";
 import { QuizPage } from "./pages/QuizPage";
 import { ResultPage } from "./pages/ResultPage";
+import { TopicPage } from "./pages/TopicPage";
 import { WelcomePage } from "./pages/WelcomePage";
 
 export function App() {
@@ -32,7 +33,27 @@ export function App() {
         }
       />
       <Route
-        path="/topics/:topicId"
+        path="/subjects/:subjectId"
+        element={
+          <RequireAuth>
+            <RequireEnrollment>
+              <HomePage />
+            </RequireEnrollment>
+          </RequireAuth>
+        }
+      />
+      <Route
+        path="/subjects/:subjectId/topics/:topicId"
+        element={
+          <RequireAuth>
+            <RequireEnrollment>
+              <TopicPage />
+            </RequireEnrollment>
+          </RequireAuth>
+        }
+      />
+      <Route
+        path="/subjects/:subjectId/topics/:topicId/subtopics/:subtopicId/lesson"
         element={
           <RequireAuth>
             <RequireEnrollment>
@@ -42,7 +63,7 @@ export function App() {
         }
       />
       <Route
-        path="/topics/:topicId/quiz"
+        path="/quizzes/:quizId"
         element={
           <RequireAuth>
             <RequireEnrollment>

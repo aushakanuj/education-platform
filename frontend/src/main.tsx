@@ -4,7 +4,9 @@ import { BrowserRouter } from "react-router-dom";
 
 import { App } from "./App";
 import { AuthProvider } from "./auth/AuthContext";
+import "./styles/tokens.css";
 import "./styles/app.css";
+import "katex/dist/katex.min.css";
 
 const root = document.getElementById("root");
 if (!root) {

@@ -1,14 +1,21 @@
 import { apiRequest } from "./client";
 import type {
+  AttemptHistoryItem,
   AttemptResult,
   StartAttemptResponse,
   SubmitAttemptRequest,
 } from "./types";
 
-export async function startAttempt(topicId: string): Promise<StartAttemptResponse> {
+export async function startAttempt(quizId: string): Promise<StartAttemptResponse> {
   return apiRequest<StartAttemptResponse>(
-    `/quizzes/${encodeURIComponent(topicId)}/attempts`,
+    `/quizzes/${encodeURIComponent(quizId)}/attempts`,
     { method: "POST" },
+  );
+}
+
+export async function listQuizAttempts(quizId: string): Promise<AttemptHistoryItem[]> {
+  return apiRequest<AttemptHistoryItem[]>(
+    `/quizzes/${encodeURIComponent(quizId)}/attempts`,
   );
 }
 

@@ -7,6 +7,7 @@ from collections.abc import AsyncIterator, Iterator
 from pathlib import Path
 
 import pytest
+import pytest_asyncio
 from alembic import command
 from alembic.config import Config
 from fastapi.testclient import TestClient
@@ -62,7 +63,7 @@ def migrated_db(sqlite_path: Path) -> Iterator[Path]:
         tables = conn.execute(
             text("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name")
         ).fetchall()
-        assert len(tables) >= 32
+        assert len(tables) >= 33
 
     sync_engine.dispose()
     yield sqlite_path
@@ -97,12 +98,12 @@ def db_session(migrated_db: Path) -> Iterator[Session]:
 @pytest.fixture()
 def seeded_db(db_session: Session) -> Session:
     seeded = seed_approved_materials(db_session, MATERIALS_DIR, replace=True)
-    assert "quadrilaterals" in seeded
-    assert "squares_cubes_roots" in seeded
+    assert "rectangles_squares_properties" in seeded
+    assert "square_numbers_patterns" in seeded
     return db_session
 
 
-@pytest.fixture()
+@pytest_asyncio.fixture()
 async def async_db_session(migrated_db: Path) -> AsyncIterator[AsyncSession]:
     engine = create_async_engine(f"sqlite+aiosqlite:///{migrated_db}")
 

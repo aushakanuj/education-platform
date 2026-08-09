@@ -8,14 +8,23 @@ from uuid import UUID
 
 from pydantic import BaseModel, Field
 
+from education_platform.modules.materials.schemas import QuizQuestion
+
 
 class StartAttemptResponse(BaseModel):
     id: UUID
-    topic_id: str
+    quiz_id: UUID
     quiz_version_id: UUID
     attempt_number: int
     status: str
     started_at: datetime | None
+    deadline_at: datetime | None
+    pass_threshold_percent: Decimal
+    result_release_mode: str
+    questions: list[QuizQuestion]
+    title: str
+    scope: str
+    target_id: UUID
 
 
 class AnswerSubmission(BaseModel):
@@ -36,13 +45,18 @@ class AttemptAnswerOut(BaseModel):
 
 class AttemptResult(BaseModel):
     id: UUID
-    topic_id: str
+    quiz_id: UUID
+    target_id: UUID | None = None
+    scope: str | None = None
     attempt_number: int
     status: str
     started_at: datetime | None
+    deadline_at: datetime | None = None
     submitted_at: datetime | None
     scored_at: datetime | None
     score_raw: Decimal | None
     score_percent: Decimal | None
+    pass_threshold_percent: Decimal | None = None
     passed: bool | None
+    review_available: bool = True
     answers: list[AttemptAnswerOut] = Field(default_factory=list)

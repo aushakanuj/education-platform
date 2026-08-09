@@ -33,6 +33,12 @@ class Settings(BaseSettings):
     access_token_minutes: int = 60
     refresh_token_days: int = 14
     mastery_pass_percent: float = 70.0
+    demo_student_email: str = "student@demo.school"
+    demo_student_password: str = "demo1234"
+
+    @property
+    def is_development(self) -> bool:
+        return self.environment.lower() == "development"
 
 
 @lru_cache

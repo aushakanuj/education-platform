@@ -1,38 +1,42 @@
 import { useEffect, useState } from "react";
-import { Link, useLocation, useParams } from "react-router-dom";
+import { Link, useLocation, useNavigate, useParams } from "react-router-dom";
 
 import { getAttempt } from "../api/attempts";
+import { fetchLearningDirectory } from "../api/materials";
 import type { AttemptResult } from "../api/types";
 import { ApiError } from "../api/types";
 import { AppShell } from "../components/AppShell";
+import { ConfirmDialog } from "../components/ConfirmDialog";
+import { Crumbs } from "../components/Crumbs";
 import { PushButton } from "../components/PushButton";
-import { StudyBuddy } from "../components/StudyBuddy";
+import { resolvePathFromAttempt, type LearningPath } from "../lib/learningPath";
 
 export function ResultPage() {
   const { attemptId = "" } = useParams();
   const location = useLocation();
-  const fromState = (location.state as { result?: AttemptResult } | null)?.result;
+  const navigate = useNavigate();
+  const state = location.state as { result?: AttemptResult; path?: LearningPath } | null;
+  const fromState = state?.result;
   const [result, setResult] = useState<AttemptResult | null>(fromState ?? null);
+  const [path, setPath] = useState<LearningPath | null>(state?.path ?? null);
   const [error, setError] = useState<string | null>(null);
-  const [burst, setBurst] = useState(false);
+  const [showUnlockDialog, setShowUnlockDialog] = useState(false);
 
   useEffect(() => {
-    if (fromState) {
-      if (fromState.passed) {
-        setBurst(true);
-      }
-      return;
-    }
     let cancelled = false;
     void (async () => {
       try {
-        const data = await getAttempt(attemptId);
-        if (!cancelled) {
-          setResult(data);
-          if (data.passed) {
-            setBurst(true);
-          }
-        }
+        const data = fromState ?? (await getAttempt(attemptId));
+        const directory = await fetchLearningDirectory();
+        if (cancelled) return;
+        setResult(data);
+        const resolved = resolvePathFromAttempt(directory, data);
+        setPath(resolved);
+        const unlockedNow =
+          data.scope === "subtopic_mastery" &&
+          Boolean(data.passed) &&
+          Boolean(resolved?.overallUnlocked);
+        setShowUnlockDialog(unlockedNow);
       } catch (err) {
         if (!cancelled) {
           setError(err instanceof ApiError ? err.message : "Could not load result.");
@@ -48,9 +52,21 @@ export function ResultPage() {
     result?.score_percent === null || result?.score_percent === undefined
       ? null
       : Number(result.score_percent);
+  const passMark =
+    result?.pass_threshold_percent == null
+      ? 70
+      : Math.round(Number(result.pass_threshold_percent));
+  const held = result != null && !result.review_available;
+  const topicPath = path?.topicPath ?? "/";
+  const rawScore =
+    result?.score_raw == null
+      ? null
+      : typeof result.score_raw === "string"
+        ? result.score_raw
+        : String(result.score_raw);
 
   return (
-    <AppShell>
+    <AppShell topicTitle={path?.topicTitle}>
       {!result && !error && (
         <div className="center-state" role="status">
           Loading result…
@@ -63,78 +79,121 @@ export function ResultPage() {
             {error}
           </p>
           <Link to="/">
-            <PushButton variant="soft">Back to topics</PushButton>
+            <PushButton variant="soft">Back to subjects</PushButton>
           </Link>
         </div>
       )}
 
       {result && (
         <div>
+          {path && (
+            <>
+              <Crumbs
+                parts={[
+                  { label: "Subjects", to: "/" },
+                  { label: path.subjectName, to: `/subjects/${path.subjectId}` },
+                  { label: path.topicTitle, to: path.topicPath },
+                  { label: "Result" },
+                ]}
+              />
+              <div className="back-row">
+                <Link to={path.topicPath} className="btn btn--outline btn--sm">
+                  ← Back to topic
+                </Link>
+              </div>
+            </>
+          )}
+
           <header className="page-head">
-            <div>
-              <p className="muted" style={{ fontFamily: "var(--font-mono)", fontSize: "var(--text-xs)" }}>
-                4.0 Result · Attempt {result.attempt_number}
-              </p>
-              <h1 className="page-head__title">Your score</h1>
-            </div>
-            <StudyBuddy size="lg" />
+            <p className="kicker">
+              Result · Attempt {result.attempt_number}
+              {result.scope === "topic_mastery" ? " · overall quiz" : ""}
+            </p>
+            <h1>{held ? "Result pending release" : "Your score"}</h1>
           </header>
 
-          <div className={`score-hero ${result.passed ? "is-pass" : ""}`}>
-            {burst && result.passed && (
-              <span
-                className="star-burst"
-                style={{ left: "2rem", top: "2rem" }}
-                onAnimationEnd={() => setBurst(false)}
-              />
-            )}
-            <div className="score-hero__value">
-              {percent === null ? "—" : `${Math.round(percent)}%`}
+          {held ? (
+            <div className="alert alert--info" role="status">
+              Your answers were submitted. Scores stay hidden until the teacher releases results.
             </div>
-            <p className="score-hero__status">
-              {result.passed ? "Passed — nice work." : "Not yet — review the lesson and try again."}
-            </p>
-            <p className="muted">
-              Raw score {result.score_raw ?? "—"} · Pass mark 70%
-            </p>
-          </div>
+          ) : (
+            <div className={`score-hero ${result.passed ? "is-pass" : ""}`}>
+              <p className="score-hero__value">
+                {percent === null ? "—" : `${Math.round(percent)}%`}
+              </p>
+              <p className="score-hero__status">
+                {result.passed
+                  ? "Passed — nice work."
+                  : "Not yet — review the lesson and try again."}
+              </p>
+              <p className="score-hero__meta">
+                Raw {rawScore ?? "—"} · Pass mark {passMark}%
+              </p>
+            </div>
+          )}
 
-          <h2 style={{ fontSize: "var(--text-xl)", marginBottom: "var(--space-md)" }}>
-            Question review
-          </h2>
-          <p className="muted" style={{ marginBottom: "var(--space-md)" }}>
-            Correct answers stay hidden. You only see which ones you got right.
-          </p>
+          {!held && path?.overallUnlocked && result.scope === "subtopic_mastery" && result.passed && (
+            <div className="alert alert--success">
+              All subtopic quizzes passed. The overall topic quiz is now unlocked.
+            </div>
+          )}
+          {!held && path?.topicComplete && (
+            <div className="alert alert--success">
+              Topic complete — every subtopic and the overall quiz are passed.
+            </div>
+          )}
 
-          <div className="answer-review">
-            {result.answers.map((a) => (
-              <div
-                key={a.question_number}
-                className={`answer-row ${a.is_correct ? "is-correct" : "is-wrong"}`}
-              >
-                <span className="answer-row__num">Q{a.question_number}</span>
-                <span>
-                  You chose <strong>{a.selected_option_label ?? "—"}</strong>
-                </span>
-                <span className="answer-row__mark">
-                  {a.is_correct ? "Correct" : "Incorrect"}
-                </span>
+          {result.review_available && result.answers.length > 0 && (
+            <>
+              <h2 className="section-title">Question review</h2>
+              <p className="muted" style={{ marginBottom: "0.75rem", fontSize: "0.95rem" }}>
+                Correct answer keys stay hidden. You only see which items you got right.
+              </p>
+              <div className="answer-review">
+                {result.answers.map((a) => (
+                  <div
+                    key={a.question_number}
+                    className={`answer-row ${a.is_correct ? "is-correct" : "is-wrong"}`}
+                  >
+                    <span className="answer-row__num">Q{a.question_number}</span>
+                    <span>
+                      You chose <strong>{a.selected_option_label ?? "—"}</strong>
+                    </span>
+                    <span className="answer-row__mark">
+                      {a.is_correct ? "Correct" : "Incorrect"}
+                    </span>
+                  </div>
+                ))}
               </div>
-            ))}
-          </div>
+            </>
+          )}
 
-          <div className="form__actions" style={{ marginTop: "var(--space-xl)" }}>
-            <Link to={`/topics/${result.topic_id}`}>
-              <PushButton variant="soft">Review lesson</PushButton>
-            </Link>
-            <Link to="/">
-              <PushButton color="pear">
-                Back to topics <span className="btn__arrow">→</span>
-              </PushButton>
+          <div className="actions">
+            {result.scope === "subtopic_mastery" && path?.lessonPath && (
+              <Link to={path.lessonPath} className="btn btn--soft">
+                Review lesson
+              </Link>
+            )}
+            <Link to={`/quizzes/${result.quiz_id}`} className="btn btn--outline">
+              Retake quiz
             </Link>
           </div>
         </div>
       )}
+
+      <ConfirmDialog
+        open={showUnlockDialog}
+        title="Overall quiz unlocked"
+        body="You finished every subtopic quiz. Take the overall topic quiz when you are ready."
+        onDismiss={() => setShowUnlockDialog(false)}
+        actions={[
+          { label: "Stay here", variant: "soft" },
+          {
+            label: "Go to topic",
+            onClick: () => navigate(topicPath),
+          },
+        ]}
+      />
     </AppShell>
   );
 }

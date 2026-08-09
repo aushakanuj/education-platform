@@ -1,0 +1,1846 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="academic-slate" data-fonts="source-ibm" data-mode="light">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Education Platform UI Mood Board</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link
+    href="https://fonts.googleapis.com/css2?family=Atkinson+Hyperlegible:ital,wght@0,400;0,700;1,400&family=Fraunces:opsz,wght@9..144,500;9..144,700&family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600;700&family=Literata:opsz,wght@7..72,400;7..72,600;7..72,700&family=Manrope:wght@400;500;600;700&family=Newsreader:opsz,wght@6..72,400;6..72,600;6..72,700&family=Nunito+Sans:opsz,wght@6..12,400;6..12,600;6..12,700&family=Source+Sans+3:wght@400;500;600;700&family=Source+Serif+4:opsz,wght@8..60,500;8..60,700&family=Space+Grotesk:wght@400;500;600;700&display=swap"
+    rel="stylesheet"
+  />
+  <style>
+    /* —— Shell chrome (fixed; not theme-bound) —— */
+    :root {
+      --shell-bg: #f4f4f2;
+      --shell-ink: #1c1c1a;
+      --shell-muted: #5f5f59;
+      --shell-border: #d8d8d2;
+      --shell-panel: #ffffff;
+      --shell-accent: #334155;
+      --control-h: 4.5rem;
+    }
+
+    *,
+    *::before,
+    *::after {
+      box-sizing: border-box;
+    }
+
+    html {
+      scroll-behavior: smooth;
+    }
+
+    body {
+      margin: 0;
+      font-family: ui-sans-serif, system-ui, sans-serif;
+      background: var(--shell-bg);
+      color: var(--shell-ink);
+      line-height: 1.5;
+      -webkit-font-smoothing: antialiased;
+    }
+
+    a {
+      color: inherit;
+    }
+
+    button,
+    select,
+    input {
+      font: inherit;
+    }
+
+    /* —— Theme tokens (applied to preview surface) —— */
+    .preview[data-theme="academic-slate"] {
+      --bg: #f8fafc;
+      --surface: #ffffff;
+      --surface-2: #f1f5f9;
+      --ink: #0f172a;
+      --ink-muted: #64748b;
+      --border: #e2e8f0;
+      --accent: #4f46e5;
+      --accent-hover: #4338ca;
+      --accent-ink: #ffffff;
+      --accent-soft: #eef2ff;
+      --success: #059669;
+      --success-bg: #ecfdf5;
+      --success-border: #6ee7b7;
+      --danger: #dc2626;
+      --danger-bg: #fef2f2;
+      --danger-border: #fca5a5;
+      --warning: #d97706;
+      --warning-bg: #fffbeb;
+      --warning-border: #fcd34d;
+      --focus: #4f46e5;
+      --shadow: 0 8px 24px -12px rgb(15 23 42 / 0.18);
+      --radius: 12px;
+      --radius-sm: 8px;
+      --radius-pill: 999px;
+      --theme-label: "Academic Slate";
+      --theme-blurb: "Docs-platform calm. Indigo signal on slate neutrals — closest to the research dashboard.";
+    }
+
+    .preview[data-theme="modern-classroom"] {
+      --bg: #f0f7ff;
+      --surface: #ffffff;
+      --surface-2: #e8f1fc;
+      --ink: #0b1f33;
+      --ink-muted: #4a6680;
+      --border: #c9daf0;
+      --accent: #0284c7;
+      --accent-hover: #0369a1;
+      --accent-ink: #ffffff;
+      --accent-soft: #e0f2fe;
+      --success: #0d9488;
+      --success-bg: #f0fdfa;
+      --success-border: #5eead4;
+      --danger: #e11d48;
+      --danger-bg: #fff1f2;
+      --danger-border: #fda4af;
+      --warning: #ea580c;
+      --warning-bg: #fff7ed;
+      --warning-border: #fdba74;
+      --focus: #0284c7;
+      --shadow: 0 10px 28px -14px rgb(2 132 199 / 0.28);
+      --radius: 16px;
+      --radius-sm: 10px;
+      --radius-pill: 999px;
+      --theme-label: "Modern Classroom";
+      --theme-blurb: "Bright learning UI. Cyan/sky accents, soft cards — good for enroll → study → quiz flow.";
+    }
+
+    .preview[data-theme="warm-editorial"] {
+      --bg: #f7f1e8;
+      --surface: #fffdf9;
+      --surface-2: #f0e6d8;
+      --ink: #2a2118;
+      --ink-muted: #7a6a58;
+      --border: #e2d4c2;
+      --accent: #b45309;
+      --accent-hover: #92400e;
+      --accent-ink: #fffdf9;
+      --accent-soft: #ffedd5;
+      --success: #3f6212;
+      --success-bg: #f7fee7;
+      --success-border: #bef264;
+      --danger: #b91c1c;
+      --danger-bg: #fef2f2;
+      --danger-border: #fca5a5;
+      --warning: #a16207;
+      --warning-bg: #fefce8;
+      --warning-border: #fde047;
+      --focus: #b45309;
+      --shadow: 0 10px 30px -16px rgb(42 33 24 / 0.22);
+      --radius: 10px;
+      --radius-sm: 6px;
+      --radius-pill: 999px;
+      --theme-label: "Warm Editorial";
+      --theme-blurb: "Bookish lesson reading. Amber ink on cream paper — favors long-form study over dashboards.";
+    }
+
+    .preview[data-theme="calm-humanist"] {
+      --bg: #f4f6f3;
+      --surface: #ffffff;
+      --surface-2: #e9eee8;
+      --ink: #1c2a22;
+      --ink-muted: #5d6f64;
+      --border: #d5ddd6;
+      --accent: #3f6f5a;
+      --accent-hover: #2f5645;
+      --accent-ink: #ffffff;
+      --accent-soft: #e7f0eb;
+      --success: #15803d;
+      --success-bg: #f0fdf4;
+      --success-border: #86efac;
+      --danger: #b91c1c;
+      --danger-bg: #fef2f2;
+      --danger-border: #fca5a5;
+      --warning: #a16207;
+      --warning-bg: #fefce8;
+      --warning-border: #fde68a;
+      --focus: #3f6f5a;
+      --shadow: 0 8px 22px -14px rgb(28 42 34 / 0.2);
+      --radius: 14px;
+      --radius-sm: 9px;
+      --radius-pill: 999px;
+      --theme-label: "Calm Humanist";
+      --theme-blurb: "Soft green restraint. Quiet surfaces, rounded controls — low cognitive noise for Grade 8 learners.";
+    }
+
+    .preview[data-theme="accessible-focus"] {
+      --bg: #ffffff;
+      --surface: #ffffff;
+      --surface-2: #f3f4f6;
+      --ink: #111827;
+      --ink-muted: #4b5563;
+      --border: #9ca3af;
+      --accent: #1d4ed8;
+      --accent-hover: #1e40af;
+      --accent-ink: #ffffff;
+      --accent-soft: #dbeafe;
+      --success: #166534;
+      --success-bg: #dcfce7;
+      --success-border: #166534;
+      --danger: #991b1b;
+      --danger-bg: #fee2e2;
+      --danger-border: #991b1b;
+      --warning: #92400e;
+      --warning-bg: #ffedd5;
+      --warning-border: #92400e;
+      --focus: #111827;
+      --shadow: none;
+      --radius: 4px;
+      --radius-sm: 2px;
+      --radius-pill: 4px;
+      --theme-label: "Accessible Focus";
+      --theme-blurb: "High-contrast, thick borders, strong focus rings. Prioritizes WCAG clarity over decoration.";
+    }
+
+    /* Dark mode overrides (where themes support it) */
+    .preview[data-mode="dark"][data-theme="academic-slate"] {
+      --bg: #0b1220;
+      --surface: #111827;
+      --surface-2: #1e293b;
+      --ink: #e2e8f0;
+      --ink-muted: #94a3b8;
+      --border: #334155;
+      --accent: #818cf8;
+      --accent-hover: #a5b4fc;
+      --accent-ink: #0f172a;
+      --accent-soft: #1e1b4b;
+      --success: #34d399;
+      --success-bg: #064e3b;
+      --success-border: #059669;
+      --danger: #f87171;
+      --danger-bg: #450a0a;
+      --danger-border: #dc2626;
+      --warning: #fbbf24;
+      --warning-bg: #451a03;
+      --warning-border: #d97706;
+      --focus: #a5b4fc;
+      --shadow: 0 12px 32px -16px rgb(0 0 0 / 0.55);
+    }
+
+    .preview[data-mode="dark"][data-theme="modern-classroom"] {
+      --bg: #07111d;
+      --surface: #0c1a2b;
+      --surface-2: #13263d;
+      --ink: #e8f1fc;
+      --ink-muted: #8eabc6;
+      --border: #25405c;
+      --accent: #38bdf8;
+      --accent-hover: #7dd3fc;
+      --accent-ink: #0b1f33;
+      --accent-soft: #0c4a6e;
+      --success: #2dd4bf;
+      --success-bg: #134e4a;
+      --success-border: #0f766e;
+      --danger: #fb7185;
+      --danger-bg: #4c0519;
+      --danger-border: #e11d48;
+      --warning: #fb923c;
+      --warning-bg: #431407;
+      --warning-border: #ea580c;
+      --focus: #7dd3fc;
+      --shadow: 0 12px 32px -16px rgb(0 0 0 / 0.55);
+    }
+
+    .preview[data-mode="dark"][data-theme="warm-editorial"] {
+      --bg: #1a1510;
+      --surface: #241e17;
+      --surface-2: #32291f;
+      --ink: #f5ebe0;
+      --ink-muted: #b6a48f;
+      --border: #4a3d30;
+      --accent: #f59e0b;
+      --accent-hover: #fbbf24;
+      --accent-ink: #1a1510;
+      --accent-soft: #451a03;
+      --success: #a3e635;
+      --success-bg: #1a2e05;
+      --success-border: #65a30d;
+      --danger: #f87171;
+      --danger-bg: #450a0a;
+      --danger-border: #dc2626;
+      --warning: #facc15;
+      --warning-bg: #422006;
+      --warning-border: #ca8a04;
+      --focus: #fbbf24;
+      --shadow: 0 12px 32px -16px rgb(0 0 0 / 0.55);
+    }
+
+    .preview[data-mode="dark"][data-theme="calm-humanist"] {
+      --bg: #121916;
+      --surface: #1a231e;
+      --surface-2: #25312a;
+      --ink: #e6eee8;
+      --ink-muted: #9bb0a3;
+      --border: #3a4a40;
+      --accent: #6f9f87;
+      --accent-hover: #8fb9a4;
+      --accent-ink: #0f1713;
+      --accent-soft: #1f3329;
+      --success: #4ade80;
+      --success-bg: #14532d;
+      --success-border: #16a34a;
+      --danger: #f87171;
+      --danger-bg: #450a0a;
+      --danger-border: #dc2626;
+      --warning: #fbbf24;
+      --warning-bg: #422006;
+      --warning-border: #ca8a04;
+      --focus: #8fb9a4;
+      --shadow: 0 12px 32px -16px rgb(0 0 0 / 0.55);
+    }
+
+    .preview[data-mode="dark"][data-theme="accessible-focus"] {
+      --bg: #000000;
+      --surface: #000000;
+      --surface-2: #111111;
+      --ink: #ffffff;
+      --ink-muted: #d1d5db;
+      --border: #ffffff;
+      --accent: #93c5fd;
+      --accent-hover: #bfdbfe;
+      --accent-ink: #000000;
+      --accent-soft: #1e3a8a;
+      --success: #86efac;
+      --success-bg: #052e16;
+      --success-border: #86efac;
+      --danger: #fca5a5;
+      --danger-bg: #450a0a;
+      --danger-border: #fca5a5;
+      --warning: #fde68a;
+      --warning-bg: #422006;
+      --warning-border: #fde68a;
+      --focus: #ffffff;
+      --shadow: none;
+    }
+
+    /* Font pairings */
+    .preview[data-fonts="source-ibm"] {
+      --font-display: "Source Sans 3", ui-sans-serif, sans-serif;
+      --font-body: "Source Sans 3", ui-sans-serif, sans-serif;
+      --font-mono: "IBM Plex Mono", ui-monospace, monospace;
+      --fonts-label: "Source Sans 3 + IBM Plex Mono";
+    }
+
+    .preview[data-fonts="fraunces-manrope"] {
+      --font-display: "Fraunces", Georgia, serif;
+      --font-body: "Manrope", ui-sans-serif, sans-serif;
+      --font-mono: "IBM Plex Mono", ui-monospace, monospace;
+      --fonts-label: "Fraunces + Manrope";
+    }
+
+    .preview[data-fonts="literata-plex"] {
+      --font-display: "Literata", Georgia, serif;
+      --font-body: "IBM Plex Sans", ui-sans-serif, sans-serif;
+      --font-mono: "IBM Plex Mono", ui-monospace, monospace;
+      --fonts-label: "Literata + IBM Plex Sans";
+    }
+
+    .preview[data-fonts="space-nunito"] {
+      --font-display: "Space Grotesk", ui-sans-serif, sans-serif;
+      --font-body: "Nunito Sans", ui-sans-serif, sans-serif;
+      --font-mono: "IBM Plex Mono", ui-monospace, monospace;
+      --fonts-label: "Space Grotesk + Nunito Sans";
+    }
+
+    .preview[data-fonts="newsreader-atkinson"] {
+      --font-display: "Newsreader", Georgia, serif;
+      --font-body: "Atkinson Hyperlegible", ui-sans-serif, sans-serif;
+      --font-mono: "IBM Plex Mono", ui-monospace, monospace;
+      --fonts-label: "Newsreader + Atkinson Hyperlegible";
+    }
+
+    .preview[data-fonts="serif4-source"] {
+      --font-display: "Source Serif 4", Georgia, serif;
+      --font-body: "Source Sans 3", ui-sans-serif, sans-serif;
+      --font-mono: "IBM Plex Mono", ui-monospace, monospace;
+      --fonts-label: "Source Serif 4 + Source Sans 3";
+    }
+
+    /* —— Control bar —— */
+    .controls {
+      position: sticky;
+      top: 0;
+      z-index: 40;
+      background: color-mix(in srgb, var(--shell-panel) 92%, transparent);
+      backdrop-filter: blur(10px);
+      border-bottom: 1px solid var(--shell-border);
+      padding: 0.75rem 1rem;
+    }
+
+    .controls__inner {
+      max-width: 72rem;
+      margin: 0 auto;
+      display: grid;
+      gap: 0.75rem;
+      grid-template-columns: 1fr;
+      align-items: end;
+    }
+
+    @media (min-width: 900px) {
+      .controls__inner {
+        grid-template-columns: 1.4fr 1.1fr auto auto;
+        align-items: end;
+      }
+    }
+
+    .control-group {
+      display: grid;
+      gap: 0.35rem;
+    }
+
+    .control-group label {
+      font-size: 0.7rem;
+      font-weight: 700;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+      color: var(--shell-muted);
+    }
+
+    .control-group select,
+    .mode-toggle,
+    .reset-btn {
+      height: 2.5rem;
+      border: 1px solid var(--shell-border);
+      border-radius: 8px;
+      background: var(--shell-panel);
+      color: var(--shell-ink);
+      padding: 0 0.75rem;
+    }
+
+    .control-group select:focus-visible,
+    .mode-toggle:focus-visible,
+    .reset-btn:focus-visible,
+    .nav a:focus-visible {
+      outline: 2px solid var(--shell-accent);
+      outline-offset: 2px;
+    }
+
+    .mode-toggle,
+    .reset-btn {
+      cursor: pointer;
+      font-weight: 600;
+      font-size: 0.875rem;
+    }
+
+    .reset-btn {
+      background: var(--shell-ink);
+      color: #fff;
+      border-color: var(--shell-ink);
+    }
+
+    .mode-row {
+      display: flex;
+      gap: 0.5rem;
+    }
+
+    /* —— Page chrome —— */
+    .page {
+      max-width: 72rem;
+      margin: 0 auto;
+      padding: 1.5rem 1rem 4rem;
+    }
+
+    .hero {
+      margin-bottom: 1.5rem;
+    }
+
+    .hero h1 {
+      margin: 0 0 0.5rem;
+      font-size: clamp(1.6rem, 2vw + 1rem, 2.25rem);
+      letter-spacing: -0.03em;
+    }
+
+    .hero p {
+      margin: 0;
+      max-width: 62ch;
+      color: var(--shell-muted);
+    }
+
+    .nav {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.5rem;
+      margin: 1rem 0 1.5rem;
+    }
+
+    .nav a {
+      text-decoration: none;
+      font-size: 0.8rem;
+      font-weight: 600;
+      padding: 0.4rem 0.7rem;
+      border-radius: 999px;
+      border: 1px solid var(--shell-border);
+      background: var(--shell-panel);
+      color: var(--shell-muted);
+    }
+
+    .nav a:hover {
+      color: var(--shell-ink);
+    }
+
+    .section {
+      margin-bottom: 2rem;
+    }
+
+    .section__title {
+      margin: 0 0 0.35rem;
+      font-size: 1.15rem;
+      letter-spacing: -0.02em;
+    }
+
+    .section__lede {
+      margin: 0 0 1rem;
+      color: var(--shell-muted);
+      font-size: 0.95rem;
+      max-width: 70ch;
+    }
+
+    .note {
+      font-size: 0.85rem;
+      color: var(--shell-muted);
+      border-left: 3px solid var(--shell-border);
+      padding-left: 0.75rem;
+      margin: 0.75rem 0 0;
+    }
+
+    /* —— Preview surface —— */
+    .preview {
+      background: var(--bg);
+      color: var(--ink);
+      border: 1px solid var(--shell-border);
+      border-radius: 16px;
+      overflow: hidden;
+      font-family: var(--font-body);
+      box-shadow: 0 16px 40px -28px rgb(0 0 0 / 0.35);
+    }
+
+    .preview__banner {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.75rem 1.25rem;
+      justify-content: space-between;
+      align-items: baseline;
+      padding: 1rem 1.25rem;
+      border-bottom: 1px solid var(--border);
+      background: var(--surface);
+    }
+
+    .preview__banner h2 {
+      margin: 0;
+      font-family: var(--font-display);
+      font-size: 1.1rem;
+    }
+
+    .preview__banner p {
+      margin: 0.25rem 0 0;
+      color: var(--ink-muted);
+      font-size: 0.85rem;
+      max-width: 52ch;
+    }
+
+    .preview__meta {
+      font-family: var(--font-mono);
+      font-size: 0.72rem;
+      color: var(--ink-muted);
+    }
+
+    .preview__body {
+      padding: 1.25rem;
+      display: grid;
+      gap: 1.75rem;
+    }
+
+    .preview h3.block-title {
+      margin: 0 0 0.75rem;
+      font-family: var(--font-display);
+      font-size: 0.95rem;
+      font-weight: 700;
+      letter-spacing: 0.02em;
+      text-transform: uppercase;
+      color: var(--ink-muted);
+    }
+
+    /* Palette */
+    .swatches {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(7.5rem, 1fr));
+      gap: 0.65rem;
+    }
+
+    .swatch {
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+      overflow: hidden;
+      background: var(--surface);
+    }
+
+    .swatch__chip {
+      height: 3rem;
+    }
+
+    .swatch__meta {
+      padding: 0.45rem 0.55rem;
+      font-size: 0.72rem;
+    }
+
+    .swatch__meta strong {
+      display: block;
+      font-size: 0.78rem;
+    }
+
+    .swatch__meta code {
+      font-family: var(--font-mono);
+      color: var(--ink-muted);
+      font-size: 0.68rem;
+    }
+
+    /* Type scale */
+    .type-scale {
+      display: grid;
+      gap: 0.85rem;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 1rem;
+    }
+
+    .type-row {
+      display: grid;
+      grid-template-columns: 7rem 1fr;
+      gap: 0.75rem;
+      align-items: baseline;
+      border-bottom: 1px dashed var(--border);
+      padding-bottom: 0.75rem;
+    }
+
+    .type-row:last-child {
+      border-bottom: 0;
+      padding-bottom: 0;
+    }
+
+    .type-row__token {
+      font-family: var(--font-mono);
+      font-size: 0.7rem;
+      color: var(--ink-muted);
+    }
+
+    .type-h1 {
+      font-family: var(--font-display);
+      font-size: 2rem;
+      font-weight: 700;
+      line-height: 1.25;
+      letter-spacing: -0.03em;
+      margin: 0;
+    }
+
+    .type-h2 {
+      font-family: var(--font-display);
+      font-size: 1.5rem;
+      font-weight: 600;
+      line-height: 1.3;
+      margin: 0;
+    }
+
+    .type-h3 {
+      font-family: var(--font-display);
+      font-size: 1.15rem;
+      font-weight: 500;
+      line-height: 1.4;
+      margin: 0;
+    }
+
+    .type-body {
+      font-size: 1.0625rem;
+      line-height: 1.65;
+      max-width: 65ch;
+      margin: 0;
+    }
+
+    .type-quiz {
+      font-size: 1.125rem;
+      font-weight: 600;
+      line-height: 1.4;
+      margin: 0;
+    }
+
+    .type-meta {
+      font-family: var(--font-mono);
+      font-size: 0.75rem;
+      color: var(--ink-muted);
+      margin: 0;
+    }
+
+    /* Specimens grid */
+    .spec-grid {
+      display: grid;
+      gap: 1rem;
+    }
+
+    @media (min-width: 860px) {
+      .spec-grid--2 {
+        grid-template-columns: 15rem 1fr;
+      }
+
+      .spec-grid--cards {
+        grid-template-columns: 1fr 1fr;
+      }
+
+      .spec-grid--3 {
+        grid-template-columns: repeat(3, 1fr);
+      }
+    }
+
+    /* App shell specimen */
+    .mini-shell {
+      display: grid;
+      grid-template-columns: 1fr;
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      overflow: hidden;
+      background: var(--bg);
+      min-height: 18rem;
+    }
+
+    @media (min-width: 700px) {
+      .mini-shell {
+        grid-template-columns: 12rem 1fr;
+      }
+    }
+
+    .mini-rail {
+      background: var(--surface);
+      border-bottom: 1px solid var(--border);
+      padding: 0.9rem;
+      display: grid;
+      gap: 0.45rem;
+      align-content: start;
+    }
+
+    @media (min-width: 700px) {
+      .mini-rail {
+        border-bottom: 0;
+        border-right: 1px solid var(--border);
+      }
+    }
+
+    .mini-brand {
+      font-family: var(--font-display);
+      font-weight: 700;
+      font-size: 0.95rem;
+      margin-bottom: 0.35rem;
+    }
+
+    .mini-nav-item {
+      display: block;
+      padding: 0.45rem 0.6rem;
+      border-radius: var(--radius-sm);
+      color: var(--ink-muted);
+      text-decoration: none;
+      font-size: 0.875rem;
+      font-weight: 500;
+    }
+
+    .mini-nav-item.is-active {
+      background: var(--accent-soft);
+      color: var(--accent);
+      font-weight: 700;
+    }
+
+    .mini-main {
+      padding: 1rem;
+      display: grid;
+      gap: 0.85rem;
+      align-content: start;
+    }
+
+    .progress {
+      height: 0.45rem;
+      background: var(--surface-2);
+      border-radius: var(--radius-pill);
+      overflow: hidden;
+    }
+
+    .progress > span {
+      display: block;
+      height: 100%;
+      width: 62%;
+      background: var(--accent);
+    }
+
+    .card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 0.9rem;
+      box-shadow: var(--shadow);
+    }
+
+    .card h4 {
+      margin: 0 0 0.35rem;
+      font-family: var(--font-display);
+      font-size: 1rem;
+    }
+
+    .card p {
+      margin: 0;
+      color: var(--ink-muted);
+      font-size: 0.875rem;
+    }
+
+    .chip-row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.35rem;
+      margin-top: 0.65rem;
+    }
+
+    .chip {
+      font-family: var(--font-mono);
+      font-size: 0.68rem;
+      padding: 0.15rem 0.45rem;
+      border-radius: var(--radius-pill);
+      border: 1px solid var(--border);
+      background: var(--surface-2);
+      color: var(--ink-muted);
+    }
+
+    /* Reading block */
+    .reading {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 1.1rem 1.2rem;
+      max-width: 65ch;
+    }
+
+    .reading h4 {
+      font-family: var(--font-display);
+      font-size: 1.35rem;
+      margin: 0 0 0.35rem;
+      line-height: 1.25;
+    }
+
+    .reading .kicker {
+      font-family: var(--font-mono);
+      font-size: 0.72rem;
+      color: var(--ink-muted);
+      margin: 0 0 0.75rem;
+    }
+
+    .reading p {
+      margin: 0 0 0.85rem;
+      font-size: 1.0625rem;
+      line-height: 1.65;
+    }
+
+    .reading p:last-child {
+      margin-bottom: 0;
+    }
+
+    /* Controls specimens */
+    .btn-row,
+    .field-row,
+    .tab-row,
+    .alert-stack {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.55rem;
+      align-items: center;
+    }
+
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 0.35em;
+      padding: 0.6rem 1rem;
+      border-radius: var(--radius-sm);
+      border: 1px solid transparent;
+      background: var(--accent);
+      color: var(--accent-ink);
+      font-weight: 600;
+      font-size: 0.9rem;
+      cursor: pointer;
+    }
+
+    .btn:hover {
+      background: var(--accent-hover);
+    }
+
+    .btn:focus-visible {
+      outline: 2px solid var(--focus);
+      outline-offset: 2px;
+    }
+
+    .btn--soft {
+      background: var(--surface);
+      color: var(--ink);
+      border-color: var(--border);
+    }
+
+    .btn--soft:hover {
+      background: var(--surface-2);
+    }
+
+    .btn--outline {
+      background: transparent;
+      color: var(--ink);
+      border-color: var(--border);
+    }
+
+    .btn--danger {
+      background: var(--danger);
+      color: #fff;
+    }
+
+    .btn:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+    }
+
+    .field {
+      display: grid;
+      gap: 0.3rem;
+      min-width: min(100%, 14rem);
+    }
+
+    .field label {
+      font-size: 0.8rem;
+      font-weight: 600;
+    }
+
+    .field input {
+      padding: 0.55rem 0.7rem;
+      border-radius: var(--radius-sm);
+      border: 1px solid var(--border);
+      background: var(--surface);
+      color: var(--ink);
+    }
+
+    .field input:focus-visible {
+      outline: 2px solid var(--focus);
+      outline-offset: 2px;
+      border-color: var(--accent);
+    }
+
+    .tabs {
+      display: inline-flex;
+      gap: 0.25rem;
+      padding: 0.2rem;
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+      background: var(--surface-2);
+    }
+
+    .tabs button {
+      border: 0;
+      background: transparent;
+      color: var(--ink-muted);
+      padding: 0.4rem 0.7rem;
+      border-radius: calc(var(--radius-sm) - 2px);
+      font-weight: 600;
+      font-size: 0.85rem;
+      cursor: pointer;
+    }
+
+    .tabs button.is-active {
+      background: var(--surface);
+      color: var(--ink);
+      box-shadow: var(--shadow);
+    }
+
+    .tabs button:focus-visible {
+      outline: 2px solid var(--focus);
+      outline-offset: 1px;
+    }
+
+    .badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.3rem;
+      font-size: 0.72rem;
+      font-weight: 700;
+      padding: 0.2rem 0.5rem;
+      border-radius: var(--radius-pill);
+      border: 1px solid var(--border);
+    }
+
+    .badge--ok {
+      background: var(--success-bg);
+      color: var(--success);
+      border-color: var(--success-border);
+    }
+
+    .badge--err {
+      background: var(--danger-bg);
+      color: var(--danger);
+      border-color: var(--danger-border);
+    }
+
+    .badge--info {
+      background: var(--accent-soft);
+      color: var(--accent);
+    }
+
+    .alert {
+      width: 100%;
+      padding: 0.7rem 0.85rem;
+      border-radius: var(--radius-sm);
+      border: 1px solid var(--border);
+      font-size: 0.875rem;
+    }
+
+    .alert--info {
+      background: var(--accent-soft);
+      border-color: color-mix(in srgb, var(--accent) 35%, var(--border));
+    }
+
+    .alert--success {
+      background: var(--success-bg);
+      border-color: var(--success-border);
+      color: var(--success);
+    }
+
+    .alert--danger {
+      background: var(--danger-bg);
+      border-color: var(--danger-border);
+      color: var(--danger);
+    }
+
+    .alert--warning {
+      background: var(--warning-bg);
+      border-color: var(--warning-border);
+      color: var(--warning);
+    }
+
+    /* Quiz states */
+    .quiz-grid {
+      display: grid;
+      gap: 0.65rem;
+    }
+
+    @media (min-width: 720px) {
+      .quiz-grid {
+        grid-template-columns: 1fr 1fr;
+      }
+    }
+
+    .option {
+      display: grid;
+      grid-template-columns: auto 1fr auto;
+      gap: 0.7rem;
+      align-items: start;
+      padding: 0.85rem 0.95rem;
+      border-radius: var(--radius);
+      border: 1px solid var(--border);
+      background: var(--surface);
+      text-align: left;
+      color: inherit;
+      cursor: pointer;
+      transition:
+        border-color 150ms cubic-bezier(0.4, 0, 0.2, 1),
+        background-color 150ms cubic-bezier(0.4, 0, 0.2, 1),
+        transform 150ms cubic-bezier(0.4, 0, 0.2, 1),
+        box-shadow 150ms cubic-bezier(0.4, 0, 0.2, 1);
+    }
+
+    .option:hover,
+    .option.is-hover {
+      border-color: var(--accent);
+      transform: translateY(-2px);
+      box-shadow: var(--shadow);
+    }
+
+    .option:focus-visible,
+    .option.is-focus {
+      outline: 2px solid var(--focus);
+      outline-offset: 2px;
+    }
+
+    .option.is-selected {
+      border-color: var(--accent);
+      background: var(--accent-soft);
+      border-width: 2px;
+      padding: calc(0.85rem - 1px) calc(0.95rem - 1px);
+    }
+
+    .option.is-correct {
+      border-color: var(--success);
+      background: var(--success-bg);
+      border-width: 2px;
+      padding: calc(0.85rem - 1px) calc(0.95rem - 1px);
+    }
+
+    .option.is-incorrect {
+      border-color: var(--danger);
+      background: var(--danger-bg);
+      border-width: 2px;
+      padding: calc(0.85rem - 1px) calc(0.95rem - 1px);
+    }
+
+    .option:disabled,
+    .option.is-disabled {
+      opacity: 0.55;
+      cursor: not-allowed;
+      transform: none;
+      box-shadow: none;
+    }
+
+    .option__mark {
+      width: 1.5rem;
+      height: 1.5rem;
+      border-radius: 50%;
+      border: 1px solid var(--border);
+      display: grid;
+      place-items: center;
+      font-family: var(--font-mono);
+      font-size: 0.75rem;
+      font-weight: 700;
+      background: var(--surface-2);
+    }
+
+    .option.is-selected .option__mark {
+      background: var(--accent);
+      color: var(--accent-ink);
+      border-color: var(--accent);
+    }
+
+    .option.is-correct .option__mark {
+      background: var(--success);
+      color: #fff;
+      border-color: var(--success);
+    }
+
+    .option.is-incorrect .option__mark {
+      background: var(--danger);
+      color: #fff;
+      border-color: var(--danger);
+    }
+
+    .option__text strong {
+      display: block;
+      font-size: 0.92rem;
+      margin-bottom: 0.15rem;
+    }
+
+    .option__text span {
+      font-size: 0.8rem;
+      color: var(--ink-muted);
+    }
+
+    .option__status {
+      font-family: var(--font-mono);
+      font-size: 0.68rem;
+      font-weight: 700;
+      color: var(--ink-muted);
+      white-space: nowrap;
+    }
+
+    .option.is-correct .option__status {
+      color: var(--success);
+    }
+
+    .option.is-incorrect .option__status {
+      color: var(--danger);
+    }
+
+    .option.is-loading .option__status::after {
+      content: "";
+      display: inline-block;
+      width: 0.7rem;
+      height: 0.7rem;
+      margin-left: 0.35rem;
+      border: 2px solid color-mix(in srgb, var(--ink-muted) 35%, transparent);
+      border-top-color: var(--ink-muted);
+      border-radius: 50%;
+      vertical-align: -0.1rem;
+      animation: spin 0.7s linear infinite;
+    }
+
+    @keyframes spin {
+      to {
+        transform: rotate(360deg);
+      }
+    }
+
+    /* Dialogs */
+    .dialog-grid {
+      display: grid;
+      gap: 0.85rem;
+    }
+
+    @media (min-width: 800px) {
+      .dialog-grid {
+        grid-template-columns: 1fr 1fr;
+      }
+    }
+
+    .dialog {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      box-shadow: var(--shadow);
+      padding: 1rem;
+      display: grid;
+      gap: 0.65rem;
+    }
+
+    .dialog h4 {
+      margin: 0;
+      font-family: var(--font-display);
+      font-size: 1.05rem;
+    }
+
+    .dialog p {
+      margin: 0;
+      color: var(--ink-muted);
+      font-size: 0.9rem;
+    }
+
+    .dialog__actions {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.45rem;
+      justify-content: flex-end;
+      margin-top: 0.25rem;
+    }
+
+    .dialog--danger {
+      border-color: var(--danger-border);
+    }
+
+    .dialog--success {
+      border-color: var(--success-border);
+      background: color-mix(in srgb, var(--success-bg) 55%, var(--surface));
+    }
+
+    .dialog--feedback {
+      grid-column: 1 / -1;
+    }
+
+    .dialog__hint {
+      font-family: var(--font-mono);
+      font-size: 0.7rem;
+      color: var(--ink-muted);
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+    }
+
+    /* Token table */
+    .token-table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 0.82rem;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      overflow: hidden;
+    }
+
+    .token-table th,
+    .token-table td {
+      text-align: left;
+      padding: 0.55rem 0.7rem;
+      border-bottom: 1px solid var(--border);
+      vertical-align: top;
+    }
+
+    .token-table th {
+      background: var(--surface-2);
+      font-size: 0.72rem;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+      color: var(--ink-muted);
+    }
+
+    .token-table tr:last-child td {
+      border-bottom: 0;
+    }
+
+    .token-table code {
+      font-family: var(--font-mono);
+      font-size: 0.75rem;
+    }
+
+    .footer-note {
+      margin-top: 1.5rem;
+      font-size: 0.8rem;
+      color: var(--shell-muted);
+      text-align: center;
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      html {
+        scroll-behavior: auto;
+      }
+
+      .option,
+      .btn,
+      .option.is-loading .option__status::after {
+        transition: none !important;
+        animation: none !important;
+      }
+
+      .option:hover,
+      .option.is-hover {
+        transform: none;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="controls" role="region" aria-label="Mood board controls">
+    <div class="controls__inner">
+      <div class="control-group">
+        <label for="theme-select">Theme</label>
+        <select id="theme-select">
+          <option value="academic-slate">Academic Slate</option>
+          <option value="modern-classroom">Modern Classroom</option>
+          <option value="warm-editorial">Warm Editorial</option>
+          <option value="calm-humanist">Calm Humanist</option>
+          <option value="accessible-focus">Accessible Focus</option>
+        </select>
+      </div>
+      <div class="control-group">
+        <label for="fonts-select">Typeface pairing</label>
+        <select id="fonts-select">
+          <option value="source-ibm">Source Sans 3 + IBM Plex Mono</option>
+          <option value="fraunces-manrope">Fraunces + Manrope</option>
+          <option value="literata-plex">Literata + IBM Plex Sans</option>
+          <option value="space-nunito">Space Grotesk + Nunito Sans</option>
+          <option value="newsreader-atkinson">Newsreader + Atkinson Hyperlegible</option>
+          <option value="serif4-source">Source Serif 4 + Source Sans 3</option>
+        </select>
+      </div>
+      <div class="control-group">
+        <label for="mode-toggle">Preview mode</label>
+        <div class="mode-row">
+          <button type="button" class="mode-toggle" id="mode-toggle" aria-pressed="false">
+            Light
+          </button>
+          <button type="button" class="reset-btn" id="reset-btn">Reset</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <main class="page">
+    <header class="hero">
+      <h1>Education Platform UI Mood Board</h1>
+      <p>
+        Compare visual directions before redesigning the React client. Themes change color, radius,
+        and shadow together. Typeface pairings swap independently so you can judge readability of
+        lessons and quizzes without committing to a full frontend rewrite.
+      </p>
+    </header>
+
+    <nav class="nav" aria-label="Mood board sections">
+      <a href="#palette">Palette</a>
+      <a href="#type">Type</a>
+      <a href="#shell">Shell</a>
+      <a href="#reading">Reading</a>
+      <a href="#controls">Controls</a>
+      <a href="#quiz">Quiz states</a>
+      <a href="#dialogs">Dialogs</a>
+      <a href="#tokens">Tokens</a>
+    </nav>
+
+    <section class="section">
+      <h2 class="section__title">Live preview</h2>
+      <p class="section__lede">
+        Specimens follow research guidance: ~16–18px body, 1.5–1.75 leading, ~60–65ch measure,
+        distinct assessment states, visible focus, and status cues that are not color-only.
+      </p>
+
+      <div
+        class="preview"
+        id="preview"
+        data-theme="academic-slate"
+        data-fonts="source-ibm"
+        data-mode="light"
+      >
+        <div class="preview__banner">
+          <div>
+            <h2 id="theme-name">Academic Slate</h2>
+            <p id="theme-blurb">
+              Docs-platform calm. Indigo signal on slate neutrals — closest to the research dashboard.
+            </p>
+          </div>
+          <div class="preview__meta" id="fonts-label">Source Sans 3 + IBM Plex Mono · light</div>
+        </div>
+
+        <div class="preview__body">
+          <!-- Palette -->
+          <div id="palette">
+            <h3 class="block-title">Colour palette</h3>
+            <div class="swatches" id="swatches"></div>
+          </div>
+
+          <!-- Type -->
+          <div id="type">
+            <h3 class="block-title">Typographic scale</h3>
+            <div class="type-scale">
+              <div class="type-row">
+                <div class="type-row__token">H1 · 32px</div>
+                <p class="type-h1">Your study path</p>
+              </div>
+              <div class="type-row">
+                <div class="type-row__token">H2 · 24px</div>
+                <p class="type-h2">Linear equations</p>
+              </div>
+              <div class="type-row">
+                <div class="type-row__token">H3 · 18px</div>
+                <p class="type-h3">Slope-intercept form</p>
+              </div>
+              <div class="type-row">
+                <div class="type-row__token">Body · 17px</div>
+                <p class="type-body">
+                  Constrain instructional text near 65 characters per line. A line-height of 1.65
+                  keeps long lessons readable without forcing the eye to hunt for the next line.
+                </p>
+              </div>
+              <div class="type-row">
+                <div class="type-row__token">Quiz · 18px</div>
+                <p class="type-quiz">Which equation represents a line with slope 2?</p>
+              </div>
+              <div class="type-row">
+                <div class="type-row__token">Meta · mono</div>
+                <p class="type-meta">3.0 Quiz · Attempt 2 · Pass mark 70%</p>
+              </div>
+            </div>
+          </div>
+
+          <!-- Shell -->
+          <div id="shell">
+            <h3 class="block-title">App shell &amp; learner card</h3>
+            <div class="mini-shell">
+              <aside class="mini-rail" aria-label="Sample navigation">
+                <div class="mini-brand">Education Platform</div>
+                <a class="mini-nav-item" href="#shell">1.0 Enroll</a>
+                <a class="mini-nav-item is-active" href="#shell">2.0 Study</a>
+                <a class="mini-nav-item" href="#shell">3.0 Quiz</a>
+                <a class="mini-nav-item" href="#shell">4.0 Result</a>
+              </aside>
+              <div class="mini-main">
+                <div>
+                  <div class="type-meta" style="margin-bottom: 0.35rem">Progress · lesson 3 of 5</div>
+                  <div class="progress" aria-hidden="true"><span></span></div>
+                </div>
+                <article class="card">
+                  <h4>Linear equations</h4>
+                  <p>Read the lesson, then start the quiz. Correct option labels stay hidden after scoring.</p>
+                  <div class="chip-row">
+                    <span class="chip">Lesson</span>
+                    <span class="chip">Quiz</span>
+                    <span class="badge badge--info">In progress</span>
+                  </div>
+                </article>
+              </div>
+            </div>
+          </div>
+
+          <!-- Reading -->
+          <div id="reading">
+            <h3 class="block-title">Lesson reading block (~65ch)</h3>
+            <article class="reading">
+              <p class="kicker">2.0 Study · Slide 2 of 6</p>
+              <h4>Working with slope</h4>
+              <p>
+                Slope measures how steep a line is. In the form <strong>y = mx + b</strong>,
+                <em>m</em> is the slope and <em>b</em> is the y-intercept. Keep headings closer to
+                the paragraph they introduce than to the previous section — Gestalt proximity.
+              </p>
+              <p>
+                When students skim technical material, they look for structural landmarks. A restrained
+                type scale (three primary sizes) reduces clutter while preserving scan anchors.
+              </p>
+            </article>
+          </div>
+
+          <!-- Controls -->
+          <div id="controls">
+            <h3 class="block-title">Buttons, fields, tabs, badges, alerts</h3>
+            <div class="spec-grid" style="gap: 1rem">
+              <div class="btn-row">
+                <button type="button" class="btn">Primary</button>
+                <button type="button" class="btn btn--soft">Soft</button>
+                <button type="button" class="btn btn--outline">Outline</button>
+                <button type="button" class="btn btn--danger">Destructive</button>
+                <button type="button" class="btn" disabled>Disabled</button>
+              </div>
+              <div class="field-row">
+                <div class="field">
+                  <label for="sample-email">Email</label>
+                  <input id="sample-email" type="email" placeholder="student@school.edu" />
+                </div>
+                <div class="field">
+                  <label for="sample-id">Student ID</label>
+                  <input id="sample-id" type="text" value="S1" />
+                </div>
+              </div>
+              <div class="tab-row">
+                <div class="tabs" role="tablist" aria-label="Lesson view">
+                  <button type="button" class="is-active" role="tab" aria-selected="true">Slides</button>
+                  <button type="button" role="tab" aria-selected="false">Full lesson</button>
+                </div>
+                <span class="badge badge--ok">Passed</span>
+                <span class="badge badge--err">Retry</span>
+                <span class="badge badge--info">Attempt 1</span>
+              </div>
+              <div class="alert-stack">
+                <div class="alert alert--info">Enroll in Grade 8 Mathematics to unlock lessons.</div>
+                <div class="alert alert--success">Quiz submitted. Score saved.</div>
+                <div class="alert alert--warning">Answer every question before you submit.</div>
+                <div class="alert alert--danger">Could not start quiz. Check enrollment.</div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Quiz -->
+          <div id="quiz">
+            <h3 class="block-title">Six-state quiz option cards</h3>
+            <div class="quiz-grid" role="radiogroup" aria-label="Sample quiz options">
+              <button type="button" class="option" role="radio" aria-checked="false">
+                <span class="option__mark">A</span>
+                <span class="option__text">
+                  <strong>Default</strong>
+                  <span>Neutral border, equal visual weight.</span>
+                </span>
+                <span class="option__status">default</span>
+              </button>
+              <button type="button" class="option is-hover" role="radio" aria-checked="false">
+                <span class="option__mark">B</span>
+                <span class="option__text">
+                  <strong>Hover</strong>
+                  <span>Accent border + slight lift + shadow.</span>
+                </span>
+                <span class="option__status">hover</span>
+              </button>
+              <button type="button" class="option is-focus" role="radio" aria-checked="false">
+                <span class="option__mark">C</span>
+                <span class="option__text">
+                  <strong>Focus</strong>
+                  <span>2px focus ring with offset (keyboard).</span>
+                </span>
+                <span class="option__status">focus</span>
+              </button>
+              <button type="button" class="option is-selected" role="radio" aria-checked="true">
+                <span class="option__mark">D</span>
+                <span class="option__text">
+                  <strong>Selected</strong>
+                  <span>Accent border + soft fill + filled mark.</span>
+                </span>
+                <span class="option__status">selected</span>
+              </button>
+              <button type="button" class="option is-correct" role="radio" aria-checked="true" disabled>
+                <span class="option__mark">✓</span>
+                <span class="option__text">
+                  <strong>Validated correct</strong>
+                  <span>Green border/fill + check — not color alone.</span>
+                </span>
+                <span class="option__status">correct</span>
+              </button>
+              <button type="button" class="option is-incorrect" role="radio" aria-checked="true" disabled>
+                <span class="option__mark">✕</span>
+                <span class="option__text">
+                  <strong>Validated incorrect</strong>
+                  <span>Red border/fill + cross + status label.</span>
+                </span>
+                <span class="option__status">incorrect</span>
+              </button>
+              <button type="button" class="option is-disabled" role="radio" aria-checked="false" disabled>
+                <span class="option__mark">E</span>
+                <span class="option__text">
+                  <strong>Disabled</strong>
+                  <span>Locked after submit or while loading.</span>
+                </span>
+                <span class="option__status">disabled</span>
+              </button>
+              <button type="button" class="option is-loading is-selected" role="radio" aria-checked="true" disabled>
+                <span class="option__mark">F</span>
+                <span class="option__text">
+                  <strong>Loading</strong>
+                  <span>Awaiting score response (&lt;100ms feel target).</span>
+                </span>
+                <span class="option__status">loading</span>
+              </button>
+            </div>
+          </div>
+
+          <!-- Dialogs -->
+          <div id="dialogs">
+            <h3 class="block-title">Dialogs &amp; feedback panels</h3>
+            <div class="dialog-grid">
+              <div class="dialog" role="dialog" aria-labelledby="dlg-confirm">
+                <div class="dialog__hint">Confirmation</div>
+                <h4 id="dlg-confirm">Enroll in Grade 8 Math?</h4>
+                <p>You will unlock lessons and quizzes for academic period 2026–27.</p>
+                <div class="dialog__actions">
+                  <button type="button" class="btn btn--soft">Cancel</button>
+                  <button type="button" class="btn">Enroll me</button>
+                </div>
+              </div>
+
+              <div class="dialog dialog--danger" role="dialog" aria-labelledby="dlg-warn">
+                <div class="dialog__hint">Warning / destructive</div>
+                <h4 id="dlg-warn">Leave quiz without submitting?</h4>
+                <p>Your in-progress answers for this attempt will be discarded.</p>
+                <div class="dialog__actions">
+                  <button type="button" class="btn btn--soft">Stay</button>
+                  <button type="button" class="btn btn--danger">Leave quiz</button>
+                </div>
+              </div>
+
+              <div class="dialog dialog--success" role="dialog" aria-labelledby="dlg-success">
+                <div class="dialog__hint">Success / result</div>
+                <h4 id="dlg-success">Passed — 82%</h4>
+                <p>Raw score 9/11 · Pass mark 70%. Review which items you missed without seeing answer keys.</p>
+                <div class="dialog__actions">
+                  <button type="button" class="btn btn--soft">Review lesson</button>
+                  <button type="button" class="btn">Back to topics</button>
+                </div>
+              </div>
+
+              <div class="dialog dialog--feedback" role="region" aria-labelledby="dlg-feedback">
+                <div class="dialog__hint">Explanatory quiz feedback</div>
+                <h4 id="dlg-feedback">Why this matters</h4>
+                <p>
+                  Instant item feedback should expand under the option: a short rationale plus a link
+                  back to the relevant lesson section. Keep answer keys out of the student API —
+                  show correctness, not the correct label.
+                </p>
+                <div class="dialog__actions">
+                  <button type="button" class="btn btn--outline">Jump to lesson § Slope</button>
+                  <button type="button" class="btn">Next question</button>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Tokens -->
+          <div id="tokens">
+            <h3 class="block-title">Implementation tokens (current theme)</h3>
+            <table class="token-table">
+              <thead>
+                <tr>
+                  <th>Token</th>
+                  <th>Role</th>
+                  <th>Value</th>
+                </tr>
+              </thead>
+              <tbody id="token-rows"></tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+
+      <p class="note">
+        Recommended next step: pick one theme + one type pairing, then map those CSS variables into
+        <code>frontend/src/styles/tokens.css</code>. Do not change the React app until this board is
+        approved.
+      </p>
+    </section>
+
+    <p class="footer-note">
+      Derived from <em>Educational Platform UI Research</em> and the interactive architecture dashboard.
+      Standalone review artifact — not wired into the Vite app.
+    </p>
+  </main>
+
+  <script>
+    const preview = document.getElementById("preview");
+    const themeSelect = document.getElementById("theme-select");
+    const fontsSelect = document.getElementById("fonts-select");
+    const modeToggle = document.getElementById("mode-toggle");
+    const resetBtn = document.getElementById("reset-btn");
+    const themeName = document.getElementById("theme-name");
+    const themeBlurb = document.getElementById("theme-blurb");
+    const fontsLabel = document.getElementById("fonts-label");
+    const swatches = document.getElementById("swatches");
+    const tokenRows = document.getElementById("token-rows");
+
+    const THEME_COPY = {
+      "academic-slate": {
+        name: "Academic Slate",
+        blurb:
+          "Docs-platform calm. Indigo signal on slate neutrals — closest to the research dashboard.",
+      },
+      "modern-classroom": {
+        name: "Modern Classroom",
+        blurb:
+          "Bright learning UI. Cyan/sky accents, soft cards — good for enroll → study → quiz flow.",
+      },
+      "warm-editorial": {
+        name: "Warm Editorial",
+        blurb:
+          "Bookish lesson reading. Amber ink on cream paper — favors long-form study over dashboards.",
+      },
+      "calm-humanist": {
+        name: "Calm Humanist",
+        blurb:
+          "Soft green restraint. Quiet surfaces, rounded controls — low cognitive noise for Grade 8 learners.",
+      },
+      "accessible-focus": {
+        name: "Accessible Focus",
+        blurb:
+          "High-contrast, thick borders, strong focus rings. Prioritizes WCAG clarity over decoration.",
+      },
+    };
+
+    const FONT_LABELS = {
+      "source-ibm": "Source Sans 3 + IBM Plex Mono",
+      "fraunces-manrope": "Fraunces + Manrope",
+      "literata-plex": "Literata + IBM Plex Sans",
+      "space-nunito": "Space Grotesk + Nunito Sans",
+      "newsreader-atkinson": "Newsreader + Atkinson Hyperlegible",
+      "serif4-source": "Source Serif 4 + Source Sans 3",
+    };
+
+    const SWATCH_KEYS = [
+      ["bg", "Background"],
+      ["surface", "Surface"],
+      ["surface-2", "Surface 2"],
+      ["ink", "Ink"],
+      ["ink-muted", "Muted"],
+      ["border", "Border"],
+      ["accent", "Accent"],
+      ["accent-soft", "Accent soft"],
+      ["success", "Success"],
+      ["danger", "Danger"],
+      ["warning", "Warning"],
+      ["focus", "Focus"],
+    ];
+
+    const TOKEN_DEFS = [
+      ["--bg", "Page background"],
+      ["--surface", "Cards / panels"],
+      ["--ink", "Primary text"],
+      ["--ink-muted", "Secondary text"],
+      ["--border", "Hairlines / inputs"],
+      ["--accent", "Primary actions"],
+      ["--accent-soft", "Selected / tint fills"],
+      ["--success", "Pass / correct"],
+      ["--danger", "Error / incorrect"],
+      ["--radius", "Card radius"],
+      ["--radius-sm", "Control radius"],
+      ["--shadow", "Elevation"],
+      ["--font-display", "Headings"],
+      ["--font-body", "Body / UI"],
+      ["--font-mono", "Meta / code"],
+    ];
+
+    function cssVar(name) {
+      return getComputedStyle(preview).getPropertyValue(name).trim();
+    }
+
+    function rgbToHex(value) {
+      if (!value) return "—";
+      if (value.startsWith("#")) return value.toUpperCase();
+      if (value === "none") return "none";
+      const m = value.match(/rgba?\((\d+),\s*(\d+),\s*(\d+)/i);
+      if (!m) return value;
+      const hex = [m[1], m[2], m[3]]
+        .map((n) => Number(n).toString(16).padStart(2, "0"))
+        .join("");
+      return `#${hex}`.toUpperCase();
+    }
+
+    function renderSwatches() {
+      swatches.innerHTML = SWATCH_KEYS.map(([key, label]) => {
+        const raw = cssVar(`--${key}`);
+        const hex = rgbToHex(raw);
+        return `
+          <div class="swatch">
+            <div class="swatch__chip" style="background: var(--${key})"></div>
+            <div class="swatch__meta">
+              <strong>${label}</strong>
+              <code>${hex}</code>
+            </div>
+          </div>
+        `;
+      }).join("");
+    }
+
+    function renderTokens() {
+      tokenRows.innerHTML = TOKEN_DEFS.map(([token, role]) => {
+        const value = cssVar(token) || "—";
+        const display = token.includes("font") || token.includes("shadow") || token.includes("radius")
+          ? value
+          : rgbToHex(value);
+        return `
+          <tr>
+            <td><code>${token}</code></td>
+            <td>${role}</td>
+            <td><code>${display}</code></td>
+          </tr>
+        `;
+      }).join("");
+    }
+
+    function syncLabels() {
+      const theme = preview.dataset.theme;
+      const fonts = preview.dataset.fonts;
+      const mode = preview.dataset.mode;
+      const copy = THEME_COPY[theme];
+      themeName.textContent = copy.name;
+      themeBlurb.textContent = copy.blurb;
+      fontsLabel.textContent = `${FONT_LABELS[fonts]} · ${mode}`;
+      modeToggle.textContent = mode === "dark" ? "Dark" : "Light";
+      modeToggle.setAttribute("aria-pressed", mode === "dark" ? "true" : "false");
+      document.documentElement.dataset.theme = theme;
+      document.documentElement.dataset.fonts = fonts;
+      document.documentElement.dataset.mode = mode;
+    }
+
+    function applyAll() {
+      preview.dataset.theme = themeSelect.value;
+      preview.dataset.fonts = fontsSelect.value;
+      syncLabels();
+      // Wait a frame so computed styles reflect new tokens
+      requestAnimationFrame(() => {
+        renderSwatches();
+        renderTokens();
+      });
+    }
+
+    themeSelect.addEventListener("change", applyAll);
+    fontsSelect.addEventListener("change", applyAll);
+
+    modeToggle.addEventListener("click", () => {
+      preview.dataset.mode = preview.dataset.mode === "dark" ? "light" : "dark";
+      syncLabels();
+      requestAnimationFrame(() => {
+        renderSwatches();
+        renderTokens();
+      });
+    });
+
+    resetBtn.addEventListener("click", () => {
+      themeSelect.value = "academic-slate";
+      fontsSelect.value = "source-ibm";
+      preview.dataset.mode = "light";
+      applyAll();
+    });
+
+    // Tab specimen interaction
+    document.querySelectorAll(".tabs button").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        const tabs = btn.parentElement.querySelectorAll("button");
+        tabs.forEach((t) => {
+          t.classList.remove("is-active");
+          t.setAttribute("aria-selected", "false");
+        });
+        btn.classList.add("is-active");
+        btn.setAttribute("aria-selected", "true");
+      });
+    });
+
+    applyAll();
+  </script>
+</body>
+</html>
