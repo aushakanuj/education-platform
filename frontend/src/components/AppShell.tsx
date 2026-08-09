@@ -1,5 +1,5 @@
 import { Link, useLocation, useNavigate, useParams } from "react-router-dom";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 import { resetDemoProgress } from "../api/demo";
 import { ApiError } from "../api/types";
@@ -8,6 +8,15 @@ import { ConfirmDialog } from "./ConfirmDialog";
 import { PushButton } from "./PushButton";
 
 const IS_DEV = import.meta.env.DEV;
+const RAIL_COLLAPSED_KEY = "ep.railCollapsed";
+
+function readCollapsed(): boolean {
+  try {
+    return window.localStorage.getItem(RAIL_COLLAPSED_KEY) === "1";
+  } catch {
+    return false;
+  }
+}
 
 export function AppShell({
   children,
@@ -23,6 +32,23 @@ export function AppShell({
   const [resetOpen, setResetOpen] = useState(false);
   const [resetBusy, setResetBusy] = useState(false);
   const [resetError, setResetError] = useState<string | null>(null);
+  const [railCollapsed, setRailCollapsed] = useState(false);
+
+  useEffect(() => {
+    setRailCollapsed(readCollapsed());
+  }, []);
+
+  function toggleRail() {
+    setRailCollapsed((prev) => {
+      const next = !prev;
+      try {
+        window.localStorage.setItem(RAIL_COLLAPSED_KEY, next ? "1" : "0");
+      } catch {
+        /* ignore */
+      }
+      return next;
+    });
+  }
 
   const grade = enrollments?.grade_enrollments.find((g) => g.status === "active");
 
@@ -43,6 +69,7 @@ export function AppShell({
 
   const homeTo = enrolled ? "/" : "/enroll";
   const metaParts = [grade?.grade_name ?? "Grade 8", "Demo School"];
+  const topicLabel = topicTitle ?? "Current topic";
 
   async function onResetDemo() {
     setResetBusy(true);
@@ -63,22 +90,61 @@ export function AppShell({
       <div className="demo-banner" role="status">
         Demo mockup only · Calm Humanist · Source Sans 3 + IBM Plex Mono · live API
       </div>
-      <div className="app">
-        <aside className="rail" aria-label="Primary">
-          <Link to={homeTo} className="rail__brand">
-            Education Platform
-          </Link>
-          <nav className="rail__nav" aria-label="Study">
-            <Link to={homeTo} className={`rail__link ${onSubjects ? "is-active" : ""}`}>
-              Subjects
+      <div className={`app ${railCollapsed ? "is-rail-collapsed" : ""}`}>
+        <aside
+          className={`rail ${railCollapsed ? "is-collapsed" : ""}`}
+          aria-label="Primary"
+        >
+          <div className="rail__top">
+            {!railCollapsed && (
+              <Link to={homeTo} className="rail__brand">
+                Education Platform
+              </Link>
+            )}
+            <button
+              type="button"
+              className="rail__toggle"
+              aria-expanded={!railCollapsed}
+              aria-controls="primary-rail-nav"
+              title={railCollapsed ? "Expand navigation" : "Collapse navigation"}
+              aria-label={railCollapsed ? "Expand navigation" : "Collapse navigation"}
+              onClick={toggleRail}
+            >
+              {railCollapsed ? "»" : "«"}
+            </button>
+          </div>
+          <nav id="primary-rail-nav" className="rail__nav" aria-label="Study">
+            <Link
+              to={homeTo}
+              className={`rail__link ${onSubjects ? "is-active" : ""}`}
+              title="Subjects"
+            >
+              <span className="rail__link-short" aria-hidden="true">
+                S
+              </span>
+              <span className="rail__link-label">Subjects</span>
             </Link>
             {topicId ? (
-              <Link to={topicPath} className={`rail__link ${onTopic ? "is-active" : ""}`}>
-                {topicTitle ?? "Current topic"}
+              <Link
+                to={topicPath}
+                className={`rail__link ${onTopic ? "is-active" : ""}`}
+                title={topicLabel}
+              >
+                <span className="rail__link-short" aria-hidden="true">
+                  T
+                </span>
+                <span className="rail__link-label">{topicLabel}</span>
               </Link>
             ) : (
-              <span className="rail__link is-disabled" aria-disabled="true">
-                Current topic
+              <span
+                className="rail__link is-disabled"
+                aria-disabled="true"
+                title="Current topic"
+              >
+                <span className="rail__link-short" aria-hidden="true">
+                  T
+                </span>
+                <span className="rail__link-label">Current topic</span>
               </span>
             )}
           </nav>
@@ -119,7 +185,7 @@ export function AppShell({
               </Link>
               {topicId ? (
                 <Link to={topicPath} className={`rail__link ${onTopic ? "is-active" : ""}`}>
-                  {topicTitle ?? "Current topic"}
+                  {topicLabel}
                 </Link>
               ) : (
                 <span className="rail__link is-disabled" aria-disabled="true">

@@ -177,9 +177,6 @@ export function ResultPage() {
             <Link to={`/quizzes/${result.quiz_id}`} className="btn btn--outline">
               Retake quiz
             </Link>
-            <Link to={topicPath} className="btn">
-              Back to topic
-            </Link>
           </div>
         </div>
       )}

@@ -143,7 +143,7 @@ describe("ResultPage", () => {
     ).toBeInTheDocument();
     expect(screen.getByRole("dialog", { name: "Overall quiz unlocked" })).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Review lesson" })).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "Back to topic" })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: /Back to topic/i })).toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: "Stay here" }));
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();

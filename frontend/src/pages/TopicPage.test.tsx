@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { describe, expect, it, vi } from "vitest";
 
@@ -114,6 +114,11 @@ describe("TopicPage", () => {
     ).toBeInTheDocument();
     expect(screen.getByText("Properties of Rectangles and Squares")).toBeInTheDocument();
     expect(screen.getAllByText("In progress").length).toBeGreaterThan(0);
+
+    const summary = screen.getByText("Properties of Rectangles and Squares").closest("summary");
+    expect(summary).toBeTruthy();
+    fireEvent.click(summary!);
+
     expect(screen.getByText("Continue lesson")).toBeInTheDocument();
     expect(screen.getByText("Lesson")).toBeInTheDocument();
     expect(screen.getByText("Quiz")).toBeInTheDocument();

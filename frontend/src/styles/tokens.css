@@ -27,6 +27,7 @@
   --font-body: "Source Sans 3", ui-sans-serif, system-ui, sans-serif;
   --font-mono: "IBM Plex Mono", ui-monospace, monospace;
   --rail-width: 15rem;
+  --rail-collapsed-width: 3.5rem;
   --page-max: 52rem;
   --measure: 65ch;
 }
