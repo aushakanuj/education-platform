@@ -1,4 +1,4 @@
-"""Import approved markdown curriculum from docs/materials into SQLite."""
+"""Import approved markdown curriculum from docs/curriculum into SQLite."""
 
 from __future__ import annotations
 
@@ -736,6 +736,33 @@ def seed_demo_student(session: Session) -> None:
         )
 
 
+def seed_demo_admin(session: Session) -> None:
+    settings = get_settings()
+    if not settings.is_development:
+        return
+    institution = session.scalar(
+        select(Institution).where(Institution.name == POC_INSTITUTION_NAME)
+    )
+    if institution is None:
+        return
+    email = settings.demo_admin_email.lower()
+    existing = session.scalar(
+        select(User).where(User.institution_id == institution.id, User.email == email)
+    )
+    if existing is not None:
+        return
+    user = User(
+        institution_id=institution.id,
+        email=email,
+        full_name="Demo Admin",
+        password_hash=hash_password(settings.demo_admin_password),
+        status=UserStatus.ACTIVE,
+    )
+    session.add(user)
+    session.flush()
+    session.add(UserRole(user_id=user.id, role=RoleName.ADMINISTRATOR))
+
+
 def seed_approved_materials(
     session: Session,
     materials_dir: Path | None = None,
@@ -763,6 +790,7 @@ def seed_approved_materials(
         _seed_subtopic(session, parent_topic, topic_id, sequence, directory)
     _seed_topic_mastery_quiz(session, parent_topic)
     seed_demo_student(session)
+    seed_demo_admin(session)
 
     session.commit()
     return topic_ids

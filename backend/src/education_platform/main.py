@@ -13,6 +13,7 @@ from education_platform.modules.assessments.router import router as assessments_
 from education_platform.modules.auth.router import router as auth_router
 from education_platform.modules.materials.router import router as materials_router
 from education_platform.modules.materials.seed import seed_approved_materials
+from education_platform.modules.rag.router import router as rag_router
 
 _ = _models
 
@@ -53,6 +54,7 @@ app.add_middleware(
 app.include_router(auth_router, prefix=settings.api_v1_prefix)
 app.include_router(academics_router, prefix=settings.api_v1_prefix)
 app.include_router(materials_router, prefix=settings.api_v1_prefix)
+app.include_router(rag_router, prefix=settings.api_v1_prefix)
 app.include_router(assessments_router, prefix=settings.api_v1_prefix)
 
 

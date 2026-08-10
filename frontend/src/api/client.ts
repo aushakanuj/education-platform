@@ -28,10 +28,15 @@ export function clearTokens(): void {
 
 type RequestOptions = {
   method?: string;
+  /** JSON-serializable value, or FormData for multipart uploads (no Content-Type set). */
   body?: unknown;
   auth?: boolean;
   skipRefresh?: boolean;
 };
+
+function isFormDataBody(body: unknown): body is FormData {
+  return typeof FormData !== "undefined" && body instanceof FormData;
+}
 
 let refreshPromise: Promise<boolean> | null = null;
 
@@ -62,7 +67,8 @@ async function refreshAccessToken(): Promise<boolean> {
 export async function apiRequest<T>(path: string, options: RequestOptions = {}): Promise<T> {
   const { method = "GET", body, auth = true, skipRefresh = false } = options;
   const headers: Record<string, string> = {};
-  if (body !== undefined) {
+  const formData = isFormDataBody(body);
+  if (body !== undefined && !formData) {
     headers["Content-Type"] = "application/json";
   }
   if (auth) {
@@ -75,7 +81,7 @@ export async function apiRequest<T>(path: string, options: RequestOptions = {}):
   const res = await fetch(`${getApiBaseUrl()}/api/v1${path}`, {
     method,
     headers,
-    body: body === undefined ? undefined : JSON.stringify(body),
+    body: body === undefined ? undefined : formData ? body : JSON.stringify(body),
   });
 
   if (res.status === 401 && auth && !skipRefresh) {

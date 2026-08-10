@@ -1,17 +1,18 @@
-# Architecture
+# Architecture diagrams
 
-Target-design diagrams. Narrative overview: [project-overview.html](./project-overview.html).
-Component detail: [design docs](./design/README.md).
+Narrative: [architecture README](./README.md) · [project overview](./project-overview.html) · [design docs](../design/README.md)
+
+Target-design Mermaid diagrams. For POC vs target infrastructure narrative, see [architecture README](./README.md).
 
 | View | Design |
 | --- | --- |
-| Context / components | [00 abstract system view](./design/00-abstract-system-view.md) |
-| Student directory | [01 student learning experience](./design/01-student-learning-experience.md) |
-| Identity / auth gate | [02 identity tenancy authorization](./design/02-identity-tenancy-and-authorization.md) |
-| Academic structure | [03 academic structure enrollment](./design/03-academic-structure-enrollment-and-timetable.md) |
-| Source / material lifecycle | [04 material lifecycle](./design/04-material-lifecycle-and-ai-artifacts.md) |
-| Assessment | [05 common mastery quizzes](./design/05-assessment-common-subtopic-mastery-quizzes.md) |
-| Analytics | [06 analytics comparison](./design/06-analytics-and-comparison-insights.md) |
+| Context / components | [00 abstract system view](../design/00-abstract-system-view.md) |
+| Student directory | [01 student learning experience](../design/01-student-learning-experience.md) |
+| Identity / auth gate | [02 identity tenancy authorization](../design/02-identity-tenancy-and-authorization.md) |
+| Academic structure | [03 academic structure enrollment](../design/03-academic-structure-enrollment-and-timetable.md) |
+| Source / material lifecycle | [04 material lifecycle](../design/04-material-lifecycle-and-ai-artifacts.md) |
+| Assessment | [05 common mastery quizzes](../design/05-assessment-common-subtopic-mastery-quizzes.md) |
+| Analytics | [06 analytics comparison](../design/06-analytics-and-comparison-insights.md) |
 
 ## 1. System context
 
@@ -37,6 +38,8 @@ flowchart LR
     Mobile -->|JWT_REST| Api
     Api --> Tenant
 ```
+
+*POC note:* React Native client and teacher backend APIs are target/deferred; the POC ships a multi-role React web client with teacher UI on frontend fixtures.
 
 ## 2. Bounded components
 
@@ -241,6 +244,8 @@ flowchart TB
     LocalDev["Local_dev: SQLite_local_files_in_process"] -.-> Api
     Compose["Compose: Postgres_Redis_MinIO"] -.-> Data
 ```
+
+**Implementation overlay:** dashed paths label target infrastructure. POC today uses SQLite, local markdown seed (`docs/curriculum/`), and in-process workers; target adds PostgreSQL + pgvector, Redis queue, MinIO object storage, and dedicated ingestion workers.
 
 ## 10. Trust boundaries
 

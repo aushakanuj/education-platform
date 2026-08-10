@@ -20,7 +20,7 @@ The POC proves a focused common-curriculum and student-evaluation loop:
 The detailed learner workflow and dashboard contract are defined in
 [Student learning experience](./01-student-learning-experience.md).
 Diagram-only target architecture views live in
-[Architecture](../architecture.md).
+[Architecture](../architecture/diagrams.md).
 
 ## 2. Product model: two directories
 

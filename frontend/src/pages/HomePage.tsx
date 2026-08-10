@@ -87,6 +87,11 @@ export function HomePage() {
                 { label: selected.name },
               ]}
             />
+            <div className="back-row">
+              <Link to="/" className="btn btn--outline btn--sm">
+                ← Back to subjects
+              </Link>
+            </div>
             <div className="subject-view__bar">
               <h1 id="school-material-heading" className="subject-view__section">
                 School material

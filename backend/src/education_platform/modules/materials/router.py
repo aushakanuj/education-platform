@@ -1,9 +1,9 @@
 from uuid import UUID
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, File, Form, UploadFile, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from education_platform.api.deps import Principal, get_current_user
+from education_platform.api.deps import Principal, get_current_user, require_administrator
 from education_platform.db.session import get_session
 from education_platform.modules.materials import service
 from education_platform.modules.materials.schemas import (
@@ -13,8 +13,43 @@ from education_platform.modules.materials.schemas import (
     QuizMaterial,
     TopicSummary,
 )
+from education_platform.modules.rag import service as rag_service
+from education_platform.modules.rag.schemas import MaterialIngestAccepted, MaterialVersionStatusOut
 
 router = APIRouter(tags=["materials"])
+
+
+@router.post(
+    "/admin/subtopics/{subtopic_id}/materials",
+    response_model=MaterialIngestAccepted,
+    status_code=status.HTTP_202_ACCEPTED,
+)
+async def upload_subtopic_material(
+    subtopic_id: UUID,
+    title: str = Form(...),
+    file: UploadFile = File(...),
+    principal: Principal = Depends(require_administrator),
+    session: AsyncSession = Depends(get_session),
+) -> MaterialIngestAccepted:
+    return await rag_service.upload_curriculum_material(
+        session,
+        principal,
+        subtopic_id=subtopic_id,
+        title=title,
+        file=file,
+    )
+
+
+@router.get(
+    "/admin/material-versions/{version_id}",
+    response_model=MaterialVersionStatusOut,
+)
+async def get_material_version_status(
+    version_id: UUID,
+    principal: Principal = Depends(require_administrator),
+    session: AsyncSession = Depends(get_session),
+) -> MaterialVersionStatusOut:
+    return await rag_service.get_material_version_status(session, principal, version_id)
 
 
 @router.get("/materials", response_model=list[TopicSummary])
