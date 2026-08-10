@@ -132,7 +132,11 @@ describe("ResultPage", () => {
       >
         <Routes>
           <Route path="/attempts/:attemptId" element={<ResultPage />} />
-          <Route path="/subjects/:subjectId/topics/:topicId" element={<div>Topic hub</div>} />
+          <Route path="/subjects/:subjectId" element={<div>Subject hub</div>} />
+          <Route
+            path="/subjects/:subjectId/subtopics/:subtopicId/lesson"
+            element={<div>Unit quiz tab</div>}
+          />
         </Routes>
       </MemoryRouter>,
     );
@@ -143,7 +147,14 @@ describe("ResultPage", () => {
     ).toBeInTheDocument();
     expect(screen.getByRole("dialog", { name: "Overall quiz unlocked" })).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Review lesson" })).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: /Back to topic/i })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: /Back to quiz/i })).toHaveAttribute(
+      "href",
+      "/subjects/subj-1/subtopics/st-1/lesson?tab=quiz",
+    );
+    expect(screen.getByRole("link", { name: "Properties of Rectangles and Squares" })).toHaveAttribute(
+      "href",
+      "/subjects/subj-1/subtopics/st-1/lesson?tab=quiz",
+    );
 
     await user.click(screen.getByRole("button", { name: "Stay here" }));
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();

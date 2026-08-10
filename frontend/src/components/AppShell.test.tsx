@@ -26,18 +26,18 @@ describe("AppShell", () => {
     window.localStorage.clear();
   });
 
-  it("uses Subjects / Current topic navigation from the mock", () => {
+  it("uses Subjects / School material navigation from the mock", () => {
     render(
       <MemoryRouter
-        initialEntries={["/subjects/sub-1/topics/topic-1"]}
+        initialEntries={["/subjects/sub-1"]}
         future={{ v7_startTransition: true, v7_relativeSplatPath: true }}
       >
         <Routes>
           <Route
-            path="/subjects/:subjectId/topics/:topicId"
+            path="/subjects/:subjectId"
             element={
-              <AppShell topicTitle="Approved Materials">
-                <div>Topic body</div>
+              <AppShell subjectTitle="Mathematics">
+                <div>Subject body</div>
               </AppShell>
             }
           />
@@ -46,7 +46,7 @@ describe("AppShell", () => {
     );
 
     expect(screen.getAllByRole("link", { name: /Subjects/ }).length).toBeGreaterThan(0);
-    expect(screen.getAllByRole("link", { name: /Approved Materials/ }).length).toBeGreaterThan(0);
+    expect(screen.getAllByRole("link", { name: /Mathematics/ }).length).toBeGreaterThan(0);
     expect(screen.getByText("Asha Student")).toBeInTheDocument();
     expect(screen.getAllByText(/Grade 8 · Demo School/).length).toBeGreaterThan(0);
     expect(screen.getByRole("button", { name: "Reset demo" })).toBeInTheDocument();
@@ -58,15 +58,15 @@ describe("AppShell", () => {
     const user = userEvent.setup();
     const { container } = render(
       <MemoryRouter
-        initialEntries={["/subjects/sub-1/topics/topic-1"]}
+        initialEntries={["/subjects/sub-1"]}
         future={{ v7_startTransition: true, v7_relativeSplatPath: true }}
       >
         <Routes>
           <Route
-            path="/subjects/:subjectId/topics/:topicId"
+            path="/subjects/:subjectId"
             element={
-              <AppShell topicTitle="Approved Materials">
-                <div>Topic body</div>
+              <AppShell subjectTitle="Mathematics">
+                <div>Subject body</div>
               </AppShell>
             }
           />

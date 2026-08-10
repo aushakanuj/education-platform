@@ -19,6 +19,9 @@
   --warning: #a16207;
   --warning-bg: #fefce8;
   --warning-border: #fde68a;
+  --info: #0284c7;
+  --info-bg: #e0f2fe;
+  --info-border: #7dd3fc;
   --focus: #3f6f5a;
   --shadow: 0 8px 22px -14px rgb(28 42 34 / 0.2);
   --radius: 14px;
@@ -28,6 +31,8 @@
   --font-mono: "IBM Plex Mono", ui-monospace, monospace;
   --rail-width: 15rem;
   --rail-collapsed-width: 3.5rem;
+  --objectives-width: 16.5rem;
+  --objectives-collapsed-width: 3.5rem;
   --page-max: 52rem;
   --measure: 65ch;
 }

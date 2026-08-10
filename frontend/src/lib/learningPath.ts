@@ -7,8 +7,12 @@ export type LearningPath = {
   topicTitle: string;
   subtopicId: string | null;
   subtopicTitle: string | null;
+  subjectPath: string;
+  /** @deprecated Use subjectPath */
   topicPath: string;
   lessonPath: string | null;
+  /** Unit lesson page with Quiz tab selected */
+  quizTabPath: string | null;
   overallUnlocked: boolean;
   topicComplete: boolean;
 };
@@ -19,6 +23,8 @@ function pathForTopic(
   topic: LearningDirectory["subjects"][number]["topics"][number],
   subtopic: LearningDirectory["subjects"][number]["topics"][number]["subtopics"][number] | null,
 ): LearningPath {
+  const subjectPath = `/subjects/${subjectId}`;
+  const lessonPath = subtopic ? `${subjectPath}/subtopics/${subtopic.id}/lesson` : null;
   return {
     subjectId,
     subjectName,
@@ -26,10 +32,10 @@ function pathForTopic(
     topicTitle: topic.title,
     subtopicId: subtopic?.id ?? null,
     subtopicTitle: subtopic?.title ?? null,
-    topicPath: `/subjects/${subjectId}/topics/${topic.id}`,
-    lessonPath: subtopic
-      ? `/subjects/${subjectId}/topics/${topic.id}/subtopics/${subtopic.id}/lesson`
-      : null,
+    subjectPath,
+    topicPath: subjectPath,
+    lessonPath,
+    quizTabPath: lessonPath ? `${lessonPath}?tab=quiz` : null,
     overallUnlocked: Boolean(topic.overall_quiz?.unlocked),
     topicComplete: topic.complete,
   };

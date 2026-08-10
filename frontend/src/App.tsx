@@ -7,7 +7,7 @@ import { HomePage } from "./pages/HomePage";
 import { LessonPage } from "./pages/LessonPage";
 import { QuizPage } from "./pages/QuizPage";
 import { ResultPage } from "./pages/ResultPage";
-import { TopicPage } from "./pages/TopicPage";
+import { TopicPageRedirect } from "./pages/TopicPageRedirect";
 import { WelcomePage } from "./pages/WelcomePage";
 
 export function App() {
@@ -47,7 +47,17 @@ export function App() {
         element={
           <RequireAuth>
             <RequireEnrollment>
-              <TopicPage />
+              <TopicPageRedirect />
+            </RequireEnrollment>
+          </RequireAuth>
+        }
+      />
+      <Route
+        path="/subjects/:subjectId/subtopics/:subtopicId/lesson"
+        element={
+          <RequireAuth>
+            <RequireEnrollment>
+              <LessonPage />
             </RequireEnrollment>
           </RequireAuth>
         }
@@ -57,7 +67,7 @@ export function App() {
         element={
           <RequireAuth>
             <RequireEnrollment>
-              <LessonPage />
+              <TopicPageRedirect />
             </RequireEnrollment>
           </RequireAuth>
         }

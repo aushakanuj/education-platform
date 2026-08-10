@@ -20,15 +20,15 @@ function readCollapsed(): boolean {
 
 export function AppShell({
   children,
-  topicTitle,
+  subjectTitle,
 }: {
   children: React.ReactNode;
-  topicTitle?: string;
+  subjectTitle?: string;
 }) {
   const { user, enrollments, enrolled, signOut } = useAuth();
   const location = useLocation();
   const navigate = useNavigate();
-  const { subjectId, topicId } = useParams();
+  const { subjectId } = useParams();
   const [resetOpen, setResetOpen] = useState(false);
   const [resetBusy, setResetBusy] = useState(false);
   const [resetError, setResetError] = useState<string | null>(null);
@@ -52,24 +52,18 @@ export function AppShell({
 
   const grade = enrollments?.grade_enrollments.find((g) => g.status === "active");
 
-  const onSubjects =
-    location.pathname === "/" ||
-    (Boolean(subjectId) && !topicId && location.pathname.startsWith("/subjects/"));
-  const onTopic =
-    Boolean(topicId) ||
-    location.pathname.startsWith("/quizzes/") ||
-    location.pathname.startsWith("/attempts/");
+  const onSubjects = location.pathname === "/" || location.pathname === `/subjects/${subjectId}`;
+  const onSubjectMaterial =
+    Boolean(subjectId) &&
+    (location.pathname.startsWith(`/subjects/${subjectId}/`) ||
+      location.pathname.startsWith("/quizzes/") ||
+      location.pathname.startsWith("/attempts/"));
 
-  const topicPath =
-    enrolled && subjectId && topicId
-      ? `/subjects/${subjectId}/topics/${topicId}`
-      : enrolled
-        ? "/"
-        : "/enroll";
+  const subjectPath = enrolled && subjectId ? `/subjects/${subjectId}` : enrolled ? "/" : "/enroll";
 
   const homeTo = enrolled ? "/" : "/enroll";
   const metaParts = [grade?.grade_name ?? "Grade 8", "Demo School"];
-  const topicLabel = topicTitle ?? "Current topic";
+  const subjectLabel = subjectTitle ?? "School material";
 
   async function onResetDemo() {
     setResetBusy(true);
@@ -124,27 +118,27 @@ export function AppShell({
               </span>
               <span className="rail__link-label">Subjects</span>
             </Link>
-            {topicId ? (
+            {subjectId ? (
               <Link
-                to={topicPath}
-                className={`rail__link ${onTopic ? "is-active" : ""}`}
-                title={topicLabel}
+                to={subjectPath}
+                className={`rail__link ${onSubjectMaterial ? "is-active" : ""}`}
+                title={subjectLabel}
               >
                 <span className="rail__link-short" aria-hidden="true">
-                  T
+                  M
                 </span>
-                <span className="rail__link-label">{topicLabel}</span>
+                <span className="rail__link-label">{subjectLabel}</span>
               </Link>
             ) : (
               <span
                 className="rail__link is-disabled"
                 aria-disabled="true"
-                title="Current topic"
+                title="School material"
               >
                 <span className="rail__link-short" aria-hidden="true">
-                  T
+                  M
                 </span>
-                <span className="rail__link-label">Current topic</span>
+                <span className="rail__link-label">School material</span>
               </span>
             )}
           </nav>
@@ -183,13 +177,13 @@ export function AppShell({
               <Link to={homeTo} className={`rail__link ${onSubjects ? "is-active" : ""}`}>
                 Subjects
               </Link>
-              {topicId ? (
-                <Link to={topicPath} className={`rail__link ${onTopic ? "is-active" : ""}`}>
-                  {topicLabel}
+              {subjectId ? (
+                <Link to={subjectPath} className={`rail__link ${onSubjectMaterial ? "is-active" : ""}`}>
+                  {subjectLabel}
                 </Link>
               ) : (
                 <span className="rail__link is-disabled" aria-disabled="true">
-                  Current topic
+                  School material
                 </span>
               )}
             </nav>
