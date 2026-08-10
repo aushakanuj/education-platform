@@ -91,11 +91,15 @@ export function QuizPage() {
     }
   }
 
-  const topicPath = path?.topicPath ?? "/";
+  const subjectPath = path?.subjectPath ?? "/";
   const lessonPath = path?.lessonPath;
+  const quizTabPath = path?.quizTabPath;
+  const isUnitQuiz = Boolean(quizTabPath && path?.subtopicId);
+  const backPath = isUnitQuiz ? quizTabPath! : subjectPath;
+  const backLabel = isUnitQuiz ? "← Back to quiz" : "← Back to subject";
 
   return (
-    <AppShell topicTitle={path?.topicTitle}>
+    <AppShell subjectTitle={path?.subjectName}>
       {starting && (
         <div className="center-state" role="status">
           Starting quiz…
@@ -113,8 +117,8 @@ export function QuizPage() {
                 Open lesson
               </Link>
             )}
-            <Link to={topicPath} className="btn">
-              Back to topic
+            <Link to={backPath} className="btn">
+              {isUnitQuiz ? "Back to quiz" : "Back to subject"}
             </Link>
           </div>
         </div>
@@ -127,14 +131,16 @@ export function QuizPage() {
               <Crumbs
                 parts={[
                   { label: "Subjects", to: "/" },
-                  { label: path.subjectName, to: `/subjects/${path.subjectId}` },
-                  { label: path.topicTitle, to: path.topicPath },
+                  { label: path.subjectName, to: path.subjectPath },
+                  ...(path.subtopicTitle && quizTabPath
+                    ? [{ label: path.subtopicTitle, to: quizTabPath }]
+                    : []),
                   { label: attempt.title },
                 ]}
               />
               <div className="back-row">
-                <Link to={path.topicPath} className="btn btn--outline btn--sm">
-                  ← Back to topic
+                <Link to={backPath} className="btn btn--outline btn--sm">
+                  {backLabel}
                 </Link>
               </div>
             </>

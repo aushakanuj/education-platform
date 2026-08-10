@@ -1,5 +1,5 @@
-import { render, screen } from "@testing-library/react";
-import { MemoryRouter } from "react-router-dom";
+import { fireEvent, render, screen } from "@testing-library/react";
+import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { describe, expect, it, vi, beforeEach } from "vitest";
 
 import { HomePage } from "./HomePage";
@@ -22,18 +22,73 @@ const mockDirectory = {
       name: "Mathematics",
       grade_name: "Grade 8",
       academic_period_name: "2026-27",
-      progress_percent: 0,
+      progress_percent: 25,
       topics: [
         {
           id: "topic-1",
           title: "Approved Materials",
           slug: "approved_materials",
           sequence: 1,
-          progress_percent: 0,
+          progress_percent: 25,
           complete: false,
-          objectives: [],
-          subtopics: [],
-          overall_quiz: null,
+          objectives: ["Define rectangles and squares."],
+          overall_quiz: {
+            id: "overall-1",
+            title: "Overall",
+            scope: "topic_mastery",
+            available: true,
+            unlocked: false,
+            locked_reason: "Pass all subtopic quizzes first",
+            pass_threshold_percent: 70,
+            attempt_count: 0,
+            best_score_percent: null,
+            passed: false,
+            in_progress_attempt_id: null,
+            recent_attempts: [],
+          },
+          subtopics: [
+            {
+              id: "st-1",
+              title: "Properties of Rectangles and Squares",
+              slug: "rectangles_squares_properties",
+              sequence: 1,
+              has_lesson: true,
+              lesson_completed: true,
+              progress_percent: 50,
+              progress: {
+                status: "opened",
+                opened_at: "2026-08-09T21:00:00Z",
+                last_opened_at: "2026-08-09T21:00:00Z",
+                completed_at: null,
+                last_unit_ordinal: 4,
+                source_material_version_id: "ver-1",
+              },
+              quiz: {
+                id: "quiz-1",
+                title: "Quiz",
+                scope: "subtopic_mastery",
+                available: true,
+                unlocked: true,
+                locked_reason: null,
+                pass_threshold_percent: 70,
+                attempt_count: 1,
+                best_score_percent: 50,
+                passed: false,
+                in_progress_attempt_id: null,
+                recent_attempts: [
+                  {
+                    id: "att-1",
+                    attempt_number: 1,
+                    status: "submitted",
+                    score_percent: 50,
+                    passed: false,
+                    started_at: "2026-08-09T21:00:00Z",
+                    submitted_at: "2026-08-09T21:30:00Z",
+                  },
+                ],
+              },
+            },
+          ],
         },
       ],
     },
@@ -56,10 +111,39 @@ describe("HomePage", () => {
     expect(screen.getByText("Student dashboard · demo data")).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "Mathematics" })).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "Science" })).toBeInTheDocument();
-    expect(screen.getByRole("heading", { name: "English" })).toBeInTheDocument();
-    expect(screen.getByRole("heading", { name: "Social Studies" })).toBeInTheDocument();
     expect(screen.queryByText(/1\.0 Enroll/)).not.toBeInTheDocument();
     expect(screen.queryByText(/^Topics$/)).not.toBeInTheDocument();
-    expect(screen.queryByText(/You’re in/)).not.toBeInTheDocument();
+  });
+
+  it("shows school material on the subject view", async () => {
+    render(
+      <MemoryRouter
+        initialEntries={["/subjects/math-1"]}
+        future={{ v7_startTransition: true, v7_relativeSplatPath: true }}
+      >
+        <Routes>
+          <Route path="/subjects/:subjectId" element={<HomePage />} />
+        </Routes>
+      </MemoryRouter>,
+    );
+
+    expect(await screen.findByRole("heading", { name: "School material" })).toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "Personal material" })).not.toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Units" })).toBeInTheDocument();
+    expect(screen.getByText("Properties of Rectangles and Squares")).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Mathematics quiz" })).toBeInTheDocument();
+    expect(screen.getByText("After all units")).toBeInTheDocument();
+    expect(screen.queryByText("Approved Materials")).not.toBeInTheDocument();
+
+    const summary = screen.getByText("Properties of Rectangles and Squares").closest("summary");
+    fireEvent.click(summary!);
+    expect(screen.getByRole("link", { name: "Review lesson" })).toHaveAttribute(
+      "href",
+      "/subjects/math-1/subtopics/st-1/lesson",
+    );
+    expect(screen.getByRole("link", { name: /Quiz history/i })).toHaveAttribute(
+      "href",
+      "/subjects/math-1/subtopics/st-1/lesson?tab=quiz",
+    );
   });
 });

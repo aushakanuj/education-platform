@@ -6,6 +6,8 @@ import type { LearningDirectory, SubjectNode } from "../api/types";
 import { ApiError } from "../api/types";
 import { AppShell } from "../components/AppShell";
 import { Crumbs } from "../components/Crumbs";
+import { SchoolMaterialPanel } from "../components/SchoolMaterialPanel";
+import { schoolTopic, subjectProgress } from "../lib/subjectMaterial";
 
 const PLACEHOLDER_SUBJECTS = [
   {
@@ -32,16 +34,6 @@ const SUBJECT_BLURBS: Record<string, string> = {
   Mathematics: "Number sense, algebra foundations, and geometry basics.",
   MATH: "Number sense, algebra foundations, and geometry basics.",
 };
-
-function topicsComplete(subject: SubjectNode): { done: number; total: number; pct: number } {
-  const total = subject.topics.length;
-  const done = subject.topics.filter((topic) => topic.complete).length;
-  return {
-    done,
-    total,
-    pct: total === 0 ? 0 : Math.round(subject.progress_percent),
-  };
-}
 
 function subjectBlurb(subject: SubjectNode): string {
   return (
@@ -83,64 +75,38 @@ export function HomePage() {
   const placeholders = PLACEHOLDER_SUBJECTS.filter((p) => !knownNames.has(p.name.toLowerCase()));
 
   if (selected) {
-    return (
-      <AppShell>
-        <Crumbs
-          parts={[
-            { label: "Subjects", to: "/" },
-            { label: selected.name },
-          ]}
-        />
-        <div className="back-row">
-          <Link to="/" className="btn btn--outline btn--sm">
-            ← Back to subjects
-          </Link>
-        </div>
-        <header className="page-head">
-          <p className="kicker">Subject overview</p>
-          <h1>{selected.name}</h1>
-          <p>{subjectBlurb(selected)}</p>
-        </header>
+    const curriculum = schoolTopic(selected);
 
-        {selected.topics.length === 0 ? (
-          <div className="alert alert--info">No topics published yet.</div>
-        ) : (
-          <div className="grid grid--2">
-            {selected.topics.map((topic) => {
-              const done = topic.subtopics.filter((s) => s.progress_percent === 100).length;
-              return (
-                <Link
-                  key={topic.id}
-                  to={`/subjects/${selected.id}/topics/${topic.id}`}
-                  className="card"
-                >
-                  <h3>{topic.title}</h3>
-                  <p>
-                    {topic.subtopics.length} subtopics · overall quiz{" "}
-                    {topic.overall_quiz?.unlocked ? "unlocked" : "locked"}
-                  </p>
-                  <div className="progress-label">
-                    {done}/{topic.subtopics.length} subtopics complete · topic{" "}
-                    {Math.round(topic.progress_percent)}%
-                  </div>
-                  <div className="progress" aria-hidden="true">
-                    <span style={{ width: `${topic.progress_percent}%` }} />
-                  </div>
-                  <div className="meta-row">
-                    {topic.complete ? (
-                      <span className="badge badge--ok">Topic complete</span>
-                    ) : (
-                      <span className="badge badge--info">In progress</span>
-                    )}
-                    {topic.overall_quiz?.passed && (
-                      <span className="badge badge--ok">Overall quiz passed</span>
-                    )}
-                  </div>
-                </Link>
-              );
-            })}
-          </div>
-        )}
+    return (
+      <AppShell subjectTitle={selected.name}>
+        <div className="subject-view">
+          <header className="subject-view__head">
+            <Crumbs
+              parts={[
+                { label: "Subjects", to: "/" },
+                { label: selected.name },
+              ]}
+            />
+            <div className="subject-view__bar">
+              <h1 id="school-material-heading" className="subject-view__section">
+                School material
+              </h1>
+              <span className="subject-view__grade">{selected.grade_name}</span>
+            </div>
+          </header>
+
+          <section className="material-pane material-pane--school" aria-labelledby="school-material-heading">
+            {!curriculum ? (
+              <div className="alert alert--info">No school material published yet.</div>
+            ) : (
+              <SchoolMaterialPanel
+                subjectId={selected.id}
+                subjectName={selected.name}
+                topic={curriculum}
+              />
+            )}
+          </section>
+        </div>
       </AppShell>
     );
   }
@@ -152,8 +118,8 @@ export function HomePage() {
         <p className="kicker">Student dashboard · demo data</p>
         <h1>Your subjects</h1>
         <p>
-          Pick a subject to browse topics and subtopics. Track lesson and quiz progress, review
-          attempt history, and unlock the overall topic quiz after every subtopic quiz is passed.
+          Pick a subject to open school material, track lesson and quiz progress, and review attempt
+          history.
         </p>
       </header>
 
@@ -178,7 +144,7 @@ export function HomePage() {
       {(subjects.length > 0 || placeholders.length > 0) && (
         <div className="grid grid--2">
           {subjects.map((subject) => {
-            const prog = topicsComplete(subject);
+            const prog = subjectProgress(subject);
             const empty = subject.topics.length === 0;
             if (empty) {
               return (
@@ -197,13 +163,16 @@ export function HomePage() {
                 <h2>{subject.name}</h2>
                 <p>{subjectBlurb(subject)}</p>
                 <div className="progress-label">
-                  {prog.done}/{prog.total} topics complete · {prog.pct}%
+                  {prog.done}/{prog.total} units complete · {prog.pct}%
                 </div>
-                <div className="progress" aria-hidden="true">
+                <div
+                  className={`progress ${prog.pct >= 100 ? "progress--complete" : "progress--in-progress"}`}
+                  aria-hidden="true"
+                >
                   <span style={{ width: `${prog.pct}%` }} />
                 </div>
                 <div className="meta-row">
-                  <span className="badge badge--info">{subject.topics.length} topics</span>
+                  <span className="badge badge--info">School material</span>
                 </div>
               </Link>
             );

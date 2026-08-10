@@ -34,7 +34,7 @@ export function WelcomePage() {
   const [quickDialog, setQuickDialog] = useState<{
     title: string;
     body: string;
-    topicPath: string;
+    subjectPath: string;
   } | null>(null);
 
   if (!loading && user && !holdingForDemo && !quickDialog) {
@@ -71,11 +71,11 @@ export function WelcomePage() {
       const summary = await enrollPocMath(true);
       setEnrollments(summary);
       const boot = await bootstrapDemoProgress();
-      const topicPath = `/subjects/${boot.subject_id}/topics/${boot.topic_id}`;
+      const subjectPath = `/subjects/${boot.subject_id}`;
       setQuickDialog({
         title: "Quick demo ready",
         body: boot.message,
-        topicPath,
+        subjectPath,
       });
     } catch (err) {
       setHoldingForDemo(false);
@@ -86,7 +86,7 @@ export function WelcomePage() {
   }
 
   function finishQuickDemo() {
-    const path = quickDialog?.topicPath ?? "/";
+    const path = quickDialog?.subjectPath ?? "/";
     setQuickDialog(null);
     setHoldingForDemo(false);
     navigate(path, { replace: true });

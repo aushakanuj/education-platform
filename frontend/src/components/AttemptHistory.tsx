@@ -11,6 +11,15 @@ export function formatAttempt(attempt: AttemptHistoryItem): string {
   return attempt.status.replaceAll("_", " ");
 }
 
+export function formatAttemptWhen(attempt: AttemptHistoryItem): string | null {
+  const when = attempt.submitted_at ?? attempt.started_at;
+  if (!when) return null;
+  return new Date(when).toLocaleDateString(undefined, {
+    month: "short",
+    day: "numeric",
+  });
+}
+
 export function AttemptHistoryList({ attempts }: { attempts: AttemptHistoryItem[] }) {
   if (attempts.length === 0) {
     return <p className="history-empty">No attempts recorded yet.</p>;
@@ -45,20 +54,20 @@ export function AttemptHistoryTrigger({
   attempts,
   onOpen,
   active,
+  to,
+  actionLabel,
 }: {
   title: string;
   attempts: AttemptHistoryItem[];
-  onOpen: () => void;
+  onOpen?: () => void;
   active?: boolean;
+  to?: string;
+  actionLabel?: string;
 }) {
   const latest = attempts[0];
-  return (
-    <button
-      type="button"
-      className={`history-trigger ${active ? "is-active" : ""}`}
-      onClick={onOpen}
-      aria-pressed={active}
-    >
+  const action = actionLabel ?? (active ? "Viewing" : to ? "Open quiz" : "Show history");
+  const body = (
+    <>
       <div className="history-toggle__label">
         <div className="history-toggle__title">{title}</div>
         <div className="history-toggle__latest">
@@ -71,7 +80,26 @@ export function AttemptHistoryTrigger({
           )}
         </div>
       </div>
-      <span className="history-trigger__action">{active ? "Viewing" : "Show history"}</span>
+      <span className="history-trigger__action">{action}</span>
+    </>
+  );
+
+  if (to) {
+    return (
+      <Link to={to} className="history-trigger">
+        {body}
+      </Link>
+    );
+  }
+
+  return (
+    <button
+      type="button"
+      className={`history-trigger ${active ? "is-active" : ""}`}
+      onClick={onOpen}
+      aria-pressed={active}
+    >
+      {body}
     </button>
   );
 }

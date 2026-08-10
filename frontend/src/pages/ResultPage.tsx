@@ -57,7 +57,15 @@ export function ResultPage() {
       ? 70
       : Math.round(Number(result.pass_threshold_percent));
   const held = result != null && !result.review_available;
-  const topicPath = path?.topicPath ?? "/";
+  const subjectPath = path?.subjectPath ?? "/";
+  const backPath =
+    result?.scope === "subtopic_mastery" && path?.quizTabPath
+      ? path.quizTabPath
+      : subjectPath;
+  const backLabel =
+    result?.scope === "subtopic_mastery" && path?.quizTabPath
+      ? "← Back to quiz"
+      : "← Back to subject";
   const rawScore =
     result?.score_raw == null
       ? null
@@ -66,7 +74,7 @@ export function ResultPage() {
         : String(result.score_raw);
 
   return (
-    <AppShell topicTitle={path?.topicTitle}>
+    <AppShell subjectTitle={path?.subjectName}>
       {!result && !error && (
         <div className="center-state" role="status">
           Loading result…
@@ -91,25 +99,39 @@ export function ResultPage() {
               <Crumbs
                 parts={[
                   { label: "Subjects", to: "/" },
-                  { label: path.subjectName, to: `/subjects/${path.subjectId}` },
-                  { label: path.topicTitle, to: path.topicPath },
+                  { label: path.subjectName, to: path.subjectPath },
+                  ...(path.subtopicTitle && path.quizTabPath
+                    ? [{ label: path.subtopicTitle, to: path.quizTabPath }]
+                    : []),
                   { label: "Result" },
                 ]}
               />
               <div className="back-row">
-                <Link to={path.topicPath} className="btn btn--outline btn--sm">
-                  ← Back to topic
+                <Link to={backPath} className="btn btn--outline btn--sm">
+                  {backLabel}
                 </Link>
               </div>
             </>
           )}
 
-          <header className="page-head">
-            <p className="kicker">
-              Result · Attempt {result.attempt_number}
-              {result.scope === "topic_mastery" ? " · overall quiz" : ""}
-            </p>
-            <h1>{held ? "Result pending release" : "Your score"}</h1>
+          <header className="page-head page-head--with-actions">
+            <div>
+              <p className="kicker">
+                Result · Attempt {result.attempt_number}
+                {result.scope === "topic_mastery" ? " · overall quiz" : ""}
+              </p>
+              <h1>{held ? "Result pending release" : "Your score"}</h1>
+            </div>
+            <div className="page-head__actions">
+              {result.scope === "subtopic_mastery" && path?.lessonPath && (
+                <Link to={path.lessonPath} className="btn btn--soft btn--sm">
+                  Review lesson
+                </Link>
+              )}
+              <Link to={`/quizzes/${result.quiz_id}`} className="btn btn--outline btn--sm">
+                Retake quiz
+              </Link>
+            </div>
           </header>
 
           {held ? (
@@ -167,17 +189,6 @@ export function ResultPage() {
               </div>
             </>
           )}
-
-          <div className="actions">
-            {result.scope === "subtopic_mastery" && path?.lessonPath && (
-              <Link to={path.lessonPath} className="btn btn--soft">
-                Review lesson
-              </Link>
-            )}
-            <Link to={`/quizzes/${result.quiz_id}`} className="btn btn--outline">
-              Retake quiz
-            </Link>
-          </div>
         </div>
       )}
 
@@ -190,7 +201,7 @@ export function ResultPage() {
           { label: "Stay here", variant: "soft" },
           {
             label: "Go to topic",
-            onClick: () => navigate(topicPath),
+            onClick: () => navigate(subjectPath),
           },
         ]}
       />
