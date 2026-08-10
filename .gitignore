@@ -55,3 +55,4 @@ Thumbs.db
 # Misc
 *.local
 .cache/
+.hallmark/
