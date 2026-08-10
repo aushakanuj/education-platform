@@ -69,3 +69,14 @@ async def get_current_user(
         student_profile_id=profile_id,
         status=user.status.value,
     )
+
+
+async def require_administrator(
+    principal: Principal = Depends(get_current_user),
+) -> Principal:
+    if not principal.is_administrator:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Administrator role required",
+        )
+    return principal

@@ -5,11 +5,14 @@ import { bootstrapDemoProgress } from "../api/demo";
 import { enrollPocMath } from "../api/enrollments";
 import { ApiError } from "../api/types";
 import { useAuth } from "../auth/AuthContext";
+import { ROLE_TEACHER, roleHome } from "../auth/roles";
 import { ConfirmDialog } from "../components/ConfirmDialog";
 import { PushButton } from "../components/PushButton";
 
 const DEMO_EMAIL = "student@demo.school";
 const DEMO_PASSWORD = "demo1234";
+const DEMO_ADMIN_EMAIL = "admin@demo.school";
+const DEMO_ADMIN_PASSWORD = "demo1234";
 const LAST_EMAIL_KEY = "ep_last_email";
 const IS_DEV = import.meta.env.DEV;
 
@@ -24,7 +27,7 @@ function initialPassword(email: string): string {
 }
 
 export function WelcomePage() {
-  const { user, enrolled, loading, signIn, setEnrollments } = useAuth();
+  const { user, loading, signIn, setEnrollments, enterDevRoleSession } = useAuth();
   const navigate = useNavigate();
   const [email, setEmail] = useState(initialEmail);
   const [password, setPassword] = useState(() => initialPassword(initialEmail()));
@@ -38,7 +41,7 @@ export function WelcomePage() {
   } | null>(null);
 
   if (!loading && user && !holdingForDemo && !quickDialog) {
-    return <Navigate to={enrolled ? "/" : "/enroll"} replace />;
+    return <Navigate to={roleHome(user.roles)} replace />;
   }
 
   async function doSignIn(nextEmail: string, nextPassword: string) {
@@ -90,6 +93,28 @@ export function WelcomePage() {
     setQuickDialog(null);
     setHoldingForDemo(false);
     navigate(path, { replace: true });
+  }
+
+  async function onDevAdmin() {
+    setError(null);
+    setBusy(true);
+    try {
+      await signIn(DEMO_ADMIN_EMAIL, DEMO_ADMIN_PASSWORD);
+      navigate("/admin", { replace: true });
+    } catch (err) {
+      setError(
+        err instanceof ApiError
+          ? err.message
+          : "Could not sign in as admin. Ensure the API is running and admin@demo.school is seeded.",
+      );
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  function onDevTeacher() {
+    enterDevRoleSession(ROLE_TEACHER);
+    navigate("/teacher", { replace: true });
   }
 
   return (
@@ -156,6 +181,28 @@ export function WelcomePage() {
               )}
             </div>
           </form>
+
+          {IS_DEV && (
+            <div className="login__actions" style={{ marginTop: "1rem" }}>
+              <p className="hint" style={{ width: "100%", marginBottom: "0.5rem" }}>
+                DEV shortcuts: admin signs in with a real JWT (
+                <code>{DEMO_ADMIN_EMAIL}</code> / <code>{DEMO_ADMIN_PASSWORD}</code>
+                ). Teacher still uses a fixture session (no JWT).
+              </p>
+              <PushButton
+                type="button"
+                variant="soft"
+                disabled={busy}
+                loading={busy}
+                onClick={() => void onDevAdmin()}
+              >
+                Enter as admin
+              </PushButton>
+              <PushButton type="button" variant="soft" disabled={busy} onClick={onDevTeacher}>
+                Enter as teacher
+              </PushButton>
+            </div>
+          )}
         </div>
       </div>
 

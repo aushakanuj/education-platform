@@ -7,12 +7,18 @@ dependencies = [
   "aiosqlite>=0.21",
   "alembic>=1.15",
   "argon2-cffi>=23.1",
+  "arq>=0.26",
+  "docling>=2.30",
   "email-validator>=2.2",
   "fastapi>=0.115",
   "httpx>=0.28",
   "pydantic-settings>=2.8",
   "pyjwt[crypto]>=2.10",
+  "python-multipart>=0.0.20",
+  "redis>=5.2",
+  "sentence-transformers>=3.4",
   "sqlalchemy[asyncio]>=2.0",
+  "sqlite-vec>=0.1.6",
   "uvicorn[standard]>=0.34",
 ]
 
@@ -53,6 +59,19 @@ python_version = "3.12"
 strict = true
 plugins = ["pydantic.mypy"]
 packages = ["education_platform"]
+
+[[tool.mypy.overrides]]
+module = [
+  "arq",
+  "arq.*",
+  "docling",
+  "docling.*",
+  "sentence_transformers",
+  "sentence_transformers.*",
+  "sqlite_vec",
+  "sqlite_vec.*",
+]
+ignore_missing_imports = true
 
 [tool.pytest.ini_options]
 addopts = "-q --cov=education_platform --cov-report=term-missing --cov-fail-under=80"

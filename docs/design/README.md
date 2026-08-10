@@ -17,15 +17,18 @@ over time. Teachers consume assigned-group evidence. Broader teacher workspace p
 views, adaptive practice, and private dynamic materials are under
 [future scope](./future-scope/README.md).
 
-Start with the [HTML project overview](../project-overview.html) (open in a browser),
-[architecture diagrams](../architecture.md), the
+Start with the [HTML project overview](../architecture/project-overview.html) (open in a browser),
+[architecture diagrams](../architecture/diagrams.md), the
 [abstract system view](./00-abstract-system-view.md), and
 [student learning experience](./01-student-learning-experience.md).
 
+See the [documentation hub](../README.md) for vision, reading paths, and the full implementation
+status matrix.
+
 ## Design sequence
 
-0. [HTML project overview](../project-overview.html) — detailed readable summary
-0b. [Architecture diagrams](../architecture.md) — diagram-only target views
+0. [HTML project overview](../architecture/project-overview.html) — detailed readable summary
+0b. [Architecture diagrams](../architecture/diagrams.md) — diagram-only target views
 1. [Abstract system view](./00-abstract-system-view.md)
 2. [Student learning experience](./01-student-learning-experience.md)
 3. [Identity, tenancy, and authorization](./02-identity-tenancy-and-authorization.md)
@@ -43,8 +46,8 @@ Deferred product surfaces live under [`future-scope/`](./future-scope/README.md)
 
 Later design topics still to document:
 
-- Document ingestion and knowledge indexing
-- AI assistant orchestration
+- Document ingestion and knowledge indexing — see [research/ai-rag-integration.md](../research/ai-rag-integration.md)
+- AI assistant orchestration — see [research/ai-rag-integration.md](../research/ai-rag-integration.md)
 - Notifications, forums, and certifications
 - API and React / React Native client contract
 - Security, privacy, and auditability

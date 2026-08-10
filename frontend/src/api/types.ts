@@ -241,6 +241,87 @@ export type TopicSummary = {
   has_quiz: boolean;
 };
 
+/** Admin RAG ingest lifecycle (materials + knowledge docs). */
+export type IngestLifecycleStatus =
+  | "draft"
+  | "processing"
+  | "ready"
+  | "published"
+  | "failed"
+  | "superseded"
+  | "archived";
+
+export type MaterialIngestAccepted = {
+  source_material_id: string;
+  version_id: string;
+  version_number: number;
+  title: string;
+  lifecycle_status: IngestLifecycleStatus;
+  ingest_job_id: string;
+};
+
+export type MaterialVersionStatus = {
+  id: string;
+  source_material_id: string;
+  version_number: number;
+  title: string;
+  lifecycle_status: IngestLifecycleStatus;
+  failure_reason: string | null;
+  chunk_count: number;
+  blob_content_type?: string | null;
+};
+
+export type KnowledgeDocType = "policy" | "handbook" | "other" | string;
+
+export type KnowledgeDocumentAccepted = {
+  document_id: string;
+  version_id: string;
+  version_number: number;
+  title: string;
+  doc_type: string;
+  lifecycle_status: IngestLifecycleStatus;
+  ingest_job_id: string;
+};
+
+export type KnowledgeVersionSummary = {
+  id: string;
+  version_number: number;
+  lifecycle_status: IngestLifecycleStatus;
+  failure_reason: string | null;
+  chunk_count: number;
+  created_at?: string | null;
+};
+
+export type KnowledgeDocumentListItem = {
+  id: string;
+  title: string;
+  slug: string;
+  doc_type: string;
+  status: string;
+  required_roles: string[];
+  latest_version: KnowledgeVersionSummary | null;
+};
+
+export type KnowledgeDocumentDetail = {
+  id: string;
+  title: string;
+  slug: string;
+  doc_type: string;
+  status: string;
+  required_roles: string[];
+  versions: KnowledgeVersionSummary[];
+};
+
+export type KnowledgeDocumentVersionStatus = {
+  id: string;
+  document_id: string;
+  version_number: number;
+  lifecycle_status: IngestLifecycleStatus;
+  failure_reason: string | null;
+  chunk_count: number;
+  blob_content_type?: string | null;
+};
+
 export class ApiError extends Error {
   status: number;
   body: unknown;

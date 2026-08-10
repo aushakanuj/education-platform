@@ -91,6 +91,34 @@ class SourceMaterialVersion(UUIDTimestampMixin, Base):
     published_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
 
+class SourceChunk(UUIDTimestampMixin, Base):
+    """Normalized text chunk produced by curriculum material ingestion."""
+
+    __tablename__ = "source_chunks"
+    __table_args__ = (
+        UniqueConstraint(
+            "source_material_version_id",
+            "content_hash",
+            name="uq_source_chunks_version_content_hash",
+        ),
+        CheckConstraint("ordinal >= 1", name="ck_source_chunks_ordinal"),
+        CheckConstraint(
+            "token_count IS NULL OR token_count >= 0",
+            name="ck_source_chunks_token_count",
+        ),
+    )
+
+    source_material_version_id: Mapped[UUID] = mapped_column(
+        ForeignKey("source_material_versions.id"), index=True
+    )
+    ordinal: Mapped[int] = mapped_column(Integer)
+    text: Mapped[str] = mapped_column(Text)
+    content_hash: Mapped[str] = mapped_column(String(64))
+    page_number: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    section_heading: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    token_count: Mapped[int | None] = mapped_column(Integer, nullable=True)
+
+
 class StudentMaterialProgress(UUIDTimestampMixin, Base):
     """Student progress against an immutable published material version."""
 

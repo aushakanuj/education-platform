@@ -1,9 +1,14 @@
 import { Navigate, useLocation } from "react-router-dom";
 
 import { useAuth } from "./AuthContext";
+import { primaryRole, ROLE_STUDENT, roleHome } from "./roles";
 
+/**
+ * Student enrollment gate. Administrators and teachers are sent to their role
+ * home instead of /enroll — enrollment applies to students only.
+ */
 export function RequireEnrollment({ children }: { children: React.ReactNode }) {
-  const { enrolled, loading } = useAuth();
+  const { user, enrolled, loading } = useAuth();
   const location = useLocation();
 
   if (loading) {
@@ -12,6 +17,12 @@ export function RequireEnrollment({ children }: { children: React.ReactNode }) {
         Loading…
       </div>
     );
+  }
+
+  const roles = user?.roles ?? [];
+  const primary = primaryRole(roles);
+  if (primary && primary !== ROLE_STUDENT) {
+    return <Navigate to={roleHome(roles)} replace />;
   }
 
   if (!enrolled) {

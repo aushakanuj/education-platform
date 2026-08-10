@@ -48,6 +48,6 @@ Quality checks (from backend/):
   uv run alembic upgrade head
   uv run pytest
 
-Approved materials live in docs/materials/.
+Approved curriculum lives in docs/curriculum/.
 Schema browser: docs/design/relational-schema.html
 "@

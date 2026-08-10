@@ -374,8 +374,8 @@
           <span class="pill later">Foundation implemented; learner loop designed</span>
         </div>
         <div class="doc-links">
-          <a href="./architecture.md">Architecture diagrams</a>
-          <a href="./design/README.md">Design docs</a>
+          <a href="./diagrams.md">Architecture diagrams</a>
+          <a href="../design/README.md">Design docs</a>
           <a href="../README.md">Repository README</a>
         </div>
       </header>
@@ -600,7 +600,7 @@ flowchart TB
           </tbody>
         </table>
         <div class="doc-links">
-          <a href="./design/02-identity-tenancy-and-authorization.md">Design: identity</a>
+          <a href="../design/02-identity-tenancy-and-authorization.md">Design: identity</a>
         </div>
       </section>
 
@@ -629,7 +629,7 @@ flowchart TB
           <li>Administrators create or copy prior-period Topic/Subtopic templates as new period-scoped records.</li>
         </ul>
         <div class="doc-links">
-          <a href="./design/03-academic-structure-enrollment-and-timetable.md">Design: academic structure</a>
+          <a href="../design/03-academic-structure-enrollment-and-timetable.md">Design: academic structure</a>
         </div>
       </section>
 
@@ -664,7 +664,7 @@ stateDiagram-v2
           <li>Uploaded and extracted text are untrusted data—never system instructions.</li>
         </ul>
         <div class="doc-links">
-          <a href="./design/04-material-lifecycle-and-ai-artifacts.md">Design: material lifecycle</a>
+          <a href="../design/04-material-lifecycle-and-ai-artifacts.md">Design: material lifecycle</a>
         </div>
       </section>
 
@@ -710,7 +710,7 @@ stateDiagram-v2
           <li>Deferred: adaptive practice, section variants, live AI question authoring, subjective grading.</li>
         </ul>
         <div class="doc-links">
-          <a href="./design/05-assessment-common-subtopic-mastery-quizzes.md">Design: assessment</a>
+          <a href="../design/05-assessment-common-subtopic-mastery-quizzes.md">Design: assessment</a>
         </div>
       </section>
 
@@ -759,7 +759,7 @@ AND marked_students / enrolled_students_at_assessment &gt;= 0.80</pre>
           <li>Pass: 50%</li>
         </ul>
         <div class="doc-links">
-          <a href="./design/06-analytics-and-comparison-insights.md">Design: analytics</a>
+          <a href="../design/06-analytics-and-comparison-insights.md">Design: analytics</a>
         </div>
       </section>
 
@@ -805,7 +805,7 @@ flowchart TD
           </tbody>
         </table>
         <div class="doc-links">
-          <a href="./design/01-student-learning-experience.md">Design: student experience</a>
+          <a href="../design/01-student-learning-experience.md">Design: student experience</a>
         </div>
       </section>
 
@@ -814,7 +814,7 @@ flowchart TD
         <h2>11. Architecture — request &amp; pipeline views</h2>
         <p>
           Full diagram-only index:
-          <a href="./architecture.md">docs/architecture.md</a>.
+          <a href="./diagrams.md">docs/architecture/diagrams.md</a>.
         </p>
         <h3>Study → evaluation pipeline</h3>
         <div class="diagram">
@@ -1017,8 +1017,8 @@ flowchart TB
           <li>Production cloud deployment, DR, compliance certification</li>
         </ul>
         <div class="doc-links">
-          <a href="./design/future-scope/README.md">Future scope index</a>
-          <a href="./design/future-scope/teacher-workspace-and-planning.md">Teacher workspace</a>
+          <a href="../design/future-scope/README.md">Future scope index</a>
+          <a href="../design/future-scope/teacher-workspace-and-planning.md">Teacher workspace</a>
         </div>
       </section>
 
@@ -1060,14 +1060,14 @@ uv run pytest</pre>
         <table>
           <thead><tr><th>Document</th><th>Role</th></tr></thead>
           <tbody>
-            <tr><td><a href="./architecture.md">docs/architecture.md</a></td><td>Diagram-only target architecture index</td></tr>
-            <tr><td><a href="./design/00-abstract-system-view.md">00 abstract system view</a></td><td>Product model, components, POC boundary</td></tr>
-            <tr><td><a href="./design/01-student-learning-experience.md">01 student learning experience</a></td><td>Learner directory, UX, APIs</td></tr>
-            <tr><td><a href="./design/02-identity-tenancy-and-authorization.md">02 identity</a></td><td>Roles, tenancy, authz</td></tr>
-            <tr><td><a href="./design/03-academic-structure-enrollment-and-timetable.md">03 academic structure</a></td><td>Periods, enrollments, assignments</td></tr>
-            <tr><td><a href="./design/04-material-lifecycle-and-ai-artifacts.md">04 materials</a></td><td>Publication &amp; ingestion</td></tr>
-            <tr><td><a href="./design/05-assessment-common-subtopic-mastery-quizzes.md">05 assessment</a></td><td>Common quizzes &amp; scoring</td></tr>
-            <tr><td><a href="./design/06-analytics-and-comparison-insights.md">06 analytics</a></td><td>Four pillars &amp; snapshots</td></tr>
+            <tr><td><a href="./diagrams.md">docs/architecture/diagrams.md</a></td><td>Diagram-only target architecture index</td></tr>
+            <tr><td><a href="../design/00-abstract-system-view.md">00 abstract system view</a></td><td>Product model, components, POC boundary</td></tr>
+            <tr><td><a href="../design/01-student-learning-experience.md">01 student learning experience</a></td><td>Learner directory, UX, APIs</td></tr>
+            <tr><td><a href="../design/02-identity-tenancy-and-authorization.md">02 identity</a></td><td>Roles, tenancy, authz</td></tr>
+            <tr><td><a href="../design/03-academic-structure-enrollment-and-timetable.md">03 academic structure</a></td><td>Periods, enrollments, assignments</td></tr>
+            <tr><td><a href="../design/04-material-lifecycle-and-ai-artifacts.md">04 materials</a></td><td>Publication &amp; ingestion</td></tr>
+            <tr><td><a href="../design/05-assessment-common-subtopic-mastery-quizzes.md">05 assessment</a></td><td>Common quizzes &amp; scoring</td></tr>
+            <tr><td><a href="../design/06-analytics-and-comparison-insights.md">06 analytics</a></td><td>Four pillars &amp; snapshots</td></tr>
             <tr><td><a href="../README.md">README.md</a></td><td>Setup and current vs planned capabilities</td></tr>
             <tr><td><a href="../AGENTS.md">AGENTS.md</a></td><td>Backend engineering invariants</td></tr>
           </tbody>

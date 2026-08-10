@@ -25,7 +25,7 @@ _ = _models
 
 BACKEND_ROOT = Path(__file__).resolve().parents[1]
 REPO_ROOT = BACKEND_ROOT.parent
-MATERIALS_DIR = REPO_ROOT / "docs" / "materials"
+MATERIALS_DIR = REPO_ROOT / "docs" / "curriculum"
 
 STUDENT_EMAIL = "student@example.com"
 STUDENT_PASSWORD = "password123"
@@ -37,12 +37,16 @@ def sqlite_path(tmp_path: Path) -> Path:
 
 
 @pytest.fixture()
-def migrated_db(sqlite_path: Path) -> Iterator[Path]:
+def migrated_db(sqlite_path: Path, tmp_path: Path) -> Iterator[Path]:
     database_url = f"sqlite+aiosqlite:///{sqlite_path}"
     previous_database_url = os.environ.get("DATABASE_URL")
     previous_jwt_secret = os.environ.get("JWT_SECRET")
+    previous_upload_dir = os.environ.get("UPLOAD_DIR")
+    previous_vector_db = os.environ.get("VECTOR_DB_PATH")
     os.environ["DATABASE_URL"] = database_url
     os.environ["JWT_SECRET"] = "test-secret-key-at-least-32-bytes-long!!"
+    os.environ["UPLOAD_DIR"] = str(tmp_path / "uploads")
+    os.environ["VECTOR_DB_PATH"] = str(tmp_path / "vectors.db")
     get_settings.cache_clear()
     reset_engine()
 
@@ -78,6 +82,14 @@ def migrated_db(sqlite_path: Path) -> Iterator[Path]:
         os.environ.pop("JWT_SECRET", None)
     else:
         os.environ["JWT_SECRET"] = previous_jwt_secret
+    if previous_upload_dir is None:
+        os.environ.pop("UPLOAD_DIR", None)
+    else:
+        os.environ["UPLOAD_DIR"] = previous_upload_dir
+    if previous_vector_db is None:
+        os.environ.pop("VECTOR_DB_PATH", None)
+    else:
+        os.environ["VECTOR_DB_PATH"] = previous_vector_db
 
 
 @pytest.fixture()

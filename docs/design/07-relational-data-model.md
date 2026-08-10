@@ -40,7 +40,7 @@ stays the same.
 - JWT login / refresh routes
 - Admin publish / release workflows
 - Object storage (MinIO/S3) for blobs
-- Seeding current `docs/materials/` files into grade/subject/topic rows
+- Seeding current `docs/curriculum/` files into grade/subject/topic rows
 - Timetable, AI artifacts, evaluation snapshots, and peer analytics tables
 
 ## 2. Cross-cutting conventions
@@ -347,7 +347,7 @@ Constraints:
 - Partial unique: at most one `published` version per material at a time (superseded versions keep
   historical status)
 
-Runtime note: until a later migration slice, `docs/materials/*.md` remains the live approved source
+Runtime note: until a later migration slice, `docs/curriculum/*.md` remains the live approved source
 for the materials API. This schema stores the target shape; no guessed grade/subject mappings are
 seeded from those files in this milestone.
 
