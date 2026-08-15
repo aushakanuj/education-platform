@@ -2,11 +2,12 @@ import { useEffect, useMemo, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 
 import { fetchLearningDirectory } from "../api/materials";
-import type { LearningDirectory, SubjectNode } from "../api/types";
+import type { LearningDirectory, SubjectNode, TopicNode } from "../api/types";
 import { ApiError } from "../api/types";
 import { AppShell } from "../components/AppShell";
 import { Crumbs } from "../components/Crumbs";
 import { SchoolMaterialPanel } from "../components/SchoolMaterialPanel";
+import { BACKDROP_CHROME_ANCHOR, setBackdropChrome } from "../lib/backdropChrome";
 import { schoolTopic, subjectProgress } from "../lib/subjectMaterial";
 
 const PLACEHOLDER_SUBJECTS = [
@@ -43,6 +44,78 @@ function subjectBlurb(subject: SubjectNode): string {
   );
 }
 
+function SubjectMaterialView({
+  subjectId,
+  subjectName,
+  curriculum,
+}: {
+  subjectId: string;
+  subjectName: string;
+  curriculum: TopicNode | null;
+}) {
+  useEffect(() => {
+    if (!curriculum) {
+      setBackdropChrome(null);
+      return;
+    }
+
+    const done = curriculum.subtopics.filter((s) => s.progress_percent === 100).length;
+    const total = curriculum.subtopics.length;
+    setBackdropChrome({
+      progressPercent: curriculum.progress_percent,
+      progressLabel: `Subject completion · ${Math.round(curriculum.progress_percent)}% · ${done}/${total} units · overall quiz ${
+        curriculum.overall_quiz?.passed ? "passed" : "pending"
+      }`,
+      statusLabel: curriculum.complete ? "Complete" : "In progress",
+      complete: curriculum.complete,
+    });
+
+    return () => setBackdropChrome(null);
+  }, [curriculum]);
+
+  const progressSr =
+    curriculum &&
+    `Subject completion · ${Math.round(curriculum.progress_percent)}% · ${
+      curriculum.subtopics.filter((s) => s.progress_percent === 100).length
+    }/${curriculum.subtopics.length} units · overall quiz ${
+      curriculum.overall_quiz?.passed ? "passed" : "pending"
+    }`;
+
+  return (
+    <AppShell subjectTitle={subjectName}>
+      <div className="subject-view">
+        <header className="subject-view__head">
+          <Crumbs
+            parts={[
+              { label: "Subjects", to: "/" },
+              { label: subjectName },
+            ]}
+          />
+          <div className="subject-view__toolbar">
+            <Link to="/" className="btn btn--matte btn--sm subject-view__back">
+              ← Back to subjects
+            </Link>
+          </div>
+          <div className="subject-view__chrome-slot" {...{ [BACKDROP_CHROME_ANCHOR]: "" }}>
+            <h1 id="school-material-heading" className="sr-only">
+              School material
+            </h1>
+            {progressSr && <p className="sr-only">{progressSr}</p>}
+          </div>
+        </header>
+
+        <section className="material-pane material-pane--school" aria-labelledby="school-material-heading">
+          {!curriculum ? (
+            <div className="alert alert--info">No school material published yet.</div>
+          ) : (
+            <SchoolMaterialPanel subjectId={subjectId} subjectName={subjectName} topic={curriculum} />
+          )}
+        </section>
+      </div>
+    </AppShell>
+  );
+}
+
 export function HomePage() {
   const { subjectId } = useParams();
   const [directory, setDirectory] = useState<LearningDirectory | null>(null);
@@ -75,44 +148,12 @@ export function HomePage() {
   const placeholders = PLACEHOLDER_SUBJECTS.filter((p) => !knownNames.has(p.name.toLowerCase()));
 
   if (selected) {
-    const curriculum = schoolTopic(selected);
-
     return (
-      <AppShell subjectTitle={selected.name}>
-        <div className="subject-view">
-          <header className="subject-view__head">
-            <Crumbs
-              parts={[
-                { label: "Subjects", to: "/" },
-                { label: selected.name },
-              ]}
-            />
-            <div className="back-row">
-              <Link to="/" className="btn btn--outline btn--sm">
-                ← Back to subjects
-              </Link>
-            </div>
-            <div className="subject-view__bar">
-              <h1 id="school-material-heading" className="subject-view__section">
-                School material
-              </h1>
-              <span className="subject-view__grade">{selected.grade_name}</span>
-            </div>
-          </header>
-
-          <section className="material-pane material-pane--school" aria-labelledby="school-material-heading">
-            {!curriculum ? (
-              <div className="alert alert--info">No school material published yet.</div>
-            ) : (
-              <SchoolMaterialPanel
-                subjectId={selected.id}
-                subjectName={selected.name}
-                topic={curriculum}
-              />
-            )}
-          </section>
-        </div>
-      </AppShell>
+      <SubjectMaterialView
+        subjectId={selected.id}
+        subjectName={selected.name}
+        curriculum={schoolTopic(selected)}
+      />
     );
   }
 
@@ -120,8 +161,7 @@ export function HomePage() {
     <AppShell>
       <Crumbs parts={[{ label: "Subjects" }]} />
       <header className="page-head">
-        <p className="kicker">Student dashboard · demo data</p>
-        <h1>Your subjects</h1>
+        <h1 className="sr-only">Your subjects</h1>
         <p>
           Pick a subject to open school material, track lesson and quiz progress, and review attempt
           history.

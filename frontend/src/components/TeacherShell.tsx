@@ -3,6 +3,7 @@ import { useEffect, useState } from "react";
 
 import { useAuth } from "../auth/AuthContext";
 import { PushButton } from "./PushButton";
+import { RouteMotion } from "./RouteMotion";
 
 const RAIL_COLLAPSED_KEY = "ep.teacherRailCollapsed";
 
@@ -48,6 +49,7 @@ export function TeacherShell() {
         <aside
           className={`rail ${railCollapsed ? "is-collapsed" : ""}`}
           aria-label="Primary"
+          data-elevated="true"
         >
           <div className="rail__top">
             {!railCollapsed && (
@@ -126,9 +128,9 @@ export function TeacherShell() {
           </div>
 
           <main className="main">
-            <div className="main__inner">
+            <RouteMotion>
               <Outlet />
-            </div>
+            </RouteMotion>
           </main>
         </div>
       </div>

@@ -117,7 +117,7 @@ describe("QuizPage", () => {
     expect(screen.getByText("A rectangle with equal sides")).toBeInTheDocument();
     expect(screen.getByRole("link", { name: /Back to quiz/i })).toHaveAttribute(
       "href",
-      "/subjects/subj-1/subtopics/st-1/lesson?tab=quiz",
+      "/subjects/subj-1/subtopics/st-1/lesson",
     );
   });
 });

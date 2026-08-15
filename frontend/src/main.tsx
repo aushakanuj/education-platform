@@ -1,12 +1,17 @@
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
+import { MotionConfig } from "motion/react";
 import { BrowserRouter } from "react-router-dom";
 
+import { AmbientBackdrop } from "./components/AmbientBackdrop";
 import { App } from "./App";
 import { AuthProvider } from "./auth/AuthContext";
+import { installCopyGuard } from "./lib/copyGuard";
 import "./styles/tokens.css";
 import "./styles/app.css";
 import "katex/dist/katex.min.css";
+
+installCopyGuard();
 
 const root = document.getElementById("root");
 if (!root) {
@@ -15,10 +20,13 @@ if (!root) {
 
 createRoot(root).render(
   <StrictMode>
-    <BrowserRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
-      <AuthProvider>
-        <App />
-      </AuthProvider>
-    </BrowserRouter>
+    <MotionConfig reducedMotion="user">
+      <BrowserRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
+        <AmbientBackdrop />
+        <AuthProvider>
+          <App />
+        </AuthProvider>
+      </BrowserRouter>
+    </MotionConfig>
   </StrictMode>,
 );

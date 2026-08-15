@@ -5,7 +5,7 @@
   --surface-2: #e9eee8;
   --ink: #1c2a22;
   --ink-muted: #5d6f64;
-  --border: #d5ddd6;
+  --border: color-mix(in srgb, #000000 10%, transparent);
   --accent: #3f6f5a;
   --accent-hover: #2f5645;
   --accent-ink: #ffffff;
@@ -23,7 +23,17 @@
   --info-bg: #e0f2fe;
   --info-border: #7dd3fc;
   --focus: #3f6f5a;
+  --shadow-sm: 0 2px 8px -4px rgb(28 42 34 / 0.12);
   --shadow: 0 8px 22px -14px rgb(28 42 34 / 0.2);
+  --shadow-md: 0 12px 28px -12px rgb(28 42 34 / 0.22), 0 4px 10px -6px rgb(63 111 90 / 0.1);
+  --shadow-lg: 0 20px 40px -18px rgb(28 42 34 / 0.28), 0 8px 16px -10px rgb(63 111 90 / 0.12);
+  --shadow-float: 0 18px 42px -16px rgb(28 42 34 / 0.32), 0 8px 18px -10px rgb(28 42 34 / 0.14);
+  --glass: color-mix(in srgb, #ffffff 78%, var(--surface));
+  --glass-border: color-mix(in srgb, #000000 8%, transparent);
+  --matte: #1a1f1c;
+  --matte-glass: color-mix(in srgb, #1a1f1c 78%, transparent);
+  --matte-border: color-mix(in srgb, #ffffff 18%, transparent);
+  --matte-ink: #f4f6f3;
   --radius: 14px;
   --radius-sm: 9px;
   --radius-pill: 999px;
@@ -31,8 +41,8 @@
   --font-mono: "IBM Plex Mono", ui-monospace, monospace;
   --rail-width: 15rem;
   --rail-collapsed-width: 3.5rem;
-  --objectives-width: 16.5rem;
-  --objectives-collapsed-width: 3.5rem;
+  --rail-inset: 0.85rem;
+  --demo-banner-height: 2.1rem;
   --page-max: 52rem;
   --measure: 65ch;
 }

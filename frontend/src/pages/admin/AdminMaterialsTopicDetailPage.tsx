@@ -84,7 +84,7 @@ export function AdminMaterialsTopicDetailPage() {
               ? `/admin/materials/grades/${grade.key}/subjects/${subject.id}`
               : "/admin/materials"
           }
-          className="btn btn--outline btn--sm"
+          className="btn btn--matte btn--sm"
         >
           ← Back to units
         </Link>

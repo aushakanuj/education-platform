@@ -38,7 +38,7 @@ export function RosterPage() {
       <div className="back-row">
         <Link
           to={`/teacher/classes/${section.id}`}
-          className="btn btn--outline btn--sm"
+          className="btn btn--matte btn--sm"
         >
           ← Back to section
         </Link>
