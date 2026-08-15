@@ -1,52 +1,67 @@
 # Agentic Education Platform
 
-Multi-role platform for automated education management and analytics. Administrators publish shared
-source curriculum; enrolled students study through a private learning directory; teachers consume
-class evidence (teacher UI is mock-only in the POC). See the
-[documentation hub](docs/README.md) for vision, reading paths, and the full implementation matrix.
+Multi-role platform for common curriculum and student evaluation. Administrators publish a shared
+**SourceCurriculum**; enrolled students study through a private **StudentLearningDirectory** that
+references published versions (not copies). Teachers consume class evidence (UI is mock-only in the
+POC). See the [documentation hub](docs/README.md) for vision, reading paths, and the full matrix.
 
-## Monorepo layout
+```text
+SourceCurriculum (shared, admin-owned)
+└── AcademicPeriod → Grade → Subject → Topic → Subtopic
+    ├── published lesson materials
+    └── common mastery quiz
 
-- `backend/` — FastAPI API backed by Postgres + pgvector
-- `frontend/` — Vite + React multi-role web client (student, admin, teacher mock)
-- `docs/curriculum/` — admin-approved lesson and quiz markdown (seed source)
-- `docs/` — architecture, design, research, and assets ([hub](docs/README.md))
+StudentLearningDirectory (private, per student)
+└── same tree, with progress + quiz attempts
+    (references published sources; no duplicated files)
+```
 
-## Current POC slice
+## Architecture (POC today)
 
-| Role | Flow | Status |
-| --- | --- | --- |
-| **Student** | Enroll → learning directory → lesson → quiz → score | **Built** |
-| **Admin** | JWT login → `/admin/materials` browse (read-only) | **Built** |
-| **Teacher** | `/teacher/*` workspace | **Mock** (frontend fixtures only) |
+```mermaid
+flowchart LR
+  Web[React_web_5173]
+  Api[FastAPI_8000]
+  Pg[Postgres_pgvector]
+  Worker[Ingest_worker]
+  OR[OpenRouter_optional]
 
-Approved markdown under `docs/curriculum/` is seeded into Postgres. Authenticated students with active
-Grade + Grade–Subject enrollments can list topics, read lessons/quizzes (no answer keys), and
-start/submit scored quiz attempts. Auth uses JWT access/refresh tokens.
+  Web -->|JWT_REST| Api
+  Api --> Pg
+  Worker --> Pg
+  Api -->|policy_LLM| OR
+```
 
-Browse the schema visually:
-[docs/design/relational-schema.html](docs/design/relational-schema.html).
-
-### Implementation summary
-
-| Area | Status |
+| Module | Role |
 | --- | --- |
-| JWT auth + roles | **Built** |
-| Enrollment gate + learning directory | **Built** |
-| Curriculum seed + student quiz loop | **Built** |
-| Admin materials browser | **Built** |
-| Teacher workspace / policy assistant | **Partial** (policy chat live; teacher still mock) |
-| Four-pillar analytics, ingestion, AI | **Deferred** |
+| `auth` | JWT access/refresh, roles, demo accounts |
+| `academics` | Periods, grades, subjects, enrollments, learning directory, demo bootstrap/reset |
+| `materials` | Curriculum seed, lessons, progress, PDF ingest hooks |
+| `assessments` | Quizzes and scored attempts (no answer keys on student APIs) |
+| `rag` | Knowledge docs, chunking, pgvector embeddings, ingest jobs |
+| `assistant` | Admin policy chats (LangGraph: inject → validate → retrieve → summarize) |
+| `workers` | Postgres claim worker for PDF ingest |
+
+**Not in POC:** teacher backend APIs, four-pillar evaluation snapshots, MinIO, React Native, student
+grounded assistant.
+
+## What’s built
+
+| Role / area | Status |
+| --- | --- |
+| **Student** — enroll → learning directory → lesson → quiz → score | **Built** |
+| **Admin** — materials browse + curriculum PDF upload, knowledge docs, policy assistant | **Built** |
+| **Teacher** — `/teacher/*` workspace | **Mock** (frontend fixtures only) |
+| JWT auth + enrollment gate | **Built** |
+| Curriculum seed (`docs/curriculum/` → Postgres) | **Built** |
+| Ingestion + pgvector indexing | **Built** |
+| Four-pillar analytics, MinIO, React Native, student grounded assistant | **Deferred** |
 
 Full matrix: [docs/README.md#implementation-status](docs/README.md#implementation-status).
 
-## Prerequisites
+## Start locally
 
-- macOS/Linux: `bash` and `curl`; Windows: PowerShell
-- Python 3.12 via `uv`
-- Docker (Compose Postgres + pgvector)
-
-## Setup
+**Prerequisites:** `uv`, Docker (Compose), Node 18+.
 
 ```bash
 # macOS/Linux
@@ -56,44 +71,62 @@ Full matrix: [docs/README.md#implementation-status](docs/README.md#implementatio
 ./scripts/setup-windows.ps1
 ```
 
-Start infra, migrate, and seed curriculum:
-
 ```bash
+# 1. Postgres + pgvector
 docker compose up -d postgres
+# wait until healthy, then:
+
+# 2. Migrate (API auto-seeds from docs/curriculum/ when no topics exist)
 cd backend
 uv run alembic upgrade head
-uv run python -m education_platform.modules.materials.seed
-```
+# optional manual seed:
+# uv run python -m education_platform.modules.materials.seed
 
-The API also auto-seeds on startup when the database has no topics yet.
+# 3. API
+uv run uvicorn education_platform.main:app --reload --host 127.0.0.1 --port 8000
 
-Start the API:
-
-```bash
-uv run uvicorn education_platform.main:app --reload
-```
-
-For admin PDF ingest, also run the Postgres claim worker:
-
-```bash
-uv run python -m education_platform.workers
-```
-
-Open API docs at `http://127.0.0.1:8000/docs`.
-
-### Frontend
-
-```bash
+# 4. Frontend (separate terminal)
 cd frontend
 cp .env.example .env   # VITE_API_BASE_URL=http://127.0.0.1:8000
 npm install
 npm run dev
 ```
 
-Open `http://localhost:5173`. Sign in as a student, enroll in Grade 8 Math, then study topics and
-take quizzes. Demo accounts: `student@demo.school` / `demo1234`, `admin@demo.school` / `demo1234`.
+Optional:
 
-### Example requests
+- Ingest worker (admin PDF upload): `cd backend && uv run python -m education_platform.workers`
+- Live policy LLM stages: set `OPENROUTER_API_KEY` in `backend/.env` (heuristic + stub summarize still run without it)
+
+| Service | URL |
+| --- | --- |
+| API docs | http://127.0.0.1:8000/docs |
+| Web app | http://localhost:5173 |
+
+Demo accounts: `student@demo.school` / `demo1234`, `admin@demo.school` / `demo1234`.
+
+Schema browser: [docs/design/relational-schema.html](docs/design/relational-schema.html).
+
+## How to use
+
+### Student
+
+1. Sign in as `student@demo.school` / `demo1234`
+2. Enroll in Grade 8 Math, or use **Quick demo**
+3. Open a topic lesson (slides), then start the unit quiz
+4. Submit answers and review the score (pass ≥ 70%). Correct option labels are never shown.
+
+### Admin
+
+1. Sign in as `admin@demo.school` / `demo1234`
+2. `/admin/materials` — browse the curriculum tree; upload curriculum PDFs and poll ingest status
+3. `/admin/documents` — upload/list knowledge PDFs
+4. `/admin/policy` — multi-chat policy assistant (retrieval over indexed docs; LLM optional via OpenRouter)
+
+### Teacher
+
+DEV **Enter as teacher** only — fixture UI, no teacher backend APIs.
+
+## Example requests
 
 **Student** — provision, login, enroll, learning directory:
 
@@ -118,10 +151,12 @@ ADMIN_TOKEN=$(curl -s -X POST http://127.0.0.1:8000/api/v1/auth/login \
 curl http://127.0.0.1:8000/api/v1/me/learning-directory -H "Authorization: Bearer $ADMIN_TOKEN"
 ```
 
-**Quick demo** — bootstrap enrollments and progress in development:
+**Quick demo** — bootstrap or reset enrollments/progress in development:
 
 ```bash
 curl -X POST http://127.0.0.1:8000/api/v1/me/demo/bootstrap \
+  -H "Authorization: Bearer $TOKEN"
+curl -X POST http://127.0.0.1:8000/api/v1/me/demo/reset \
   -H "Authorization: Bearer $TOKEN"
 ```
 
@@ -142,9 +177,18 @@ uv run alembic upgrade head
 uv run pytest
 ```
 
+```bash
+cd frontend
+npm test
+```
+
 ## Documentation
 
-- [Documentation hub](docs/README.md) — vision, map, implementation matrix
-- [Architecture](docs/architecture/README.md) — diagrams and HTML overview
-- [Design specs](docs/design/README.md) — component contracts and data model
-- [Backend README](backend/README.md) — API modules and access rules
+| Doc | Contents |
+| --- | --- |
+| [Documentation hub](docs/README.md) | Vision, map, implementation matrix |
+| [Architecture](docs/architecture/README.md) | Diagrams and HTML overview |
+| [Design specs](docs/design/README.md) | Component contracts and data model |
+| [Backend README](backend/README.md) | API modules and access rules |
+| [Frontend README](frontend/README.md) | Routes and role flows |
+| [Schema HTML](docs/design/relational-schema.html) | Visual relational schema |

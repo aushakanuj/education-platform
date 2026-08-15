@@ -44,12 +44,19 @@ cat <<'EOF'
 Setup complete.
 
 Next steps:
-  1. Infra: docker compose up -d postgres
+  1. Infra: docker compose up -d postgres  (wait until healthy)
   2. Apply schema: cd backend && uv run alembic upgrade head
-  3. Seed materials: cd backend && uv run python -m education_platform.modules.materials.seed
-  4. Start the API: cd backend && uv run uvicorn education_platform.main:app --reload
-  5. Ingest worker: cd backend && uv run python -m education_platform.workers
-  6. Open API docs: http://127.0.0.1:8000/docs
+     (API auto-seeds from docs/curriculum/ when no topics exist;
+      optional: uv run python -m education_platform.modules.materials.seed)
+  3. Start the API: cd backend && uv run uvicorn education_platform.main:app --reload --host 127.0.0.1 --port 8000
+  4. Frontend: cd frontend && cp .env.example .env && npm install && npm run dev
+  5. Optional ingest worker: cd backend && uv run python -m education_platform.workers
+  6. Optional policy LLM: set OPENROUTER_API_KEY in backend/.env
+  7. Open: API docs http://127.0.0.1:8000/docs  |  app http://localhost:5173
+
+Demo accounts:
+  student@demo.school / demo1234
+  admin@demo.school / demo1234
 
 Quality checks (from backend/):
   uv run ruff format --check .
@@ -57,6 +64,8 @@ Quality checks (from backend/):
   uv run mypy src
   uv run alembic upgrade head
   uv run pytest
+
+Frontend: cd frontend && npm test
 
 Approved curriculum lives in docs/curriculum/.
 Schema browser: docs/design/relational-schema.html

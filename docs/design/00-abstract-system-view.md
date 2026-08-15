@@ -266,7 +266,7 @@ flowchart TD
 
 ### Included
 
-- Administrator, teacher, and student roles
+- Administrator, teacher, and student roles (teacher UI is fixture-only today; see hub matrix)
 - Institution-aware JWT authentication
 - Multiple academic periods with one active period per institution
 - Administrator-managed Grade / Subject / Topic / Subtopic source folders
@@ -274,13 +274,18 @@ flowchart TD
 - Administrator publication of common source materials and one common mastery quiz per subtopic
 - Enrollment-scoped authorization before material or quiz access
 - Online objective attempts with automatic scoring
-- StudentLearningDirectory with progress, attempts, and four-pillar evaluation snapshots
-- Teacher class insights for assigned groups
+- StudentLearningDirectory with progress and quiz attempts
 - Audit metadata and testable access boundaries
-- FastAPI/OpenAPI contract for React web and React Native clients
+- FastAPI/OpenAPI contract for the React web client
+
+For **implemented vs designed** status (policy assistant, PDF ingest, mocks, deferred analytics),
+see the [documentation hub matrix](../README.md#implementation-status).
 
 ### Deferred
 
+- Four-pillar evaluation snapshots
+- Teacher class insights for assigned groups
+- React Native client
 - Parent portal and supervisor workflow
 - Teacher-authored derivatives and section-specific material/quiz assignments
 - Private AI-generated dynamic material versions
