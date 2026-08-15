@@ -103,6 +103,32 @@ def test_generator_is_deterministic(sync_session: Session) -> None:
     assert first_scores == second_scores
 
 
+def test_regenerating_works_after_the_school_has_been_used(sync_session: Session) -> None:
+    """Audit events reference users, so a naive wipe hits a foreign-key violation.
+
+    Found by running the demo twice: the first run leaves audit rows behind, and the second
+    generation could not delete the users they point at.
+    """
+    first = generate_school(sync_session, TEST_SPEC)
+    sync_session.commit()
+
+    # Simulate the school having been used: somebody read some data.
+    sync_session.add(
+        AuditEvent(
+            institution_id=first.institution_id,
+            actor_user_id=sync_session.scalar(select(StudentProfile.user_id).limit(1)),
+            event_type="data.scoped_read",
+            entity_type="insights.students",
+            payload={"rows_returned": 5},
+        )
+    )
+    sync_session.commit()
+
+    second = generate_school(sync_session, TEST_SPEC)
+    sync_session.commit()
+    assert second.students == first.students
+
+
 def test_planted_declining_student_is_actually_declining(synthetic_session: Session) -> None:
     """A random generator would not produce this, and the demo depends on it."""
     row = synthetic_session.execute(

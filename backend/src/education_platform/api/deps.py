@@ -13,7 +13,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from education_platform.db.session import get_session
 from education_platform.modules.audit.service import AuditAction, record_event
-from education_platform.modules.auth.models import StudentProfile, User, UserRole, UserStatus
+from education_platform.modules.auth.models import (
+    AuditEvent,
+    StudentProfile,
+    User,
+    UserRole,
+    UserStatus,
+)
 from education_platform.modules.auth.security import decode_token
 from education_platform.modules.authorization.scope import Scope, scope_for
 
@@ -116,19 +122,34 @@ async def get_scope(
 
 @dataclass(frozen=True, slots=True)
 class ScopedRequest:
-    """A principal plus their resolved boundary, for handlers that read student data."""
+    """A principal, their resolved boundary, and the audit entry for this read."""
 
     principal: Principal
     scope: Scope
     session: AsyncSession
+    audit_event: AuditEvent
+
+    async def record_rows(self, rows_returned: int, detail: str | None = None) -> None:
+        """Complete this read's audit entry with what it actually returned.
+
+        The entry is created up front by `scoped()` so a handler cannot forget to log the
+        access at all; this fills in the outcome. One read, one audit row -- an entry
+        recording `rows_returned = 0` is the evidence the boundary held.
+        """
+        payload = {**self.audit_event.payload, "rows_returned": rows_returned}
+        if detail:
+            payload["detail"] = detail
+        # Reassign rather than mutate: SQLAlchemy does not track in-place JSON edits.
+        self.audit_event.payload = payload
+        await self.session.flush()
 
 
 def scoped(resource: str) -> Callable[..., Awaitable[ScopedRequest]]:
     """Dependency for any route that reads student data.
 
-    Resolves the caller's scope and records the access in the audit trail. `resource` names
-    what was read and appears in the audit screen. Handlers should call
-    `audit.record_scoped_read` afterwards if they want the row count recorded too.
+    Resolves the caller's boundary and opens an audit entry for the access. The handler
+    completes it with `request.record_rows(n)`. `resource` names what was read and appears
+    on the audit screen.
     """
 
     async def _dependency(
@@ -136,7 +157,7 @@ def scoped(resource: str) -> Callable[..., Awaitable[ScopedRequest]]:
         session: AsyncSession = Depends(get_session),
     ) -> ScopedRequest:
         scope = await scope_for(session, principal)
-        await record_event(
+        event = await record_event(
             session,
             institution_id=principal.institution_id,
             actor_user_id=principal.user_id,
@@ -148,6 +169,6 @@ def scoped(resource: str) -> Callable[..., Awaitable[ScopedRequest]]:
                 "scoped_students": len(scope.student_ids),
             },
         )
-        return ScopedRequest(principal=principal, scope=scope, session=session)
+        return ScopedRequest(principal=principal, scope=scope, session=session, audit_event=event)
 
     return _dependency

@@ -2,16 +2,33 @@
 
 from __future__ import annotations
 
+from dataclasses import asdict
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel
 
 from education_platform.api.deps import ScopedRequest, scoped
-from education_platform.modules.audit.service import record_scoped_read
+from education_platform.modules.authorization.scope import Scope
 from education_platform.modules.insights import service
 
 router = APIRouter(tags=["insights"])
+
+
+def _describe(scope: Scope) -> str:
+    """A plain-English summary of the caller's boundary, for the interface to show."""
+    if scope.unrestricted:
+        return "Whole institution"
+    if not scope.student_ids:
+        return "No students in scope"
+    if scope.self_student_id is not None and scope.student_ids == {scope.self_student_id}:
+        return "Your own record only"
+    students = len(scope.student_ids)
+    assignments = len(scope.offering_sections)
+    return (
+        f"{students} student{'s' if students != 1 else ''} across "
+        f"{assignments} assignment{'s' if assignments != 1 else ''}"
+    )
 
 
 class StudentSummaryOut(BaseModel):
@@ -60,12 +77,8 @@ async def list_student_summaries(
         limit=limit,
     )
 
-    await record_scoped_read(
-        request.session,
-        principal=request.principal,
-        scope=request.scope,
-        resource="insights.students",
-        rows_returned=len(rows),
+    await request.record_rows(
+        len(rows),
         detail=", ".join(
             part
             for part in (
@@ -79,18 +92,11 @@ async def list_student_summaries(
     )
     await request.session.commit()
 
-    if request.scope.unrestricted:
-        description = "Whole institution"
-    elif not request.scope.student_ids:
-        description = "No students in scope"
-    else:
-        description = (
-            f"{len(request.scope.student_ids)} students across "
-            f"{len(request.scope.offering_sections)} assignments"
-        )
+    description = _describe(request.scope)
 
     return StudentSummaryPage(
         scope_description=description,
         rows_returned=len(rows),
-        items=[StudentSummaryOut(**row.__dict__) for row in rows],
+        # asdict, not __dict__: Student360Row uses slots and so has no __dict__.
+        items=[StudentSummaryOut(**asdict(row)) for row in rows],
     )

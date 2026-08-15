@@ -66,6 +66,7 @@ from education_platform.modules.assessments.models import (
 )
 from education_platform.modules.attendance.models import AttendanceRecord, AttendanceStatus
 from education_platform.modules.auth.models import (
+    AuditEvent,
     Institution,
     InstitutionStatus,
     RefreshSession,
@@ -217,6 +218,12 @@ def _wipe(session: Session, institution_id: UUID) -> None:
             delete(StudentGradeEnrollment).where(StudentGradeEnrollment.student_id.in_(student_ids))
         )
         session.execute(delete(StudentProfile).where(StudentProfile.id.in_(student_ids)))
+
+    # Audit events reference users, so they must go before the users do. Regenerating is a
+    # full reset of one synthetic school, and its audit history is synthetic too -- but note
+    # this is the only place anything deletes audit rows, and it is deliberately scoped to a
+    # single institution.
+    session.execute(delete(AuditEvent).where(AuditEvent.institution_id == institution_id))
 
     # Users too, or a regenerate collides with the unique (institution, email) constraint.
     user_ids = list(session.scalars(select(User.id).where(User.institution_id == institution_id)))
