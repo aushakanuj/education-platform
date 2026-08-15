@@ -12,6 +12,9 @@ target) call a FastAPI backend over JWT-authenticated REST. Bounded components i
 and access, academic structure, source curriculum, ingestion and indexing, assessment, analytics,
 student learning experience, grounded AI assistance, and platform infrastructure.
 
+The [repository README](../../README.md) describes the **implemented POC slice**. Diagrams in this
+folder remain **target** product views unless a POC overlay note says otherwise.
+
 See [abstract system view](../design/00-abstract-system-view.md) for the full component map.
 
 ## Two-directory model
@@ -62,7 +65,7 @@ material, quiz, and attempt access requires active enrollments.
 | --- | --- | --- |
 | API | FastAPI + PostgreSQL | FastAPI + PostgreSQL |
 | Curriculum storage | Markdown seed + Postgres rows | Object storage + versions |
-| Search/AI | pgvector indexing (assistant Deferred) | pgvector + grounded retrieval |
+| Search/AI | pgvector + admin policy retrieval (student grounded assistant Deferred) | pgvector + grounded retrieval |
 | Queue | Postgres `ingest_jobs` (SKIP LOCKED) | Worker + durable queue |
 | Blobs | Local `UPLOAD_DIR` | MinIO/S3 |
 

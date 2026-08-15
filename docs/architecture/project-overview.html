@@ -368,10 +368,10 @@
           mastery quiz per subtopic, and surface four-pillar evidence to students and teachers.
         </p>
         <div class="meta-row">
-          <span class="pill ok">Target design: student-evaluation POC</span>
-          <span class="pill">Backend: FastAPI + PostgreSQL</span>
-          <span class="pill">Clients: React web + React Native</span>
-          <span class="pill later">Foundation implemented; learner loop designed</span>
+          <span class="pill ok">POC live: student study + quiz loop</span>
+          <span class="pill">Backend: FastAPI + PostgreSQL / pgvector</span>
+          <span class="pill">Client: React web</span>
+          <span class="pill later">Teacher UI mock; four-pillar / RN deferred</span>
         </div>
         <div class="doc-links">
           <a href="./diagrams.md">Architecture diagrams</a>
@@ -917,10 +917,10 @@ flowchart TB
           <li>Python via <code class="inline">uv</code> (no <code class="inline">requirements.txt</code>).</li>
           <li>Thin HTTP routes; business logic in module services; persistence in models/repositories.</li>
           <li>Alembic migrations for schema; do not rely on <code class="inline">create_all</code> for production.</li>
-          <li>Package layout under <code class="inline">src/education_platform/</code>: <code class="inline">core</code>, <code class="inline">api</code>, <code class="inline">db</code>, <code class="inline">modules</code> (auth, curriculum, ai).</li>
-          <li>Compose stack: PostgreSQL + pgvector (ingest queue in Postgres; MinIO deferred).</li>
-          <li>Provider-neutral LLM/embedding ports; OpenAI-compatible adapter configurable via environment.</li>
-          <li>Clients: React web app and React Native mobile app against the same FastAPI OpenAPI / JWT contract (Flutter is not used).</li>
+          <li>Package layout under <code class="inline">src/education_platform/</code>: <code class="inline">core</code>, <code class="inline">api</code>, <code class="inline">db</code>, <code class="inline">modules</code> (auth, academics, materials, assessments, rag, assistant), plus <code class="inline">workers</code>.</li>
+          <li>Compose stack: PostgreSQL + pgvector only (ingest queue in Postgres; MinIO deferred).</li>
+          <li>Provider-neutral LLM/embedding ports; OpenRouter optional for admin policy assistant LLM stages.</li>
+          <li>Client: React web against the FastAPI OpenAPI / JWT contract (React Native deferred).</li>
         </ul>
       </section>
 
@@ -929,30 +929,31 @@ flowchart TB
         <h2>13. Implemented today vs designed POC</h2>
         <div class="grid-2">
           <div class="card">
-            <h3>Current backend foundation</h3>
+            <h3>Implemented today</h3>
             <ul>
-              <li>JWT authentication for administrators and teachers</li>
-              <li>Admin-managed teacher accounts, curriculum collections, assignments, documents, publication</li>
-              <li>Text, PDF, DOCX parsing with source chunks</li>
-              <li>Assignment-scoped teacher Q&amp;A with citations and structured lesson-plan generation</li>
-              <li>Local object storage and in-process ingestion for simple local DX</li>
+              <li>JWT auth for students and administrators; enrollment-gated student access</li>
+              <li>SourceCurriculum seed + StudentLearningDirectory (progress and quiz attempts)</li>
+              <li>Common mastery quizzes with automatic scoring (no answer keys on student APIs)</li>
+              <li>Admin materials browse, curriculum/knowledge PDF ingest, pgvector indexing</li>
+              <li>Admin policy assistant (multi-chat + retrieval; OpenRouter optional for LLM stages)</li>
             </ul>
           </div>
           <div class="card">
-            <h3>Designed POC (not fully implemented)</h3>
+            <h3>Designed / not in POC yet</h3>
             <ul>
-              <li>Student accounts with Grade + Grade–Subject enrollment gates</li>
-              <li>SourceCurriculum folders (AcademicPeriod → … → Subtopic)</li>
-              <li>Common mastery quizzes, attempts, automatic scoring</li>
-              <li>StudentLearningDirectory progress, attempts, evaluation snapshots</li>
-              <li>Four-pillar analytics and teacher class insights</li>
+              <li>Teacher workspace backed by APIs (frontend fixtures only today)</li>
+              <li>Four-pillar evaluation snapshots and teacher class insights</li>
+              <li>Student grounded AI assistant</li>
+              <li>MinIO/S3 object storage and React Native client</li>
+              <li>Full CMS / markdown publish editor beyond PDF ingest</li>
             </ul>
           </div>
         </div>
         <div class="callout">
-          Design documents under <code class="inline">docs/design/</code> are the product source of truth.
-          The codebase currently covers the administrator/teacher content and grounded-AI foundation
-          that the learner loop will build on.
+          Design documents under <code class="inline">docs/design/</code> remain target product contracts.
+          For live vs deferred status, prefer the
+          <a href="../README.md#implementation-status">documentation hub matrix</a> and the
+          <a href="../../README.md">repository README</a>.
         </div>
       </section>
 
@@ -1025,6 +1026,7 @@ flowchart TB
         <h3>Prerequisites</h3>
         <ul>
           <li>Docker Desktop (PostgreSQL + pgvector via Compose)</li>
+          <li><code class="inline">uv</code> and Python 3.12; Node 18+</li>
           <li>macOS/Linux: bash + curl; Windows: PowerShell</li>
         </ul>
         <h3>Bootstrap</h3>
@@ -1034,20 +1036,37 @@ flowchart TB
 # Windows PowerShell
 ./scripts/setup-windows.ps1
 
-docker compose up -d
-# copy .env.example → .env and set JWT secret
+docker compose up -d postgres
+# wait until healthy
+cd backend
 uv run alembic upgrade head
-uv run uvicorn education_platform.main:app --reload
-# API docs: http://127.0.0.1:8000/docs</pre>
+# API auto-seeds from docs/curriculum/ when no topics exist
+uv run uvicorn education_platform.main:app --reload --host 127.0.0.1 --port 8000
+
+# Frontend (separate terminal)
+cd frontend
+cp .env.example .env
+npm install
+npm run dev
+# App: http://localhost:5173  |  API docs: http://127.0.0.1:8000/docs
+
+# Demo: student@demo.school / demo1234 , admin@demo.school / demo1234
+# Optional: OPENROUTER_API_KEY in backend/.env for live policy LLM stages
+# Optional ingest worker: cd backend &amp;&amp; uv run python -m education_platform.workers</pre>
         <h3>Quality checks</h3>
-        <pre>uv run ruff format --check .
+        <pre>cd backend
+uv run ruff format --check .
 uv run ruff check .
 uv run mypy src
-uv run pytest</pre>
+uv run pytest
+
+cd frontend
+npm test</pre>
         <p>
-          Project agent rules also require institution/role/assignment/publication checks before
+          Project agent rules also require institution/role/enrollment/publication checks before
           curriculum retrieval, treating uploads and model output as untrusted, and Alembic for
-          schema changes.
+          schema changes. See the <a href="../../README.md">repository README</a> for the full
+          start path.
         </p>
       </section>
 
