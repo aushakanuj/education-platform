@@ -42,10 +42,19 @@ class Settings(BaseSettings):
     embedding_model_name: str = "all-MiniLM-L6-v2"
     max_upload_bytes: int = 20 * 1024 * 1024
     ingest_allowed_content_types: list[str] = ["application/pdf"]
+    openrouter_api_key: str | None = None
+    openrouter_base_url: str = "https://openrouter.ai/api/v1"
+    openrouter_model: str = "openai/gpt-4o-mini"
+    chat_context_limit_tokens: int = 8192
+    chat_retrieval_limit: int = 6
 
     @property
     def is_development(self) -> bool:
         return self.environment.lower() == "development"
+
+    @property
+    def openrouter_configured(self) -> bool:
+        return bool(self.openrouter_api_key and self.openrouter_api_key.strip())
 
 
 @lru_cache

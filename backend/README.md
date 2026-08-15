@@ -52,6 +52,7 @@ stored under `backend/var/uploads/`; embeddings live in Postgres `chunk_embeddin
 | `modules/academics` | Enrollments, demo bootstrap, `GET /me/learning-directory` |
 | `modules/materials` | Topics, lessons, progress, legacy flat `/materials` list, admin curriculum PDF upload |
 | `modules/rag` | Knowledge-document upload/status, local blobs, chunking, embeddings, pgvector |
+| `modules/assistant` | Admin policy multi-chat; OpenRouter + LangGraph; tool registry (`retrieve_chunks`) |
 | `modules/assessments` | Quiz attempts, scoring (no answer keys on student responses) |
 | `workers` | Postgres claim loop: DoclingDocument + HybridChunker → embed → index |
 
@@ -76,6 +77,11 @@ stored under `backend/var/uploads/`; embeddings live in Postgres `chunk_embeddin
 | `GET` | `/api/v1/admin/knowledge-documents` | Admin: list knowledge docs |
 | `GET` | `/api/v1/admin/knowledge-documents/{id}` | Admin: doc detail + versions |
 | `GET` | `/api/v1/admin/knowledge-document-versions/{id}` | Admin: knowledge ingest status |
+| `GET` | `/api/v1/chats` | Admin: list policy conversations |
+| `POST` | `/api/v1/chats` | Admin: create conversation |
+| `GET` | `/api/v1/chats/{id}` | Admin: conversation + messages + context % |
+| `POST` | `/api/v1/chats/{id}/messages` | Admin: send message (LangGraph turn) |
+| `DELETE` | `/api/v1/chats/{id}` | Admin: delete conversation |
 
 ## Access rules
 
@@ -83,6 +89,7 @@ stored under `backend/var/uploads/`; embeddings live in Postgres `chunk_embeddin
   access.
 - **Administrators** may call `GET /me/learning-directory` without student enrollments.
 - **Administrators** only for ingest upload/status routes (`require_administrator`).
+- **Administrators** only for `/chats*` policy assistant routes.
 - **Teachers** — role exists in schema; no teacher backend module or APIs yet (frontend uses
   fixtures).
 - Student-facing quiz endpoints never expose answer keys or correct option labels.
@@ -100,6 +107,11 @@ Environment variables (see `.env.example`):
 | `UPLOAD_DIR` | `backend/var/uploads` | Local PDF blobs |
 | `EMBEDDING_MODEL_NAME` | `all-MiniLM-L6-v2` | Local embedding model |
 | `MAX_UPLOAD_BYTES` | `20971520` (20MB) | Upload size cap |
+| `OPENROUTER_API_KEY` | unset | Required for live LLM stages in Policy assistant |
+| `OPENROUTER_BASE_URL` | `https://openrouter.ai/api/v1` | OpenRouter API base |
+| `OPENROUTER_MODEL` | `openai/gpt-4o-mini` | Chat model id |
+| `CHAT_CONTEXT_LIMIT_TOKENS` | `8192` | Context meter denominator |
+| `CHAT_RETRIEVAL_LIMIT` | `6` | Default `retrieve_chunks` top-k |
 
 Pytest expects Compose Postgres and the `education_test` database (created by
 `docker/postgres/init.sql`).

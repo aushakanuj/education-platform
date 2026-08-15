@@ -26,6 +26,7 @@
 | Backend API | From `backend/`: `uv run uvicorn education_platform.main:app --reload --host 127.0.0.1 --port 8000` | After Postgres is up: `uv run alembic upgrade head`. API auto-seeds from `docs/curriculum/` when no topics exist. |
 | Frontend | From `frontend/`: `npm run dev` | Needs `frontend/.env` with `VITE_API_BASE_URL=http://127.0.0.1:8000` (copy from `.env.example`). Dev server on `:5173`. |
 | Ingest worker | Optional | `uv run python -m education_platform.workers` from `backend/` — only for admin PDF ingest. Not required for student quiz or admin materials browse. |
+| Policy assistant | Admin `/admin/policy` | Needs `OPENROUTER_API_KEY` in `backend/.env` for LLM injection/validate/summarize stages. Without the key, heuristic injection + stub summarize still run; retrieval uses pgvector. |
 
 Standard quality commands: root [`README.md`](README.md) and [`backend/README.md`](backend/README.md). Backend gate from `backend/`: ruff format/check, mypy, pytest (80% coverage). Frontend: `npm test` (Vitest). Prefer `npm run dev` over `npm run build` for day-to-day work — `tsc --noEmit` in the production build currently fails on two pre-existing issues unrelated to runtime.
 
@@ -38,4 +39,5 @@ Standard quality commands: root [`README.md`](README.md) and [`backend/README.md
 
 - `uv` must be on `PATH` (`$HOME/.local/bin` after Astral install). All Python work uses `uv` from `backend/`.
 - Nested Docker in Cloud Agents may need `fuse-overlayfs` + `iptables-legacy` (see Cursor env-setup guidance) before `docker compose up -d postgres` works.
+- Set `OPENROUTER_API_KEY` (and optionally `OPENROUTER_MODEL`) for live Policy assistant LLM calls; never commit the key.
 - Pre-commit hooks live in `.pre-commit-config.yaml` (ruff on `backend/`); optional for agents, required quality gate is still the backend commands above.

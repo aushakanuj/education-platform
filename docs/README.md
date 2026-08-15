@@ -49,7 +49,7 @@ Status legend: **Built** | **Partial** | **Mock** | **Deferred**
 | Student study + quiz + scoring | **Built** | No answer keys on student APIs |
 | Legacy `GET /materials` | **Built** | Flat list; prefer learning-directory |
 | Admin materials browser (`/admin/materials`) | **Built** | Read-only; live API |
-| Admin policy assistant | **Mock** | Frontend fixture only |
+| Admin policy assistant | **Partial** | Live multi-chat + LangGraph (injection → validate → retrieve → summarize) via OpenRouter; needs `OPENROUTER_API_KEY` for LLM stages |
 | Teacher workspace (`/teacher/*`) | **Mock** | Frontend fixtures; no teacher backend APIs |
 | Material upload / publish UI | **Deferred** | Design in [04](./design/04-material-lifecycle-and-ai-artifacts.md); admin UI stubs disabled |
 | Four-pillar evaluation snapshots | **Deferred** | Designed in [06](./design/06-analytics-and-comparison-insights.md); not in backend/frontend yet |
