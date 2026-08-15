@@ -139,7 +139,7 @@ export function QuizPage() {
                 ]}
               />
               <div className="back-row">
-                <Link to={backPath} className="btn btn--outline btn--sm">
+                <Link to={backPath} className="btn btn--matte btn--sm">
                   {backLabel}
                 </Link>
               </div>

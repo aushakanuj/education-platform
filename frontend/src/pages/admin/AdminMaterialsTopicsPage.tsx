@@ -30,7 +30,7 @@ export function AdminMaterialsTopicsPage() {
       <div className="back-row">
         <Link
           to={grade ? `/admin/materials/grades/${grade.key}` : "/admin/materials"}
-          className="btn btn--outline btn--sm"
+          className="btn btn--matte btn--sm"
         >
           ← Back to subjects
         </Link>

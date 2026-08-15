@@ -110,7 +110,7 @@ Environment variables (see `.env.example`):
 | `OPENROUTER_API_KEY` | unset | Required for live LLM stages in Policy assistant |
 | `OPENROUTER_BASE_URL` | `https://openrouter.ai/api/v1` | OpenRouter API base |
 | `OPENROUTER_MODEL` | `openai/gpt-4o-mini` | Chat model id |
-| `CHAT_CONTEXT_LIMIT_TOKENS` | `8192` | Context meter denominator |
+| `CHAT_CONTEXT_LIMIT_TOKENS` | `20000` | Context meter denominator |
 | `CHAT_RETRIEVAL_LIMIT` | `6` | Default `retrieve_chunks` top-k |
 
 Pytest expects Compose Postgres and the `education_test` database (created by

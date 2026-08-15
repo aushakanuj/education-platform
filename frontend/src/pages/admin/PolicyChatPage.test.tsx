@@ -14,7 +14,7 @@ vi.mock("../../api/chats", () => ({
   postChatMessage: vi.fn(),
 }));
 
-const sampleContext = { used_tokens: 120, limit_tokens: 8192, used_percent: 1 };
+const sampleContext = { used_tokens: 120, limit_tokens: 20_000, used_percent: 1 };
 
 describe("PolicyChatPage", () => {
   beforeEach(() => {
@@ -57,11 +57,11 @@ describe("PolicyChatPage", () => {
       assistant_message: {
         id: "m3",
         role: "assistant",
-        content: "Notify the office after three absences.",
+        content: "## Attendance\n\nNotify the office after **three** absences.",
         citations: [{ id: "1", label: "Handbook", excerpt: "three absences" }],
         created_at: "2026-08-15T00:01:01Z",
       },
-      context: { used_tokens: 400, limit_tokens: 8192, used_percent: 5 },
+      context: { used_tokens: 400, limit_tokens: 20_000, used_percent: 2 },
     });
   });
 
@@ -76,7 +76,15 @@ describe("PolicyChatPage", () => {
     await waitFor(() => {
       expect(screen.getByText("Ask a policy question.")).toBeInTheDocument();
     });
-    expect(screen.getByLabelText(/Context window 1 percent/i)).toBeInTheDocument();
+    expect(screen.queryByText(/Administrator · grounded policy lookup/)).not.toBeInTheDocument();
+    expect(document.querySelector(".page-head")).toBeNull();
+    expect(screen.queryByText(/Answers are grounded in indexed/)).not.toBeInTheDocument();
+    expect(
+      screen.getByLabelText(/Context window 120 of 20,000 tokens, 1 percent/i),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText("120 / 20,000 tokens · 1%", { selector: ".policy-chat__context-tip" }),
+    ).toBeInTheDocument();
     expect(screen.getByText("Attendance", { selector: ".policy-chat__conv-title" })).toBeInTheDocument();
 
     await user.type(
@@ -86,11 +94,55 @@ describe("PolicyChatPage", () => {
     await user.click(screen.getByRole("button", { name: "Send" }));
 
     await waitFor(() => {
-      expect(
-        screen.getByText("Notify the office after three absences."),
-      ).toBeInTheDocument();
+      expect(screen.getByRole("heading", { name: "Attendance" })).toBeInTheDocument();
     });
-    expect(screen.getByText("Handbook")).toBeInTheDocument();
-    expect(screen.getByLabelText(/Context window 5 percent/i)).toBeInTheDocument();
+    expect(screen.getByText("three", { selector: "strong" })).toBeInTheDocument();
+    expect(screen.getByText(/Notify the office after/)).toBeInTheDocument();
+    expect(screen.getByText("Sources (1)")).toBeInTheDocument();
+    expect(screen.queryByLabelText("Filter")).not.toBeVisible();
+    expect(screen.queryByText("three absences")).not.toBeVisible();
+
+    await user.click(screen.getByText("Sources (1)"));
+
+    expect(screen.getByLabelText("Filter")).toHaveDisplayValue("All types");
+    expect(screen.getByRole("option", { name: "Handbook" })).toBeInTheDocument();
+    expect(screen.getByText("three absences")).toBeVisible();
+    expect(
+      screen.getByLabelText(/Context window 400 of 20,000 tokens, 2 percent/i),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText("400 / 20,000 tokens · 2%", { selector: ".policy-chat__context-tip" }),
+    ).toBeInTheDocument();
+  });
+
+  it("collapses and expands the conversation sidebar", async () => {
+    const user = userEvent.setup();
+    render(
+      <MemoryRouter>
+        <PolicyChatPage />
+      </MemoryRouter>,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText("Attendance", { selector: ".policy-chat__conv-title" })).toBeVisible();
+    });
+
+    const collapse = screen.getByRole("button", { name: "Collapse chats" });
+    expect(collapse).toHaveAttribute("aria-expanded", "true");
+    await user.click(collapse);
+
+    expect(screen.getByRole("button", { name: "Expand chats" })).toHaveAttribute(
+      "aria-expanded",
+      "false",
+    );
+    expect(document.querySelector(".policy-chat__layout.is-sidebar-collapsed")).not.toBeNull();
+    expect(screen.queryByText("Attendance", { selector: ".policy-chat__conv-title" })).not.toBeVisible();
+
+    await user.click(screen.getByRole("button", { name: "Expand chats" }));
+    expect(screen.getByRole("button", { name: "Collapse chats" })).toHaveAttribute(
+      "aria-expanded",
+      "true",
+    );
+    expect(screen.getByText("Attendance", { selector: ".policy-chat__conv-title" })).toBeVisible();
   });
 });

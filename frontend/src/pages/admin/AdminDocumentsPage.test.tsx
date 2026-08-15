@@ -78,19 +78,27 @@ describe("AdminDocumentsPage", () => {
       </MemoryRouter>,
     );
 
-    expect(screen.getByRole("heading", { level: 1, name: "Documents" })).toBeInTheDocument();
+    expect(screen.queryByLabelText("Breadcrumb")).not.toBeInTheDocument();
+    expect(screen.queryByText(/Administrator · knowledge ingest/)).not.toBeInTheDocument();
+    expect(screen.getByText("Upload PDFs to index for Policy chat.")).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Upload document" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Indexed documents" })).toBeInTheDocument();
 
     await waitFor(() => {
       expect(screen.getByText("Attendance policy")).toBeInTheDocument();
     });
     expect(screen.getByText("ready")).toBeInTheDocument();
 
+    expect(screen.getByRole("checkbox", { name: "Administrator" })).toBeChecked();
+    expect(screen.getByRole("checkbox", { name: "Teacher" })).toBeChecked();
+    expect(screen.getByRole("checkbox", { name: "Student" })).not.toBeChecked();
+
     await user.clear(screen.getByLabelText(/^title$/i));
     await user.type(screen.getByLabelText(/^title$/i), "Handbook");
-    await user.selectOptions(screen.getByLabelText(/document type/i), "handbook");
+    await user.selectOptions(screen.getByLabelText(/^type$/i), "handbook");
 
     const file = new File(["%PDF-1.4"], "handbook.pdf", { type: "application/pdf" });
-    fireEvent.change(screen.getByLabelText(/pdf file/i), { target: { files: [file] } });
+    fireEvent.change(screen.getByLabelText(/drop a pdf here/i), { target: { files: [file] } });
     await user.click(screen.getByRole("button", { name: /upload pdf/i }));
 
     await waitFor(() => {
@@ -119,6 +127,26 @@ describe("AdminDocumentsPage", () => {
       expect(screen.getByRole("alert")).toHaveTextContent(/real administrator JWT/i);
     });
     expect(listKnowledgeDocuments).not.toHaveBeenCalled();
-    expect(screen.queryByLabelText(/pdf file/i)).not.toBeInTheDocument();
+    expect(screen.queryByLabelText(/drop a pdf here/i)).not.toBeInTheDocument();
+  });
+
+  it("accepts a PDF dropped onto the upload zone", async () => {
+    render(
+      <MemoryRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
+        <AdminDocumentsPage />
+      </MemoryRouter>,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText("Attendance policy")).toBeInTheDocument();
+    });
+
+    const file = new File(["%PDF-1.4"], "fee_policy.pdf", { type: "application/pdf" });
+    fireEvent.drop(screen.getByTestId("pdf-dropzone"), {
+      dataTransfer: { files: [file] },
+    });
+
+    expect(screen.getByText("fee_policy.pdf")).toBeInTheDocument();
+    expect(screen.getByLabelText(/^title$/i)).toHaveValue("fee policy");
   });
 });

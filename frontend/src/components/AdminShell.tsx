@@ -3,6 +3,7 @@ import { useEffect, useState } from "react";
 
 import { useAuth } from "../auth/AuthContext";
 import { PushButton } from "./PushButton";
+import { RouteMotion } from "./RouteMotion";
 
 const RAIL_COLLAPSED_KEY = "ep.adminRailCollapsed";
 
@@ -50,6 +51,7 @@ export function AdminShell() {
         <aside
           className={`rail ${railCollapsed ? "is-collapsed" : ""}`}
           aria-label="Admin primary"
+          data-elevated="true"
         >
           <div className="rail__top">
             {!railCollapsed && (
@@ -140,9 +142,9 @@ export function AdminShell() {
           </div>
 
           <main className="main">
-            <div className="main__inner">
+            <RouteMotion>
               <Outlet />
-            </div>
+            </RouteMotion>
           </main>
         </div>
       </div>

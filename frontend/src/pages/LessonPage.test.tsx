@@ -1,9 +1,12 @@
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
+import { clearSubtopicLessonCache } from "../lib/useSubtopicLesson";
 import { LessonPage } from "./LessonPage";
+import { LessonSlidesPage } from "./LessonSlidesPage";
+import { QuizHistoryPage } from "./QuizHistoryPage";
 
 const lessonPayload = {
   id: "mat-1",
@@ -115,10 +118,10 @@ vi.mock("../auth/AuthContext", () => ({
   }),
 }));
 
-function renderLesson() {
+function renderLesson(path = "/subjects/subj-1/subtopics/st-1/lesson") {
   return render(
     <MemoryRouter
-      initialEntries={["/subjects/subj-1/subtopics/st-1/lesson"]}
+      initialEntries={[path]}
       future={{ v7_startTransition: true, v7_relativeSplatPath: true }}
     >
       <Routes>
@@ -126,71 +129,84 @@ function renderLesson() {
           path="/subjects/:subjectId/subtopics/:subtopicId/lesson"
           element={<LessonPage />}
         />
+        <Route
+          path="/subjects/:subjectId/subtopics/:subtopicId/lesson/slides"
+          element={<LessonSlidesPage />}
+        />
+        <Route
+          path="/subjects/:subjectId/subtopics/:subtopicId/lesson/history"
+          element={<QuizHistoryPage />}
+        />
       </Routes>
     </MemoryRouter>,
   );
 }
 
 describe("LessonPage", () => {
-  it("shows lesson tab with summary before slides", async () => {
+  beforeEach(() => {
+    clearSubtopicLessonCache();
+  });
+
+  it("shows equal lesson and quiz panes on the overview", async () => {
     renderLesson();
 
     expect(await screen.findByRole("heading", { name: "Lesson Summary" })).toBeInTheDocument();
-    expect(screen.getByRole("tab", { name: "Lesson" })).toHaveAttribute("aria-selected", "true");
-    expect(screen.getByRole("link", { name: /Back to subject/i })).toHaveAttribute(
+    expect(screen.getByRole("link", { name: /Back to units/i })).toHaveAttribute(
       "href",
       "/subjects/subj-1",
     );
     expect(screen.getByText(/Rectangle Definition/)).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Continue · 2/3" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /Start from beginning/i })).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Next slide" })).not.toBeInTheDocument();
-    expect(screen.queryByText("Subtopic quiz")).not.toBeInTheDocument();
-  });
-
-  it("opens slides when continuing the lesson", async () => {
-    const user = userEvent.setup();
-    renderLesson();
-
-    await screen.findByRole("heading", { name: "Lesson Summary" });
-    await user.click(screen.getByRole("button", { name: "Continue · 2/3" }));
-
-    expect(await screen.findByRole("heading", { name: "Rectangles" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Next slide" })).toBeInTheDocument();
-  });
-
-  it("shows quiz dashboard with history and performance chart", async () => {
-    const user = userEvent.setup();
-    renderLesson();
-
-    await screen.findByRole("heading", { name: "Lesson Summary" });
-    await user.click(screen.getByRole("tab", { name: "Quiz" }));
-
-    expect(screen.getByRole("tab", { name: "Quiz" })).toHaveAttribute("aria-selected", "true");
-    expect(screen.getByRole("heading", { name: "Quiz" })).toBeInTheDocument();
-    expect(screen.getByRole("heading", { name: "Last quiz" })).toBeInTheDocument();
-    expect(screen.getByRole("heading", { name: "Performance over time" })).toBeInTheDocument();
-    expect(screen.getByRole("heading", { name: "Quiz history" })).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "Retake quiz" })).toHaveAttribute("href", "/quizzes/quiz-1");
-    expect(screen.getAllByText(/Not passed · 50%/).length).toBeGreaterThan(0);
-  });
-
-  it("opens the quiz tab when tab=quiz is in the URL", async () => {
-    render(
-      <MemoryRouter
-        initialEntries={["/subjects/subj-1/subtopics/st-1/lesson?tab=quiz"]}
-        future={{ v7_startTransition: true, v7_relativeSplatPath: true }}
-      >
-        <Routes>
-          <Route
-            path="/subjects/:subjectId/subtopics/:subtopicId/lesson"
-            element={<LessonPage />}
-          />
-        </Routes>
-      </MemoryRouter>,
+    expect(screen.queryByRole("heading", { name: "Last slide" })).not.toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Continue" })).toHaveAttribute(
+      "href",
+      "/subjects/subj-1/subtopics/st-1/lesson/slides",
     );
+    expect(screen.getByRole("heading", { name: "Last attempt" })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: /Show full history/i })).toHaveAttribute(
+      "href",
+      "/subjects/subj-1/subtopics/st-1/lesson/history",
+    );
+    expect(screen.getByRole("link", { name: "Retake quiz" })).toHaveAttribute("href", "/quizzes/quiz-1");
+    expect(screen.queryByRole("button", { name: "Next slide" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "Performance over time" })).not.toBeInTheDocument();
+  });
 
-    expect(await screen.findByRole("tab", { name: "Quiz" })).toHaveAttribute("aria-selected", "true");
-    expect(screen.getByRole("heading", { name: "Quiz history" })).toBeInTheDocument();
+  it("opens a dedicated slides page when continuing the lesson", async () => {
+    const user = userEvent.setup();
+    renderLesson();
+
+    await screen.findByRole("heading", { name: "Lesson Summary" });
+    await user.click(screen.getByRole("link", { name: "Continue" }));
+
+    expect(screen.queryByText("Loading lesson…")).not.toBeInTheDocument();
+    expect(await screen.findByRole("button", { name: "Next slide" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Rectangles" })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: /Back to lesson overview/i })).toHaveAttribute(
+      "href",
+      "/subjects/subj-1/subtopics/st-1/lesson",
+    );
+    expect(screen.queryByRole("heading", { name: "Last attempt" })).not.toBeInTheDocument();
+  });
+
+  it("opens the quiz history page with the performance chart", async () => {
+    const user = userEvent.setup();
+    renderLesson();
+
+    await screen.findByRole("heading", { name: "Last attempt" });
+    await user.click(screen.getByRole("link", { name: /Show full history/i }));
+
+    expect(screen.queryByText("Loading quiz history…")).not.toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "Quiz history" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Performance over time" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "All attempts" })).toBeInTheDocument();
+    expect(screen.getAllByText("#2").length).toBeGreaterThan(0);
+    expect(screen.getByText(/Not passed · 40%/)).toBeInTheDocument();
+  });
+
+  it("starts review slides from the beginning", async () => {
+    renderLesson("/subjects/subj-1/subtopics/st-1/lesson/slides?from=start");
+
+    expect(await screen.findByRole("heading", { name: "Introduction" })).toBeInTheDocument();
+    expect(screen.getByText("Intro content.")).toBeInTheDocument();
   });
 });

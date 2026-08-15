@@ -12,6 +12,7 @@
   },
   "dependencies": {
     "katex": "^0.18.3",
+    "motion": "^13.1.0",
     "react": "^19.1.0",
     "react-dom": "^19.1.0",
     "react-markdown": "^10.1.0",
