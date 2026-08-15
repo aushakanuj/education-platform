@@ -6,7 +6,7 @@ from uuid import UUID
 
 import pytest
 from fastapi import HTTPException
-from sqlalchemy import create_engine, select
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Session
 
@@ -35,11 +35,8 @@ from education_platform.modules.materials.service import (
 )
 
 
-def _seed(migrated_db: object) -> None:
-    engine = create_engine(f"sqlite:///{migrated_db}")
-    with Session(engine) as sync:
-        seed_approved_materials(sync, replace=True)
-    engine.dispose()
+def _seed(session: Session) -> None:
+    seed_approved_materials(session, replace=True)
 
 
 async def _student_principal(session: AsyncSession) -> Principal:
@@ -66,9 +63,9 @@ async def _student_principal(session: AsyncSession) -> Principal:
 
 @pytest.mark.asyncio
 async def test_materials_and_attempt_flow(
-    async_db_session: AsyncSession, migrated_db: object
+    async_db_session: AsyncSession, db_session: Session
 ) -> None:
-    _seed(migrated_db)
+    _seed(db_session)
     principal = await _student_principal(async_db_session)
 
     topics = await list_topics(async_db_session, principal)
@@ -141,9 +138,9 @@ async def test_materials_and_attempt_flow(
 
 @pytest.mark.asyncio
 async def test_unenrolled_student_blocked(
-    async_db_session: AsyncSession, migrated_db: object
+    async_db_session: AsyncSession, db_session: Session
 ) -> None:
-    _seed(migrated_db)
+    _seed(db_session)
     me = await provision_student(
         async_db_session,
         ProvisionStudentRequest(
@@ -171,8 +168,8 @@ async def test_unenrolled_student_blocked(
 
 
 @pytest.mark.asyncio
-async def test_missing_topic(async_db_session: AsyncSession, migrated_db: object) -> None:
-    _seed(migrated_db)
+async def test_missing_topic(async_db_session: AsyncSession, db_session: Session) -> None:
+    _seed(db_session)
     principal = await _student_principal(async_db_session)
     with pytest.raises(HTTPException) as exc:
         await get_lesson(async_db_session, principal, "missing")

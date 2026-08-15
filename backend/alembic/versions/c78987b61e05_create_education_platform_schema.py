@@ -92,7 +92,7 @@ def upgrade() -> None:
             "uq_academic_periods_one_active_per_institution",
             ["institution_id"],
             unique=True,
-            sqlite_where=sa.text("status = 'active'"),
+            postgresql_where=sa.text("status = 'active'"),
         )
 
     op.create_table(
@@ -352,7 +352,7 @@ def upgrade() -> None:
             "uq_student_profiles_user_id",
             ["user_id"],
             unique=True,
-            sqlite_where=sa.text("user_id IS NOT NULL"),
+            postgresql_where=sa.text("user_id IS NOT NULL"),
         )
 
     op.create_table(
@@ -527,7 +527,7 @@ def upgrade() -> None:
             "uq_student_grade_enrollments_active",
             ["student_id", "academic_period_id"],
             unique=True,
-            sqlite_where=sa.text("status = 'active'"),
+            postgresql_where=sa.text("status = 'active'"),
         )
 
     op.create_table(
@@ -600,13 +600,13 @@ def upgrade() -> None:
             "uq_teaching_assignments_with_section",
             ["teacher_user_id", "grade_subject_offering_id", "section_id"],
             unique=True,
-            sqlite_where=sa.text("section_id IS NOT NULL"),
+            postgresql_where=sa.text("section_id IS NOT NULL"),
         )
         batch_op.create_index(
             "uq_teaching_assignments_without_section",
             ["teacher_user_id", "grade_subject_offering_id"],
             unique=True,
-            sqlite_where=sa.text("section_id IS NULL"),
+            postgresql_where=sa.text("section_id IS NULL"),
         )
 
     op.create_table(
@@ -711,7 +711,7 @@ def upgrade() -> None:
             "uq_student_subject_enrollments_active",
             ["student_id", "grade_subject_offering_id"],
             unique=True,
-            sqlite_where=sa.text("status = 'active'"),
+            postgresql_where=sa.text("status = 'active'"),
         )
 
     op.create_table(
@@ -1051,7 +1051,7 @@ def upgrade() -> None:
             "uq_source_material_versions_one_published",
             ["source_material_id"],
             unique=True,
-            sqlite_where=sa.text("lifecycle_status = 'published'"),
+            postgresql_where=sa.text("lifecycle_status = 'published'"),
         )
 
     op.create_table(
@@ -1470,7 +1470,7 @@ def downgrade() -> None:
     with op.batch_alter_table("source_material_versions", schema=None) as batch_op:
         batch_op.drop_index(
             "uq_source_material_versions_one_published",
-            sqlite_where=sa.text("lifecycle_status = 'published'"),
+            postgresql_where=sa.text("lifecycle_status = 'published'"),
         )
         batch_op.drop_index(batch_op.f("ix_source_material_versions_source_material_id"))
         batch_op.drop_index(batch_op.f("ix_source_material_versions_lifecycle_status"))
@@ -1509,7 +1509,7 @@ def downgrade() -> None:
     op.drop_table("subtopics")
     with op.batch_alter_table("student_subject_enrollments", schema=None) as batch_op:
         batch_op.drop_index(
-            "uq_student_subject_enrollments_active", sqlite_where=sa.text("status = 'active'")
+            "uq_student_subject_enrollments_active", postgresql_where=sa.text("status = 'active'")
         )
         batch_op.drop_index(batch_op.f("ix_student_subject_enrollments_student_id"))
         batch_op.drop_index(batch_op.f("ix_student_subject_enrollments_status"))
@@ -1523,10 +1523,12 @@ def downgrade() -> None:
     op.drop_table("topics")
     with op.batch_alter_table("teaching_assignments", schema=None) as batch_op:
         batch_op.drop_index(
-            "uq_teaching_assignments_without_section", sqlite_where=sa.text("section_id IS NULL")
+            "uq_teaching_assignments_without_section",
+            postgresql_where=sa.text("section_id IS NULL"),
         )
         batch_op.drop_index(
-            "uq_teaching_assignments_with_section", sqlite_where=sa.text("section_id IS NOT NULL")
+            "uq_teaching_assignments_with_section",
+            postgresql_where=sa.text("section_id IS NOT NULL"),
         )
         batch_op.drop_index(batch_op.f("ix_teaching_assignments_teacher_user_id"))
         batch_op.drop_index(batch_op.f("ix_teaching_assignments_status"))
@@ -1537,7 +1539,7 @@ def downgrade() -> None:
     op.drop_table("teaching_assignments")
     with op.batch_alter_table("student_grade_enrollments", schema=None) as batch_op:
         batch_op.drop_index(
-            "uq_student_grade_enrollments_active", sqlite_where=sa.text("status = 'active'")
+            "uq_student_grade_enrollments_active", postgresql_where=sa.text("status = 'active'")
         )
         batch_op.drop_index(batch_op.f("ix_student_grade_enrollments_student_id"))
         batch_op.drop_index(batch_op.f("ix_student_grade_enrollments_status"))
@@ -1561,7 +1563,7 @@ def downgrade() -> None:
     op.drop_table("user_roles")
     with op.batch_alter_table("student_profiles", schema=None) as batch_op:
         batch_op.drop_index(
-            "uq_student_profiles_user_id", sqlite_where=sa.text("user_id IS NOT NULL")
+            "uq_student_profiles_user_id", postgresql_where=sa.text("user_id IS NOT NULL")
         )
         batch_op.drop_index(batch_op.f("ix_student_profiles_user_id"))
         batch_op.drop_index(batch_op.f("ix_student_profiles_institution_id"))
@@ -1599,7 +1601,7 @@ def downgrade() -> None:
     with op.batch_alter_table("academic_periods", schema=None) as batch_op:
         batch_op.drop_index(
             "uq_academic_periods_one_active_per_institution",
-            sqlite_where=sa.text("status = 'active'"),
+            postgresql_where=sa.text("status = 'active'"),
         )
         batch_op.drop_index(batch_op.f("ix_academic_periods_status"))
         batch_op.drop_index(batch_op.f("ix_academic_periods_institution_id"))

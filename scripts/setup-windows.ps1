@@ -31,15 +31,25 @@ if (-not (Test-Path ".env")) {
     Write-Step "backend/.env already exists; leaving it unchanged."
 }
 
+Write-Step "Starting Postgres (Docker Compose)..."
+Set-Location $RootDir
+if (Get-Command docker -ErrorAction SilentlyContinue) {
+    docker compose up -d postgres
+} else {
+    Write-Step "Docker not found; start Postgres manually before migrating."
+}
+
 Write-Host @"
 
 Setup complete.
 
 Next steps:
-  1. Apply schema: cd backend; uv run alembic upgrade head
-  2. Seed materials: cd backend; uv run python -m education_platform.modules.materials.seed
-  3. Start the API: cd backend; uv run uvicorn education_platform.main:app --reload
-  4. Open API docs: http://127.0.0.1:8000/docs
+  1. Infra: docker compose up -d postgres
+  2. Apply schema: cd backend; uv run alembic upgrade head
+  3. Seed materials: cd backend; uv run python -m education_platform.modules.materials.seed
+  4. Start the API: cd backend; uv run uvicorn education_platform.main:app --reload
+  5. Ingest worker: cd backend; uv run python -m education_platform.workers
+  6. Open API docs: http://127.0.0.1:8000/docs
 
 Quality checks (from backend/):
   uv run ruff format --check .

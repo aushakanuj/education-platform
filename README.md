@@ -7,7 +7,7 @@ class evidence (teacher UI is mock-only in the POC). See the
 
 ## Monorepo layout
 
-- `backend/` — FastAPI API backed by SQLite
+- `backend/` — FastAPI API backed by Postgres + pgvector
 - `frontend/` — Vite + React multi-role web client (student, admin, teacher mock)
 - `docs/curriculum/` — admin-approved lesson and quiz markdown (seed source)
 - `docs/` — architecture, design, research, and assets ([hub](docs/README.md))
@@ -20,7 +20,7 @@ class evidence (teacher UI is mock-only in the POC). See the
 | **Admin** | JWT login → `/admin/materials` browse (read-only) | **Built** |
 | **Teacher** | `/teacher/*` workspace | **Mock** (frontend fixtures only) |
 
-Approved markdown under `docs/curriculum/` is seeded into SQLite. Authenticated students with active
+Approved markdown under `docs/curriculum/` is seeded into Postgres. Authenticated students with active
 Grade + Grade–Subject enrollments can list topics, read lessons/quizzes (no answer keys), and
 start/submit scored quiz attempts. Auth uses JWT access/refresh tokens.
 
@@ -44,6 +44,7 @@ Full matrix: [docs/README.md#implementation-status](docs/README.md#implementatio
 
 - macOS/Linux: `bash` and `curl`; Windows: PowerShell
 - Python 3.12 via `uv`
+- Docker (Compose Postgres + pgvector)
 
 ## Setup
 
@@ -55,9 +56,10 @@ Full matrix: [docs/README.md#implementation-status](docs/README.md#implementatio
 ./scripts/setup-windows.ps1
 ```
 
-Prepare the database and seed curriculum from `backend/`:
+Start infra, migrate, and seed curriculum:
 
 ```bash
+docker compose up -d postgres
 cd backend
 uv run alembic upgrade head
 uv run python -m education_platform.modules.materials.seed
@@ -69,6 +71,12 @@ Start the API:
 
 ```bash
 uv run uvicorn education_platform.main:app --reload
+```
+
+For admin PDF ingest, also run the Postgres claim worker:
+
+```bash
+uv run python -m education_platform.workers
 ```
 
 Open API docs at `http://127.0.0.1:8000/docs`.

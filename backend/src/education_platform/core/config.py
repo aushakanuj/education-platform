@@ -7,9 +7,8 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 _BACKEND_ROOT = Path(__file__).resolve().parents[3]
 _REPO_ROOT = Path(__file__).resolve().parents[4]
 _DEFAULT_MATERIALS_DIR = _REPO_ROOT / "docs" / "curriculum"
-_DEFAULT_DATABASE_URL = f"sqlite+aiosqlite:///{_BACKEND_ROOT / 'education.db'}"
+_DEFAULT_DATABASE_URL = "postgresql+asyncpg://education:education@localhost:5432/education"
 _DEFAULT_UPLOAD_DIR = _BACKEND_ROOT / "var" / "uploads"
-_DEFAULT_VECTOR_DB_PATH = _BACKEND_ROOT / "education_vectors.db"
 
 
 class Settings(BaseSettings):
@@ -39,9 +38,7 @@ class Settings(BaseSettings):
     demo_student_password: str = "demo1234"
     demo_admin_email: str = "admin@demo.school"
     demo_admin_password: str = "demo1234"
-    redis_url: str = "redis://localhost:6379/0"
     upload_dir: Path = _DEFAULT_UPLOAD_DIR
-    vector_db_path: Path = _DEFAULT_VECTOR_DB_PATH
     embedding_model_name: str = "all-MiniLM-L6-v2"
     max_upload_bytes: int = 20 * 1024 * 1024
     ingest_allowed_content_types: list[str] = ["application/pdf"]

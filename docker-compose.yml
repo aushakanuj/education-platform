@@ -1,6 +1,20 @@
 services:
-  redis:
-    image: redis:7-alpine
+  postgres:
+    image: pgvector/pgvector:pg16
+    environment:
+      POSTGRES_USER: education
+      POSTGRES_PASSWORD: education
+      POSTGRES_DB: education
     ports:
-      - "6379:6379"
-    command: ["redis-server", "--save", "", "--appendonly", "no"]
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./docker/postgres/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U education -d education"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  postgres_data:
