@@ -3,21 +3,20 @@
 from __future__ import annotations
 
 import hashlib
-from dataclasses import dataclass
 from typing import Any
+
+from education_platform.modules.rag.contracts import TextChunk
 
 SECTION_HEADING_MAX_LEN = 500
 EMBEDDING_TOKENIZER_MODEL = "sentence-transformers/all-MiniLM-L6-v2"
 
-
-@dataclass(frozen=True, slots=True)
-class TextChunk:
-    ordinal: int
-    text: str
-    content_hash: str
-    token_count: int
-    page_number: int | None = None
-    section_heading: str | None = None
+__all__ = [
+    "SECTION_HEADING_MAX_LEN",
+    "TextChunk",
+    "chunk_docling_document",
+    "content_hash",
+    "estimate_token_count",
+]
 
 
 def estimate_token_count(text: str) -> int:

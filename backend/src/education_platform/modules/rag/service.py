@@ -2,12 +2,12 @@
 
 from __future__ import annotations
 
-import json
 import re
-from typing import Any, cast
+from typing import cast
 from uuid import UUID, uuid4
 
 from fastapi import HTTPException, UploadFile, status
+from pydantic import ValidationError
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -29,6 +29,7 @@ from education_platform.modules.materials.models import (
     SourceMaterialVersionStatus,
 )
 from education_platform.modules.rag import storage
+from education_platform.modules.rag.contracts import parse_required_roles
 from education_platform.modules.rag.models import (
     IngestJob,
     IngestJobStatus,
@@ -55,6 +56,16 @@ _SLUG_RE = re.compile(r"[^a-z0-9]+")
 def slugify(value: str, *, fallback: str = "document") -> str:
     slug = _SLUG_RE.sub("-", value.strip().lower()).strip("-")
     return (slug[:100] or fallback)[:100]
+
+
+def _validated_required_roles(raw: str | None) -> list[str]:
+    try:
+        return parse_required_roles(raw)
+    except ValidationError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Invalid required_roles: {exc.errors()[0]['msg']}",
+        ) from exc
 
 
 def _validate_upload(file: UploadFile, data: bytes) -> str:
@@ -212,21 +223,6 @@ async def get_material_version_status(
     )
 
 
-def _parse_required_roles(raw: str | None) -> list[str]:
-    if raw is None or not raw.strip():
-        return ["administrator", "teacher"]
-    raw = raw.strip()
-    if raw.startswith("["):
-        try:
-            parsed: Any = json.loads(raw)
-            if isinstance(parsed, list) and all(isinstance(item, str) for item in parsed):
-                return list(parsed) or ["administrator", "teacher"]
-        except json.JSONDecodeError:
-            pass
-    roles = [part.strip() for part in raw.split(",") if part.strip()]
-    return roles or ["administrator", "teacher"]
-
-
 async def upload_knowledge_document(
     session: AsyncSession,
     principal: Principal,
@@ -264,7 +260,7 @@ async def upload_knowledge_document(
         slug=slug,
         doc_type=doc_type.strip() or "policy",
         status=KnowledgeDocumentStatus.DRAFT,
-        required_roles=_parse_required_roles(required_roles_raw),
+        required_roles=_validated_required_roles(required_roles_raw),
     )
     session.add(document)
     await session.flush()

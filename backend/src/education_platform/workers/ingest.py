@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any
 from uuid import UUID
 
+from pydantic import ValidationError
 from sqlalchemy import create_engine, delete, select
 from sqlalchemy.orm import Session
 
@@ -27,6 +28,7 @@ from education_platform.modules.materials.models import (
 )
 from education_platform.modules.rag import storage
 from education_platform.modules.rag.chunking import TextChunk, chunk_docling_document
+from education_platform.modules.rag.contracts import IngestJobClaim
 from education_platform.modules.rag.embeddings import embed_texts
 from education_platform.modules.rag.models import (
     IngestJob,
@@ -140,16 +142,25 @@ def process_ingest_job_sync(
             logger.error("Ingest job %s not found", ingest_job_id)
             return
 
+        try:
+            claim = IngestJobClaim.model_validate(job)
+        except ValidationError as exc:
+            logger.error("Ingest job %s failed claim validation: %s", ingest_job_id, exc)
+            job.status = IngestJobStatus.FAILED
+            job.error = f"Invalid ingest job claim: {exc}"[:2000]
+            session.commit()
+            return
+
         job.status = IngestJobStatus.RUNNING
         session.commit()
 
         try:
-            if job.target_kind == IngestTargetKind.SOURCE_MATERIAL_VERSION:
+            if claim.target_kind == IngestTargetKind.SOURCE_MATERIAL_VERSION:
                 _process_source_material(session, job, parse)
-            elif job.target_kind == IngestTargetKind.KNOWLEDGE_DOCUMENT_VERSION:
+            elif claim.target_kind == IngestTargetKind.KNOWLEDGE_DOCUMENT_VERSION:
                 _process_knowledge_document(session, job, parse)
             else:
-                _fail_job(session, job, f"Unknown target kind: {job.target_kind}")
+                _fail_job(session, job, f"Unknown target kind: {claim.target_kind}")
         except Exception as exc:
             logger.exception("Ingest job %s failed", ingest_job_id)
             session.rollback()

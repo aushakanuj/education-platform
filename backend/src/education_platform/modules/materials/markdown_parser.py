@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass
+from typing import Literal
+
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 _SLIDE_HEADING = re.compile(r"^## Slide (\d+)\s*[—\-]\s*(.+?)\s*$", re.MULTILINE)
 _TITLE_HEADING = re.compile(r"^#\s+(.+?)\s*$", re.MULTILINE)
@@ -12,41 +14,63 @@ _OPTION_LINE = re.compile(r"^\s*([A-D])\)\s*(.+?)\s*$", re.MULTILINE)
 _ANSWER_KEY_SPLIT = re.compile(r"(?mi)^##\s+Answer Key\s*$")
 _ANSWER_LINE = re.compile(r"(?m)^(\d+)\.\s+\*\*([A-D]|True|False)\*\*(?:\s*[—\-]\s*(.+))?$")
 
+OptionLabel = Literal["A", "B", "C", "D"]
 
-@dataclass(frozen=True)
-class ParsedSlide:
-    number: int
-    title: str
+
+class ParsedSlide(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    number: int = Field(ge=1)
+    title: str = Field(min_length=1)
     content: str
 
 
-@dataclass(frozen=True)
-class ParsedOption:
-    label: str
-    text: str
+class ParsedOption(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    label: OptionLabel
+    text: str = Field(min_length=1)
 
 
-@dataclass(frozen=True)
-class ParsedQuestion:
-    number: int
-    difficulty: str | None
-    prompt: str
-    options: list[ParsedOption]
-    correct_option_label: str | None
-    explanation: str | None
+class AnswerKeyEntry(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    label: OptionLabel
+    explanation: str | None = None
 
 
-@dataclass(frozen=True)
-class ParsedLesson:
-    title: str
+class ParsedQuestion(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    number: int = Field(ge=1)
+    difficulty: str | None = None
+    prompt: str = Field(min_length=1)
+    options: list[ParsedOption] = Field(min_length=1)
+    correct_option_label: OptionLabel | None = None
+    explanation: str | None = None
+
+    @field_validator("options")
+    @classmethod
+    def unique_labels(cls, value: list[ParsedOption]) -> list[ParsedOption]:
+        labels = [option.label for option in value]
+        if len(labels) != len(set(labels)):
+            raise ValueError("question options must have unique labels")
+        return value
+
+
+class ParsedLesson(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    title: str = Field(min_length=1)
     markdown: str
     slides: list[ParsedSlide]
 
 
-@dataclass(frozen=True)
-class ParsedQuiz:
-    title: str
-    questions: list[ParsedQuestion]
+class ParsedQuiz(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    title: str = Field(min_length=1)
+    questions: list[ParsedQuestion] = Field(min_length=1)
 
 
 def title_from_markdown(markdown: str, fallback: str) -> str:
@@ -111,15 +135,15 @@ def _strip_answer_key(markdown: str) -> str:
     return parts[0].rstrip()
 
 
-def _parse_answer_key(answer_section: str) -> dict[int, tuple[str, str | None]]:
-    answers: dict[int, tuple[str, str | None]] = {}
+def _parse_answer_key(answer_section: str) -> dict[int, AnswerKeyEntry]:
+    answers: dict[int, AnswerKeyEntry] = {}
     for match in _ANSWER_LINE.finditer(answer_section):
         number = int(match.group(1))
         label = match.group(2).strip().upper()
         if label in {"TRUE", "FALSE"}:
             label = "A" if label == "TRUE" else "B"
         explanation = match.group(3).strip() if match.group(3) else None
-        answers[number] = (label, explanation)
+        answers[number] = AnswerKeyEntry(label=label, explanation=explanation)
     return answers
 
 
@@ -151,17 +175,17 @@ def parse_quiz(markdown: str, topic_id: str) -> ParsedQuiz:
         ]
         prompt = _OPTION_LINE.sub("", block).strip()
         prompt = re.sub(r"\n{2,}", "\n", prompt).strip()
-        if not options:
+        if not options or not prompt:
             continue
-        correct_label, explanation = answers.get(number, (None, None))
+        answer = answers.get(number)
         questions.append(
             ParsedQuestion(
                 number=number,
                 difficulty=difficulty,
                 prompt=prompt,
                 options=options,
-                correct_option_label=correct_label,
-                explanation=explanation,
+                correct_option_label=answer.label if answer else None,
+                explanation=answer.explanation if answer else None,
             )
         )
 
