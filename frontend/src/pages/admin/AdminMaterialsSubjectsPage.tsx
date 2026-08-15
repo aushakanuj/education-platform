@@ -22,7 +22,7 @@ export function AdminMaterialsSubjectsPage() {
         ]}
       />
       <div className="back-row">
-        <Link to="/admin/materials" className="btn btn--outline btn--sm">
+        <Link to="/admin/materials" className="btn btn--matte btn--sm">
           ← Back to materials
         </Link>
       </div>

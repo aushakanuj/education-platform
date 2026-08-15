@@ -1,5 +1,4 @@
 import { useCallback, useEffect, useRef, useState, type FormEvent } from "react";
-import { Link } from "react-router-dom";
 
 import {
   createChat,
@@ -7,18 +6,106 @@ import {
   getChat,
   listChats,
   postChatMessage,
+  type ChatCitation,
   type ChatMessage,
   type ContextUsage,
   type ConversationSummary,
 } from "../../api/chats";
 import { Crumbs } from "../../components/Crumbs";
+import { MarkdownContent } from "../../components/MarkdownContent";
 import { PushButton } from "../../components/PushButton";
 
-const DISCLAIMER =
-  "Answers are grounded in indexed institution documents when retrieval finds evidence. Model output is advisory — verify against published policy.";
-
 function emptyContext(): ContextUsage {
-  return { used_tokens: 0, limit_tokens: 8192, used_percent: 0 };
+  return { used_tokens: 0, limit_tokens: 20_000, used_percent: 0 };
+}
+
+function formatTokenCount(value: number): string {
+  return Math.max(0, Math.round(value))
+    .toString()
+    .replace(/\B(?=(\d{3})+(?!\d))/g, ",");
+}
+
+export function citationSourceType(label: string): string {
+  const text = label.toLowerCase();
+  if (text.includes("handbook")) return "Handbook";
+  if (text.includes("memo")) return "Memo";
+  if (text.includes("curriculum") || text.includes("lesson")) return "Curriculum";
+  if (text.includes("integrity") || text.includes("guide")) return "Guide";
+  if (text.includes("policy")) return "Policy";
+  return "Document";
+}
+
+function CitationSources({ citations }: { citations: ChatCitation[] }) {
+  const types = [...new Set(citations.map((cite) => citationSourceType(cite.label)))].sort();
+  const [selected, setSelected] = useState("all");
+  const visible =
+    selected === "all"
+      ? citations
+      : citations.filter((cite) => citationSourceType(cite.label) === selected);
+
+  return (
+    <details className="policy-chat__sources">
+      <summary className="policy-chat__sources-toggle">
+        Sources ({citations.length})
+      </summary>
+      <label className="policy-chat__sources-label">
+        Filter
+        <select
+          className="form__input policy-chat__sources-select"
+          value={selected}
+          onChange={(event) => setSelected(event.target.value)}
+        >
+          <option value="all">All types</option>
+          {types.map((type) => (
+            <option key={type} value={type}>
+              {type}
+            </option>
+          ))}
+        </select>
+      </label>
+      <ul className="policy-chat__citations">
+        {visible.map((cite) => (
+          <li key={cite.id}>
+            <span className="policy-chat__cite-type">{citationSourceType(cite.label)}</span>
+            <span className="policy-chat__cite-label">{cite.label}</span>
+            <span className="policy-chat__cite-excerpt">{cite.excerpt}</span>
+          </li>
+        ))}
+      </ul>
+    </details>
+  );
+}
+
+function ContextMeter({ context }: { context: ContextUsage }) {
+  const pct = Math.min(100, Math.max(0, context.used_percent));
+  const used = formatTokenCount(context.used_tokens);
+  const limit = formatTokenCount(context.limit_tokens);
+  const usageLabel = `${used} / ${limit} tokens · ${pct}%`;
+  const radius = 14;
+  const circumference = 2 * Math.PI * radius;
+  const dash = (pct / 100) * circumference;
+
+  return (
+    <div
+      className="policy-chat__context"
+      role="status"
+      tabIndex={0}
+      aria-label={`Context window ${used} of ${limit} tokens, ${pct} percent`}
+    >
+      <svg className="policy-chat__context-ring" viewBox="0 0 36 36" aria-hidden="true">
+        <circle className="policy-chat__context-track" cx="18" cy="18" r={radius} />
+        <circle
+          className="policy-chat__context-fill"
+          cx="18"
+          cy="18"
+          r={radius}
+          strokeDasharray={`${dash} ${circumference}`}
+          transform="rotate(-90 18 18)"
+        />
+      </svg>
+      <span className="policy-chat__context-tip">{usageLabel}</span>
+    </div>
+  );
 }
 
 export function PolicyChatPage() {
@@ -30,6 +117,7 @@ export function PolicyChatPage() {
   const [busy, setBusy] = useState(false);
   const [loadingList, setLoadingList] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const bottomRef = useRef<HTMLDivElement>(null);
 
   const refreshList = useCallback(async () => {
@@ -161,21 +249,8 @@ export function PolicyChatPage() {
 
   return (
     <div className="policy-chat">
+      <h1 className="sr-only">Policy assistant</h1>
       <Crumbs parts={[{ label: "Policy assistant" }]} />
-      <div className="back-row">
-        <Link to="/admin/materials" className="btn btn--outline btn--sm">
-          ← Back to materials
-        </Link>
-      </div>
-      <header className="page-head">
-        <p className="kicker">Administrator · grounded policy lookup</p>
-        <h1>Policy assistant</h1>
-        <p>Multi-chat threads with retrieval over indexed Documents and a live context meter.</p>
-      </header>
-
-      <p className="policy-chat__disclaimer" role="note">
-        {DISCLAIMER} Index PDFs under <Link to="/admin/documents">Documents</Link>.
-      </p>
 
       {error && (
         <p className="banner banner--warn" role="alert">
@@ -183,85 +258,90 @@ export function PolicyChatPage() {
         </p>
       )}
 
-      <div className="policy-chat__layout">
+      <div className={`policy-chat__layout${sidebarCollapsed ? " is-sidebar-collapsed" : ""}`}>
         <aside className="policy-chat__sidebar" aria-label="Conversations">
           <div className="policy-chat__sidebar-head">
             <h2>Chats</h2>
-            <PushButton type="button" size="sm" onClick={() => void onNewChat()} disabled={busy}>
-              New
-            </PushButton>
+            <div className="policy-chat__sidebar-actions">
+              <PushButton
+                type="button"
+                size="sm"
+                className="policy-chat__sidebar-new"
+                onClick={() => void onNewChat()}
+                disabled={busy || sidebarCollapsed}
+                aria-hidden={sidebarCollapsed}
+                tabIndex={sidebarCollapsed ? -1 : undefined}
+              >
+                New
+              </PushButton>
+              <button
+                type="button"
+                className="policy-chat__sidebar-toggle"
+                aria-expanded={!sidebarCollapsed}
+                aria-controls="policy-chat-conversations"
+                title={sidebarCollapsed ? "Expand chats" : "Collapse chats"}
+                aria-label={sidebarCollapsed ? "Expand chats" : "Collapse chats"}
+                onClick={() => setSidebarCollapsed((collapsed) => !collapsed)}
+              >
+                {sidebarCollapsed ? "»" : "«"}
+              </button>
+            </div>
           </div>
-          {loadingList ? (
-            <p className="muted">Loading…</p>
-          ) : (
-            <ul className="policy-chat__conv-list">
-              {conversations.map((conv) => (
-                <li key={conv.id}>
-                  <button
-                    type="button"
-                    className={
-                      conv.id === activeId
-                        ? "policy-chat__conv policy-chat__conv--active"
-                        : "policy-chat__conv"
-                    }
-                    onClick={() => void onSelectChat(conv.id)}
-                    disabled={busy}
-                  >
-                    <span className="policy-chat__conv-title">{conv.title}</span>
-                    <span className="policy-chat__conv-meta">{conv.context.used_percent}% ctx</span>
-                  </button>
-                  <button
-                    type="button"
-                    className="policy-chat__conv-delete"
-                    aria-label={`Delete ${conv.title}`}
-                    onClick={() => void onDeleteChat(conv.id)}
-                    disabled={busy}
-                  >
-                    ×
-                  </button>
-                </li>
-              ))}
-            </ul>
-          )}
+          <div
+            id="policy-chat-conversations"
+            className="policy-chat__sidebar-body"
+            hidden={sidebarCollapsed}
+          >
+            {loadingList ? (
+              <p className="muted">Loading…</p>
+            ) : (
+              <ul className="policy-chat__conv-list">
+                {conversations.map((conv) => (
+                  <li key={conv.id}>
+                    <button
+                      type="button"
+                      className={
+                        conv.id === activeId
+                          ? "policy-chat__conv policy-chat__conv--active"
+                          : "policy-chat__conv"
+                      }
+                      onClick={() => void onSelectChat(conv.id)}
+                      disabled={busy}
+                    >
+                      <span className="policy-chat__conv-title">{conv.title}</span>
+                      <span className="policy-chat__conv-meta">{conv.context.used_percent}% ctx</span>
+                    </button>
+                    <button
+                      type="button"
+                      className="policy-chat__conv-delete"
+                      aria-label={`Delete ${conv.title}`}
+                      onClick={() => void onDeleteChat(conv.id)}
+                      disabled={busy}
+                    >
+                      ×
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
         </aside>
 
         <div className="policy-chat__main">
-          <div
-            className="policy-chat__context"
-            role="status"
-            aria-label={`Context window ${context.used_percent} percent`}
-          >
-            <div className="policy-chat__context-label">
-              <span>Context</span>
-              <span>
-                {context.used_percent}% · {context.used_tokens}/{context.limit_tokens} tokens
-              </span>
-            </div>
-            <div className="policy-chat__context-track">
-              <div
-                className="policy-chat__context-fill"
-                style={{ width: `${Math.min(100, Math.max(0, context.used_percent))}%` }}
-              />
-            </div>
-          </div>
-
           <div className="policy-chat__thread" aria-live="polite">
             {messages.map((msg) => (
               <article
                 key={msg.id}
                 className={`policy-chat__bubble policy-chat__bubble--${msg.role === "user" ? "user" : "assistant"}`}
+                aria-label={msg.role === "user" ? "You" : "Assistant"}
               >
-                <p className="policy-chat__role">{msg.role === "user" ? "You" : "Assistant"}</p>
-                <p className="policy-chat__body">{msg.content}</p>
+                {msg.role === "assistant" ? (
+                  <MarkdownContent className="policy-chat__body markdown">{msg.content}</MarkdownContent>
+                ) : (
+                  <p className="policy-chat__body">{msg.content}</p>
+                )}
                 {msg.citations && msg.citations.length > 0 && (
-                  <ul className="policy-chat__citations">
-                    {msg.citations.map((cite) => (
-                      <li key={cite.id}>
-                        <span className="policy-chat__cite-label">{cite.label}</span>
-                        <span className="policy-chat__cite-excerpt">{cite.excerpt}</span>
-                      </li>
-                    ))}
-                  </ul>
+                  <CitationSources citations={msg.citations} />
                 )}
               </article>
             ))}
@@ -286,6 +366,7 @@ export function PolicyChatPage() {
               onChange={(e) => setDraft(e.target.value)}
               disabled={busy || !activeId}
             />
+            <ContextMeter context={context} />
             <PushButton type="submit" disabled={busy || !draft.trim() || !activeId} loading={busy}>
               Send
             </PushButton>

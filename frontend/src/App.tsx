@@ -9,6 +9,8 @@ import { TeacherShell } from "./components/TeacherShell";
 import { EnrollPage } from "./pages/EnrollPage";
 import { HomePage } from "./pages/HomePage";
 import { LessonPage } from "./pages/LessonPage";
+import { LessonSlidesPage } from "./pages/LessonSlidesPage";
+import { QuizHistoryPage } from "./pages/QuizHistoryPage";
 import { QuizPage } from "./pages/QuizPage";
 import { ResultPage } from "./pages/ResultPage";
 import { TopicPageRedirect } from "./pages/TopicPageRedirect";
@@ -109,6 +111,26 @@ export function App() {
           <RequireAuth>
             <RequireEnrollment>
               <TopicPageRedirect />
+            </RequireEnrollment>
+          </RequireAuth>
+        }
+      />
+      <Route
+        path="/subjects/:subjectId/subtopics/:subtopicId/lesson/slides"
+        element={
+          <RequireAuth>
+            <RequireEnrollment>
+              <LessonSlidesPage />
+            </RequireEnrollment>
+          </RequireAuth>
+        }
+      />
+      <Route
+        path="/subjects/:subjectId/subtopics/:subtopicId/lesson/history"
+        element={
+          <RequireAuth>
+            <RequireEnrollment>
+              <QuizHistoryPage />
             </RequireEnrollment>
           </RequireAuth>
         }
