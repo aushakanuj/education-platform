@@ -21,11 +21,6 @@ export function SectionPage() {
           { label: section.label },
         ]}
       />
-      <div className="back-row">
-        <Link to="/teacher" className="btn btn--matte btn--sm">
-          ← Back to my classes
-        </Link>
-      </div>
       <header className="page-head">
         <p className="kicker">{section.academicPeriod} · teaching assignment</p>
         <h1>{section.label}</h1>

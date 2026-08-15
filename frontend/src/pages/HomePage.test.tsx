@@ -1,12 +1,10 @@
 import { render, screen } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { describe, expect, it, vi, beforeEach } from "vitest";
 
+import { clearLearningDirectoryCache } from "../lib/useLearningDirectory";
 import { HomePage } from "./HomePage";
-
-vi.mock("../components/AppShell", () => ({
-  AppShell: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
-}));
 
 vi.mock("../api/materials", () => ({
   fetchLearningDirectory: vi.fn(),
@@ -97,6 +95,7 @@ const mockDirectory = {
 
 describe("HomePage", () => {
   beforeEach(() => {
+    clearLearningDirectoryCache();
     vi.mocked(fetchLearningDirectory).mockResolvedValue(mockDirectory as never);
   });
 
@@ -109,7 +108,7 @@ describe("HomePage", () => {
 
     expect(await screen.findByRole("heading", { name: "Your subjects" })).toBeInTheDocument();
     expect(screen.queryByText("Student dashboard · demo data")).not.toBeInTheDocument();
-    expect(screen.getByRole("heading", { name: "Mathematics" })).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "Mathematics" })).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "Science" })).toBeInTheDocument();
     expect(screen.queryByText(/1\.0 Enroll/)).not.toBeInTheDocument();
     expect(screen.queryByText(/^Topics$/)).not.toBeInTheDocument();
@@ -128,6 +127,10 @@ describe("HomePage", () => {
     );
 
     expect(await screen.findByRole("heading", { name: "School material" })).toBeInTheDocument();
+    expect(screen.getByRole("navigation", { name: "Breadcrumb" })).toHaveTextContent(
+      /Subjects.*Mathematics/,
+    );
+    expect(screen.getByRole("link", { name: "Subjects" })).toHaveAttribute("href", "/");
     expect(screen.queryByRole("heading", { name: "Personal material" })).not.toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "Units" })).toBeInTheDocument();
     expect(screen.getByText("Properties of Rectangles and Squares")).toBeInTheDocument();
@@ -139,5 +142,27 @@ describe("HomePage", () => {
     expect(
       screen.getByRole("link", { name: /Properties of Rectangles and Squares/ }),
     ).toHaveAttribute("href", "/subjects/math-1/subtopics/st-1/lesson");
+  });
+
+  it("opens a subject from the list without a loading flash", async () => {
+    const user = userEvent.setup();
+    render(
+      <MemoryRouter
+        initialEntries={["/"]}
+        future={{ v7_startTransition: true, v7_relativeSplatPath: true }}
+      >
+        <Routes>
+          <Route path="/" element={<HomePage />} />
+          <Route path="/subjects/:subjectId" element={<HomePage />} />
+        </Routes>
+      </MemoryRouter>,
+    );
+
+    await user.click(await screen.findByRole("link", { name: /Mathematics/i }));
+
+    expect(screen.queryByText("Loading subject…")).not.toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "School material" })).toBeInTheDocument();
+    expect(screen.getByRole("navigation", { name: "Breadcrumb" })).toHaveTextContent("Mathematics");
+    expect(screen.getByRole("link", { name: "Subjects" })).toHaveAttribute("href", "/");
   });
 });

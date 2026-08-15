@@ -3,9 +3,9 @@ import { Link, useSearchParams } from "react-router-dom";
 
 import { updateMaterialProgress } from "../api/materials";
 import { ApiError } from "../api/types";
-import { AppShell } from "../components/AppShell";
 import { Crumbs } from "../components/Crumbs";
 import { MarkdownContent } from "../components/MarkdownContent";
+import { PageChrome } from "../components/PageChrome";
 import { PushButton } from "../components/PushButton";
 import { resumeSlideIndex, useSubtopicLesson } from "../lib/useSubtopicLesson";
 
@@ -91,7 +91,7 @@ export function LessonSlidesPage() {
   }
 
   return (
-    <AppShell subjectTitle={subjectName}>
+    <>
       {!lesson && !error && (
         <div className="center-state" role="status">
           Loading lesson…
@@ -111,19 +111,16 @@ export function LessonSlidesPage() {
 
       {lesson && slide && (
         <div className="lesson-view">
-          <Crumbs
-            parts={[
-              { label: "Subjects", to: "/" },
-              { label: subjectName, to: subjectPath },
-              { label: subtopicTitle, to: lessonPath },
-              { label: "Slides" },
-            ]}
-          />
-          <div className="back-row">
-            <Link to={lessonPath} className="btn btn--matte btn--sm">
-              ← Back to lesson overview
-            </Link>
-          </div>
+          <PageChrome>
+            <Crumbs
+              parts={[
+                { label: "Subjects", to: "/" },
+                { label: subjectName, to: subjectPath },
+                { label: subtopicTitle, to: lessonPath },
+                { label: "Slides" },
+              ]}
+            />
+          </PageChrome>
 
           <div className="lesson-slides">
             <article className="panel lesson-overview">
@@ -160,6 +157,6 @@ export function LessonSlidesPage() {
           </div>
         </div>
       )}
-    </AppShell>
+    </>
   );
 }

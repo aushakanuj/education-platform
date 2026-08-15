@@ -5,9 +5,9 @@ import { getAttempt } from "../api/attempts";
 import { fetchLearningDirectory } from "../api/materials";
 import type { AttemptResult } from "../api/types";
 import { ApiError } from "../api/types";
-import { AppShell } from "../components/AppShell";
 import { ConfirmDialog } from "../components/ConfirmDialog";
 import { Crumbs } from "../components/Crumbs";
+import { PageChrome } from "../components/PageChrome";
 import { PushButton } from "../components/PushButton";
 import { resolvePathFromAttempt, type LearningPath } from "../lib/learningPath";
 
@@ -58,14 +58,6 @@ export function ResultPage() {
       : Math.round(Number(result.pass_threshold_percent));
   const held = result != null && !result.review_available;
   const subjectPath = path?.subjectPath ?? "/";
-  const backPath =
-    result?.scope === "subtopic_mastery" && path?.quizTabPath
-      ? path.quizTabPath
-      : subjectPath;
-  const backLabel =
-    result?.scope === "subtopic_mastery" && path?.quizTabPath
-      ? "← Back to quiz"
-      : "← Back to subject";
   const rawScore =
     result?.score_raw == null
       ? null
@@ -74,7 +66,7 @@ export function ResultPage() {
         : String(result.score_raw);
 
   return (
-    <AppShell subjectTitle={path?.subjectName}>
+    <>
       {!result && !error && (
         <div className="center-state" role="status">
           Loading result…
@@ -95,7 +87,7 @@ export function ResultPage() {
       {result && (
         <div>
           {path && (
-            <>
+            <PageChrome>
               <Crumbs
                 parts={[
                   { label: "Subjects", to: "/" },
@@ -106,12 +98,7 @@ export function ResultPage() {
                   { label: "Result" },
                 ]}
               />
-              <div className="back-row">
-                <Link to={backPath} className="btn btn--matte btn--sm">
-                  {backLabel}
-                </Link>
-              </div>
-            </>
+            </PageChrome>
           )}
 
           <header className="page-head page-head--with-actions">
@@ -205,6 +192,6 @@ export function ResultPage() {
           },
         ]}
       />
-    </AppShell>
+    </>
   );
 }

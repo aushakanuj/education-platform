@@ -1,14 +1,13 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo } from "react";
 import { Link, useParams } from "react-router-dom";
 
-import { fetchLearningDirectory } from "../api/materials";
-import type { LearningDirectory, SubjectNode, TopicNode } from "../api/types";
-import { ApiError } from "../api/types";
-import { AppShell } from "../components/AppShell";
+import type { SubjectNode, TopicNode } from "../api/types";
 import { Crumbs } from "../components/Crumbs";
+import { PageChrome } from "../components/PageChrome";
 import { SchoolMaterialPanel } from "../components/SchoolMaterialPanel";
 import { BACKDROP_CHROME_ANCHOR, setBackdropChrome } from "../lib/backdropChrome";
 import { schoolTopic, subjectProgress } from "../lib/subjectMaterial";
+import { useLearningDirectory } from "../lib/useLearningDirectory";
 
 const PLACEHOLDER_SUBJECTS = [
   {
@@ -82,8 +81,8 @@ function SubjectMaterialView({
     }`;
 
   return (
-    <AppShell subjectTitle={subjectName}>
-      <div className="subject-view">
+    <div className="subject-view">
+      <PageChrome>
         <header className="subject-view__head">
           <Crumbs
             parts={[
@@ -91,11 +90,6 @@ function SubjectMaterialView({
               { label: subjectName },
             ]}
           />
-          <div className="subject-view__toolbar">
-            <Link to="/" className="btn btn--matte btn--sm subject-view__back">
-              ← Back to subjects
-            </Link>
-          </div>
           <div className="subject-view__chrome-slot" {...{ [BACKDROP_CHROME_ANCHOR]: "" }}>
             <h1 id="school-material-heading" className="sr-only">
               School material
@@ -103,40 +97,22 @@ function SubjectMaterialView({
             {progressSr && <p className="sr-only">{progressSr}</p>}
           </div>
         </header>
+      </PageChrome>
 
-        <section className="material-pane material-pane--school" aria-labelledby="school-material-heading">
-          {!curriculum ? (
-            <div className="alert alert--info">No school material published yet.</div>
-          ) : (
-            <SchoolMaterialPanel subjectId={subjectId} subjectName={subjectName} topic={curriculum} />
-          )}
-        </section>
-      </div>
-    </AppShell>
+      <section className="material-pane material-pane--school" aria-labelledby="school-material-heading">
+        {!curriculum ? (
+          <div className="alert alert--info">No school material published yet.</div>
+        ) : (
+          <SchoolMaterialPanel subjectId={subjectId} subjectName={subjectName} topic={curriculum} />
+        )}
+      </section>
+    </div>
   );
 }
 
 export function HomePage() {
   const { subjectId } = useParams();
-  const [directory, setDirectory] = useState<LearningDirectory | null>(null);
-  const [error, setError] = useState<string | null>(null);
-
-  useEffect(() => {
-    let cancelled = false;
-    void (async () => {
-      try {
-        const data = await fetchLearningDirectory();
-        if (!cancelled) setDirectory(data);
-      } catch (err) {
-        if (!cancelled) {
-          setError(err instanceof ApiError ? err.message : "Could not load subjects.");
-        }
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, []);
+  const { directory, error } = useLearningDirectory();
 
   const subjects = directory?.subjects ?? [];
   const selected = useMemo(() => {
@@ -146,6 +122,14 @@ export function HomePage() {
 
   const knownNames = new Set(subjects.map((s) => s.name.toLowerCase()));
   const placeholders = PLACEHOLDER_SUBJECTS.filter((p) => !knownNames.has(p.name.toLowerCase()));
+
+  if (subjectId && !directory && !error) {
+    return (
+      <p className="muted" role="status">
+        Loading subject…
+      </p>
+    );
+  }
 
   if (selected) {
     return (
@@ -158,8 +142,10 @@ export function HomePage() {
   }
 
   return (
-    <AppShell>
-      <Crumbs parts={[{ label: "Subjects" }]} />
+    <>
+      <PageChrome>
+        <Crumbs parts={[{ label: "Subjects" }]} />
+      </PageChrome>
       <header className="page-head">
         <h1 className="sr-only">Your subjects</h1>
         <p>
@@ -234,6 +220,6 @@ export function HomePage() {
           ))}
         </div>
       )}
-    </AppShell>
+    </>
   );
 }

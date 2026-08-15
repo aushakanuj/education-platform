@@ -63,30 +63,24 @@ a:hover {
   border: 0;
 }
 
-.demo-banner {
-  flex: none;
-  background: var(--warning-bg);
-  border-bottom: 1px solid var(--warning-border);
-  color: var(--warning);
-  font-family: var(--font-mono);
-  font-size: 0.75rem;
-  font-weight: 500;
-  text-align: center;
-  padding: 0.45rem 1rem;
-}
-
-/* —— Buttons —— */
+/* —— Buttons (single size for .btn / PushButton / btn links) —— */
 .btn {
   display: inline-flex;
   align-items: center;
   justify-content: center;
   gap: 0.4em;
-  padding: 0.65rem 1.1rem;
+  box-sizing: border-box;
+  min-height: var(--btn-height);
+  height: var(--btn-height);
+  padding: 0 var(--btn-padding-x);
   border-radius: var(--radius-sm);
   border: 1px solid transparent;
   background: var(--accent);
   color: var(--accent-ink);
+  font-family: var(--font-body);
+  font-size: var(--btn-font-size);
   font-weight: 600;
+  line-height: 1.25;
   cursor: pointer;
   text-decoration: none;
   white-space: nowrap;
@@ -166,14 +160,13 @@ a.btn--matte:hover:not(:disabled) {
   color: var(--ink);
 }
 
-.btn--sm {
-  padding: 0.4rem 0.75rem;
-  font-size: 0.9rem;
-}
-
+/* Size modifiers kept for call-site compatibility; all match the default. */
+.btn--sm,
 .btn--lg {
-  padding: 0.8rem 1.35rem;
-  font-size: 1.1rem;
+  min-height: var(--btn-height);
+  height: var(--btn-height);
+  padding: 0 var(--btn-padding-x);
+  font-size: var(--btn-font-size);
 }
 
 .btn.is-loading {
@@ -625,7 +618,7 @@ button:hover:not(:disabled),
 .rail {
   position: fixed;
   z-index: 20;
-  top: calc(var(--demo-banner-height) + var(--rail-inset));
+  top: var(--rail-inset);
   bottom: var(--rail-inset);
   left: var(--rail-inset);
   width: var(--rail-width);
@@ -834,7 +827,17 @@ button:hover:not(:disabled),
   flex-direction: column;
 }
 
+.route-motion__chrome {
+  flex: 0 0 auto;
+  width: 100%;
+}
+
+.route-motion__chrome:has(.subject-view__head) {
+  max-width: none;
+}
+
 .route-motion__page {
+  opacity: 0;
   will-change: opacity;
 }
 
@@ -856,15 +859,23 @@ button:hover:not(:disabled),
 .crumbs {
   display: flex;
   flex-wrap: wrap;
-  gap: 0.45rem;
+  gap: 0.35rem;
   align-items: center;
+  position: relative;
   font-family: var(--font-mono);
-  font-size: 0.95rem;
+  font-size: 1.2rem;
   font-weight: 600;
-  letter-spacing: -0.01em;
+  letter-spacing: -0.02em;
   line-height: 1.35;
   color: var(--ink);
   margin-bottom: 1.25rem;
+}
+
+.crumbs__item {
+  display: inline-flex;
+  align-items: center;
+  transform-origin: left center;
+  white-space: nowrap;
 }
 
 .crumbs button {
@@ -876,11 +887,14 @@ button:hover:not(:disabled),
   padding: 0;
 }
 
-.crumbs a {
+.crumbs a,
+.crumbs [aria-current="page"] {
   color: var(--ink);
+  font-weight: 600;
   text-decoration: underline;
-  text-underline-offset: 0.15em;
-  text-decoration-color: color-mix(in srgb, var(--ink) 35%, transparent);
+  text-underline-offset: 0.18em;
+  text-decoration-thickness: 1.5px;
+  text-decoration-color: color-mix(in srgb, var(--ink) 42%, transparent);
 }
 
 .crumbs a:hover {
@@ -888,14 +902,11 @@ button:hover:not(:disabled),
   text-decoration-color: var(--accent);
 }
 
-.crumbs [aria-current="page"] {
-  color: var(--ink);
-  font-weight: 700;
-}
-
 .crumbs__sep {
+  margin-right: 0.4rem;
   color: var(--ink-muted);
   opacity: 0.85;
+  text-decoration: none;
 }
 
 .page-head {
@@ -1388,10 +1399,6 @@ button.card {
   color: var(--ink-muted);
 }
 
-.back-row {
-  margin: 0 0 0.85rem;
-}
-
 .history-toggle {
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
@@ -1599,17 +1606,6 @@ button.card {
 
 .subject-view__head {
   margin-bottom: 0.75rem;
-}
-
-.subject-view__toolbar {
-  display: flex;
-  align-items: center;
-  gap: 0.75rem 1rem;
-  margin: 0 0 1.15rem;
-}
-
-.subject-view__back {
-  justify-self: start;
 }
 
 .subject-view__chrome-slot {
@@ -2070,11 +2066,6 @@ button.card {
 }
 
 .lesson-view .crumbs {
-  flex: none;
-}
-
-.lesson-view .back-row {
-  margin-bottom: 1.15rem;
   flex: none;
 }
 
@@ -2541,6 +2532,11 @@ button.card {
   .panel:hover,
   .login__card:hover {
     transform: none;
+  }
+
+  .crumbs__item {
+    transform: none !important;
+    opacity: 1 !important;
   }
 }
 
@@ -3431,6 +3427,8 @@ button.card {
   padding: 0.4rem 0.75rem;
   border: 1px solid var(--border);
   background: var(--bg);
+  font-size: 0.875rem;
+  line-height: 1.5;
 }
 
 .policy-chat__bubble::after {
@@ -3479,6 +3477,28 @@ button.card {
 
 .policy-chat__body.markdown > :last-child {
   margin-bottom: 0;
+}
+
+.policy-chat__body.markdown h1 {
+  font-size: 1.15em;
+  margin: 0.65rem 0 0.35rem;
+}
+
+.policy-chat__body.markdown h2 {
+  font-size: 1.08em;
+  margin: 0.6rem 0 0.3rem;
+}
+
+.policy-chat__body.markdown h3,
+.policy-chat__body.markdown h4 {
+  font-size: 1em;
+  margin: 0.55rem 0 0.25rem;
+}
+
+.policy-chat__body.markdown p,
+.policy-chat__body.markdown ul,
+.policy-chat__body.markdown ol {
+  margin: 0.3rem 0 0.45rem;
 }
 
 .policy-chat__sources {

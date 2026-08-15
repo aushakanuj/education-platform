@@ -1,5 +1,3 @@
-import { Link } from "react-router-dom";
-
 import { Crumbs } from "../../components/Crumbs";
 
 /** Optional nav stub — policy/RAG assistant is out of scope for this mock. */
@@ -12,11 +10,6 @@ export function AssistantStubPage() {
           { label: "Assistant" },
         ]}
       />
-      <div className="back-row">
-        <Link to="/teacher" className="btn btn--matte btn--sm">
-          ← Back to my classes
-        </Link>
-      </div>
       <header className="page-head">
         <p className="kicker">Teacher · coming later</p>
         <h1>Assistant</h1>

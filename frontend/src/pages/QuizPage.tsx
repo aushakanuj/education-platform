@@ -5,10 +5,10 @@ import { buildSubmitPayload, startAttempt, submitAttempt } from "../api/attempts
 import { fetchLearningDirectory } from "../api/materials";
 import type { StartAttemptResponse } from "../api/types";
 import { ApiError } from "../api/types";
-import { AppShell } from "../components/AppShell";
 import { ConfirmDialog } from "../components/ConfirmDialog";
 import { Crumbs } from "../components/Crumbs";
 import { MarkdownContent } from "../components/MarkdownContent";
+import { PageChrome } from "../components/PageChrome";
 import { PushButton } from "../components/PushButton";
 import { resolvePathFromAttempt, resolvePathFromQuizId, type LearningPath } from "../lib/learningPath";
 
@@ -95,11 +95,10 @@ export function QuizPage() {
   const lessonPath = path?.lessonPath;
   const quizTabPath = path?.quizTabPath;
   const isUnitQuiz = Boolean(quizTabPath && path?.subtopicId);
-  const backPath = isUnitQuiz ? quizTabPath! : subjectPath;
-  const backLabel = isUnitQuiz ? "← Back to quiz" : "← Back to subject";
+  const recoverPath = isUnitQuiz ? quizTabPath! : subjectPath;
 
   return (
-    <AppShell subjectTitle={path?.subjectName}>
+    <>
       {starting && (
         <div className="center-state" role="status">
           Starting quiz…
@@ -117,7 +116,7 @@ export function QuizPage() {
                 Open lesson
               </Link>
             )}
-            <Link to={backPath} className="btn">
+            <Link to={recoverPath} className="btn">
               {isUnitQuiz ? "Back to quiz" : "Back to subject"}
             </Link>
           </div>
@@ -127,7 +126,7 @@ export function QuizPage() {
       {!starting && attempt && question && (
         <div className="stack-gap">
           {path && (
-            <>
+            <PageChrome>
               <Crumbs
                 parts={[
                   { label: "Subjects", to: "/" },
@@ -138,12 +137,7 @@ export function QuizPage() {
                   { label: attempt.title },
                 ]}
               />
-              <div className="back-row">
-                <Link to={backPath} className="btn btn--matte btn--sm">
-                  {backLabel}
-                </Link>
-              </div>
-            </>
+            </PageChrome>
           )}
 
           <header className="page-head">
@@ -245,6 +239,6 @@ export function QuizPage() {
             : []),
         ]}
       />
-    </AppShell>
+    </>
   );
 }

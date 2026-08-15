@@ -151,7 +151,7 @@ describe("LessonPage", () => {
     renderLesson();
 
     expect(await screen.findByRole("heading", { name: "Lesson Summary" })).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: /Back to units/i })).toHaveAttribute(
+    expect(screen.getByRole("link", { name: "Mathematics" })).toHaveAttribute(
       "href",
       "/subjects/subj-1",
     );
@@ -181,7 +181,7 @@ describe("LessonPage", () => {
     expect(screen.queryByText("Loading lesson…")).not.toBeInTheDocument();
     expect(await screen.findByRole("button", { name: "Next slide" })).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "Rectangles" })).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: /Back to lesson overview/i })).toHaveAttribute(
+    expect(screen.getByRole("link", { name: "Properties of Rectangles and Squares" })).toHaveAttribute(
       "href",
       "/subjects/subj-1/subtopics/st-1/lesson",
     );

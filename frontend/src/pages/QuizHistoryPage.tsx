@@ -1,8 +1,8 @@
 import { Link } from "react-router-dom";
 
-import { AppShell } from "../components/AppShell";
 import { AttemptHistoryList } from "../components/AttemptHistory";
 import { Crumbs } from "../components/Crumbs";
+import { PageChrome } from "../components/PageChrome";
 import { PushButton } from "../components/PushButton";
 import { QuizPerformanceChart } from "../components/QuizPerformanceChart";
 import { useSubtopicLesson } from "../lib/useSubtopicLesson";
@@ -29,7 +29,7 @@ export function QuizHistoryPage() {
   const passThreshold = quizSummary?.pass_threshold_percent ?? 70;
 
   return (
-    <AppShell subjectTitle={subjectName}>
+    <>
       {!lesson && !error && (
         <div className="center-state" role="status">
           Loading quiz history…
@@ -49,19 +49,16 @@ export function QuizHistoryPage() {
 
       {lesson && (
         <div className="lesson-view">
-          <Crumbs
-            parts={[
-              { label: "Subjects", to: "/" },
-              { label: subjectName, to: subjectPath },
-              { label: subtopicTitle, to: lessonPath },
-              { label: "Quiz history" },
-            ]}
-          />
-          <div className="back-row">
-            <Link to={lessonPath} className="btn btn--matte btn--sm">
-              ← Back to lesson overview
-            </Link>
-          </div>
+          <PageChrome>
+            <Crumbs
+              parts={[
+                { label: "Subjects", to: "/" },
+                { label: subjectName, to: subjectPath },
+                { label: subtopicTitle, to: lessonPath },
+                { label: "Quiz history" },
+              ]}
+            />
+          </PageChrome>
 
           <div className="quiz-history-page">
             <div className="lesson-quiz-panel">
@@ -106,6 +103,6 @@ export function QuizHistoryPage() {
           </div>
         </div>
       )}
-    </AppShell>
+    </>
   );
 }

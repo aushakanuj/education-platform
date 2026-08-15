@@ -1,9 +1,9 @@
 import { Link } from "react-router-dom";
 
-import { AppShell } from "../components/AppShell";
 import { AttemptHistoryTrigger, formatAttempt, formatAttemptWhen } from "../components/AttemptHistory";
 import { Crumbs } from "../components/Crumbs";
 import { MarkdownContent } from "../components/MarkdownContent";
+import { PageChrome } from "../components/PageChrome";
 import { PushButton } from "../components/PushButton";
 import { findSummarySlide, useSubtopicLesson } from "../lib/useSubtopicLesson";
 
@@ -38,7 +38,7 @@ export function LessonPage() {
   const latestWhen = latestAttempt ? formatAttemptWhen(latestAttempt) : null;
 
   return (
-    <AppShell subjectTitle={subjectName}>
+    <>
       {!lesson && !error && (
         <div className="center-state" role="status">
           Loading lesson…
@@ -58,18 +58,15 @@ export function LessonPage() {
 
       {lesson && slides.length > 0 && (
         <div className="lesson-view">
-          <Crumbs
-            parts={[
-              { label: "Subjects", to: "/" },
-              { label: subjectName, to: subjectPath },
-              { label: subtopicTitle },
-            ]}
-          />
-          <div className="back-row">
-            <Link to={subjectPath} className="btn btn--matte btn--sm">
-              ← Back to units
-            </Link>
-          </div>
+          <PageChrome>
+            <Crumbs
+              parts={[
+                { label: "Subjects", to: "/" },
+                { label: subjectName, to: subjectPath },
+                { label: subtopicTitle },
+              ]}
+            />
+          </PageChrome>
           <h1 className="sr-only">{subtopicTitle}</h1>
 
           <div className="lesson-layout">
@@ -163,6 +160,6 @@ export function LessonPage() {
           </div>
         </div>
       )}
-    </AppShell>
+    </>
   );
 }
