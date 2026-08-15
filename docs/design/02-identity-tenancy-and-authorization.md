@@ -221,6 +221,99 @@ Record these events with actor, institution, period/scope, timestamp, request co
 6. Every content and future AI request applies the same institution, period, role, and enrollment
    restrictions as the API.
 
+## 11a. Implementation spec: the scope resolver
+
+Sections 1–11 describe *what* the boundary is. This section fixes *how* it is enforced, so that
+the rule is written once and every feature inherits it.
+
+### 11a.1 One resolver, no hand-written checks
+
+`modules/authorization/scope.py` exposes a single function:
+
+```text
+scope_for(session, principal) -> Scope
+```
+
+`Scope` is the complete answer to "what may this principal read?" and is resolved **once per
+request**, before a handler touches data. Features must not write their own role checks. Where a
+`403` is currently raised inside a service function, it is replaced by a `Scope` consultation.
+
+The rule to hold the codebase to: **grep for `HTTP_403_FORBIDDEN` should only find
+`api/deps.py`.** Anything else is a permission rule that cannot be tested centrally.
+
+### 11a.2 A teacher's reach is a set of pairs, not a grade or a subject
+
+The single most consequential decision here. A teaching assignment is:
+
+```text
+(grade_subject_offering_id, section_id | NULL)
+```
+
+A NULL section covers every section of that offering. So a teacher of **Grade 8 Mathematics** and
+**Grade 9 Science** may read Grade 9 Science students but **not** Grade 9 Mathematics students —
+the same children, a different subject. Any implementation that narrows by grade alone, or by
+subject alone, is wrong and will pass a naive test while failing rule T-03 below.
+
+### 11a.3 Empty, never refused
+
+When a principal asks about data outside their scope, the correct response is **zero rows**, not
+`403` and not a message from the assistant declining. A refusal confirms that the requested data
+exists, which is itself a disclosure. Concretely, `build_scope_clause` compiles an empty scope to
+the predicate `1 = 0`.
+
+`403` remains correct for *capability* failures — a student calling an administrator-only endpoint.
+The distinction: **capability is refused, content is empty.**
+
+### 11a.4 Auditable actions
+
+Every event in section 10 is written through `modules/audit/service.py` and nothing else writes to
+`audit_events`. In addition to that list, each **scoped read** records the resource, the row count
+returned, and whether the caller was unrestricted.
+
+A scoped read that returned `rows_returned = 0` is the most important entry in the trail: it is the
+evidence that the boundary held, and it is what turns "we have role-based access" into something
+demonstrable to a regulator or a parent.
+
+### 11a.5 Test matrix
+
+These are the tests behind the claim, implemented in `backend/tests/test_authorization_scope.py`.
+Change this table first when a rule changes; the tests follow it.
+
+| ID | Rule | Expected |
+| --- | --- | --- |
+| T-01 | Administrator scope | Unrestricted within their own institution, never beyond it |
+| T-02 | Teacher scope shape | Resolves to (offering, section) pairs, not a grade |
+| T-03 | Teacher, same grade, other subject | Refused — the case §11a.2 exists for |
+| T-04 | Student scope | Exactly one student profile: their own |
+| T-05 | Student reads a classmate | `allows_student` is false |
+| T-06 | Teacher student set | Strictly between zero and the whole school |
+| T-07 | Out-of-scope query | Zero rows, no error raised |
+| T-08 | Student reads the register | Only their own rows come back |
+| T-09 | Administrator vs teacher | Administrator strictly sees more |
+| T-10 | Role but no assignments | Closed, not open — reaches nothing |
+| T-11 | Empty scope predicate | Compiles to `1 = 0` |
+| T-12 | Tenant isolation | Every clause pins `institution_id`, administrators included |
+| T-13 | Row limiting | No single read can exceed the ceiling |
+
+Still to be written, once the features they describe exist:
+
+| ID | Rule | Blocked on |
+| --- | --- | --- |
+| T-14 | Deactivated account loses access immediately | account lifecycle wiring |
+| T-15 | Student moved between sections mid-term | section-change workflow |
+| T-16 | Closed period is read-only for teachers | period status enforcement |
+| T-17 | Text-to-SQL cannot escape the scope predicate | task 2.3 |
+| T-18 | Document search cannot return an unreleased document | task 2.4 |
+| T-19 | A student cannot reach an unapproved quiz | task 3.7 |
+| T-20 | Every AI answer path writes an audit event | tasks 2.3 and 2.6 |
+
+### 11a.6 Dependency on the master register
+
+Analytics reads go through the `student_360` view rather than ad-hoc joins, so the scope predicate
+has one place to attach. The view therefore **must** carry `institution_id`, `student_id`,
+`section_id`, `subject` and `grade`; without them the boundary cannot be applied to analytics at
+all. This is asserted by a test rather than left to convention.
+
 ## 12. Deferred scope
 
 - Self-signup and unsupervised invitation workflows
@@ -230,8 +323,15 @@ Record these events with actor, institution, period/scope, timestamp, request co
 - Parent, supervisor, and TPO roles as active POC gates
 - Multifactor authentication
 
+Parent access is designed for but not built: a parent is "a student's scope, granted to a second
+person," so it adds no new shape to the resolver. It is excluded from the POC because consent and
+data-protection handling would consume time the schedule does not have before the sponsor
+presentation, not because the model cannot express it.
+
 ## 13. Open decisions
 
 - What password policy and password-reset method should the institution require?
 - Should administrators be able to view all historical student marks, or only administrative audit
   records in the POC?
+- Retention: how long are audit events kept, and who may delete them? Nobody can today, which is
+  the safe default but not a decision anyone has taken deliberately.

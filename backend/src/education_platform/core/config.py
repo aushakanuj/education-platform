@@ -46,6 +46,18 @@ class Settings(BaseSettings):
     max_upload_bytes: int = 20 * 1024 * 1024
     ingest_allowed_content_types: list[str] = ["application/pdf"]
 
+    # Language model. Provider choice is task 0.3 and is still open; `echo` is a
+    # deterministic offline stub so nothing is blocked on the decision. Never put a real
+    # key in this file -- set LLM_API_KEY in the environment.
+    llm_provider: str = "echo"
+    llm_model: str | None = None
+    llm_api_key: str | None = None
+    llm_timeout_seconds: int = 30
+
+    # Attendance below this percentage of the term makes a student exam-ineligible.
+    # Sourced from Attendance Policy v3 section 2.1; the early-warning engine reads it.
+    attendance_eligibility_percent: float = 75.0
+
     @property
     def is_development(self) -> bool:
         return self.environment.lower() == "development"
