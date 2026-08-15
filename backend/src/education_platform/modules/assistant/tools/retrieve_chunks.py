@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-from typing import Any
 
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session
@@ -11,6 +10,11 @@ from sqlalchemy.orm import Session
 from education_platform.api.deps import Principal
 from education_platform.core.config import get_settings
 from education_platform.db.url import to_sync_url
+from education_platform.modules.assistant.contracts import (
+    RetrieveChunksArgs,
+    RetrieveChunksResult,
+    RetrievedChunk,
+)
 from education_platform.modules.assistant.tools.registry import ToolSpec, register_tool
 from education_platform.modules.materials.models import SourceChunk, SourceMaterialVersion
 from education_platform.modules.rag.embeddings import embed_texts
@@ -22,14 +26,14 @@ from education_platform.modules.rag.models import (
 from education_platform.modules.rag.vector_store import SimilarChunk, search_similar
 
 
-def _load_chunk_payloads(hits: list[SimilarChunk]) -> list[dict[str, Any]]:
+def _load_chunk_payloads(hits: list[SimilarChunk]) -> list[RetrievedChunk]:
     if not hits:
         return []
     settings = get_settings()
     engine = create_engine(to_sync_url(settings.database_url), pool_pre_ping=True)
     try:
         with Session(engine) as session:
-            results: list[dict[str, Any]] = []
+            results: list[RetrievedChunk] = []
             for hit in hits:
                 label = "Source"
                 excerpt = ""
@@ -53,16 +57,18 @@ def _load_chunk_payloads(hits: list[SimilarChunk]) -> list[dict[str, Any]]:
                     page_number = source_chunk.page_number
                     source_version = session.get(SourceMaterialVersion, hit.version_id)
                     label = "Curriculum material" if source_version is not None else "Curriculum"
+                if not excerpt.strip():
+                    continue
                 results.append(
-                    {
-                        "id": str(hit.chunk_id),
-                        "label": label,
-                        "excerpt": excerpt[:500],
-                        "page_number": page_number,
-                        "doc_kind": hit.doc_kind,
-                        "doc_id": str(hit.doc_id),
-                        "distance": hit.distance,
-                    }
+                    RetrievedChunk(
+                        id=str(hit.chunk_id),
+                        label=label,
+                        excerpt=excerpt[:500],
+                        page_number=page_number,
+                        doc_kind=hit.doc_kind,
+                        doc_id=str(hit.doc_id),
+                        distance=float(hit.distance),
+                    )
                 )
             return results
     finally:
@@ -75,13 +81,13 @@ async def retrieve_chunks_handler(
     query: str,
     limit: int | None = None,
     doc_kind: str | None = None,
-) -> dict[str, Any]:
+) -> dict[str, object]:
     """Embed `query` and return institution-scoped similar chunks for the principal."""
     settings = get_settings()
     top_k = limit or settings.chat_retrieval_limit
     role = "administrator" if principal.is_administrator else next(iter(principal.roles), None)
 
-    def _run() -> list[dict[str, Any]]:
+    def _run() -> list[RetrievedChunk]:
         vectors = embed_texts([query])
         hits = search_similar(
             vectors[0],
@@ -93,7 +99,7 @@ async def retrieve_chunks_handler(
         return _load_chunk_payloads(hits)
 
     chunks = await asyncio.to_thread(_run)
-    return {"chunks": chunks, "count": len(chunks)}
+    return RetrieveChunksResult(chunks=chunks, count=len(chunks)).model_dump(mode="python")
 
 
 register_tool(
@@ -103,28 +109,8 @@ register_tool(
             "Retrieve relevant policy or curriculum text chunks from the institution "
             "vector index. Always call this before answering factual policy questions."
         ),
-        parameters={
-            "type": "object",
-            "properties": {
-                "query": {
-                    "type": "string",
-                    "description": "Search query derived from the user question",
-                },
-                "limit": {
-                    "type": "integer",
-                    "description": "Max chunks to return (default from settings)",
-                    "minimum": 1,
-                    "maximum": 20,
-                },
-                "doc_kind": {
-                    "type": "string",
-                    "description": (
-                        "Optional filter: knowledge_document_version or source_material_version"
-                    ),
-                },
-            },
-            "required": ["query"],
-        },
         handler=retrieve_chunks_handler,
+        args_model=RetrieveChunksArgs,
+        result_model=RetrieveChunksResult,
     )
 )
