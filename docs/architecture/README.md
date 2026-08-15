@@ -60,10 +60,11 @@ material, quiz, and attempt access requires active enrollments.
 
 | Layer | POC (today) | Target (design) |
 | --- | --- | --- |
-| API | FastAPI + SQLite | FastAPI + PostgreSQL |
-| Curriculum storage | Markdown seed + SQLite rows | Object storage + versions |
-| Search/AI | None | pgvector + ingestion worker |
-| Queue | In-process | Redis + worker |
+| API | FastAPI + PostgreSQL | FastAPI + PostgreSQL |
+| Curriculum storage | Markdown seed + Postgres rows | Object storage + versions |
+| Search/AI | pgvector indexing (assistant Deferred) | pgvector + grounded retrieval |
+| Queue | Postgres `ingest_jobs` (SKIP LOCKED) | Worker + durable queue |
+| Blobs | Local `UPLOAD_DIR` | MinIO/S3 |
 
 ## Related documents
 

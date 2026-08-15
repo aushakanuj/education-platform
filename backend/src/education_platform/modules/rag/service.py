@@ -1,15 +1,12 @@
-"""Admin knowledge-document uploads and shared ingest enqueue."""
+"""Admin knowledge-document uploads; queue is Postgres ``ingest_jobs``."""
 
 from __future__ import annotations
 
 import json
-import logging
 import re
 from typing import Any, cast
 from uuid import UUID, uuid4
 
-from arq import create_pool
-from arq.connections import RedisSettings
 from fastapi import HTTPException, UploadFile, status
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -52,27 +49,12 @@ from education_platform.modules.rag.schemas import (
     MaterialVersionStatusOut,
 )
 
-logger = logging.getLogger(__name__)
-
 _SLUG_RE = re.compile(r"[^a-z0-9]+")
 
 
 def slugify(value: str, *, fallback: str = "document") -> str:
     slug = _SLUG_RE.sub("-", value.strip().lower()).strip("-")
     return (slug[:100] or fallback)[:100]
-
-
-async def enqueue_ingest_job(ingest_job_id: UUID) -> str:
-    """Enqueue an ARQ ingest job. Raises on Redis failure."""
-    settings = get_settings()
-    redis = await create_pool(RedisSettings.from_dsn(settings.redis_url))
-    try:
-        job = await redis.enqueue_job("process_ingest_job", str(ingest_job_id))
-        if job is None:
-            raise RuntimeError("ARQ returned no job")
-        return job.job_id
-    finally:
-        await redis.close(close_connection_pool=True)
 
 
 def _validate_upload(file: UploadFile, data: bytes) -> str:
@@ -176,20 +158,6 @@ async def upload_curriculum_material(
         status=IngestJobStatus.QUEUED,
     )
     session.add(job)
-    await session.flush()
-
-    try:
-        redis_job_id = await enqueue_ingest_job(job.id)
-    except Exception as exc:
-        logger.exception("Failed to enqueue curriculum ingest job")
-        storage.delete_blob(object_key)
-        await session.rollback()
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="Ingest queue unavailable",
-        ) from exc
-
-    job.redis_job_id = redis_job_id
     await session.commit()
     await session.refresh(version)
     await session.refresh(job)
@@ -319,20 +287,6 @@ async def upload_knowledge_document(
         status=IngestJobStatus.QUEUED,
     )
     session.add(job)
-    await session.flush()
-
-    try:
-        redis_job_id = await enqueue_ingest_job(job.id)
-    except Exception as exc:
-        logger.exception("Failed to enqueue knowledge ingest job")
-        storage.delete_blob(object_key)
-        await session.rollback()
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="Ingest queue unavailable",
-        ) from exc
-
-    job.redis_job_id = redis_job_id
     await session.commit()
     await session.refresh(document)
     await session.refresh(version)

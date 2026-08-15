@@ -1,4 +1,4 @@
-"""Shared SQLite fixtures for database and API tests."""
+"""Shared Postgres fixtures for database and API tests."""
 
 from __future__ import annotations
 
@@ -11,13 +11,14 @@ import pytest_asyncio
 from alembic import command
 from alembic.config import Config
 from fastapi.testclient import TestClient
-from sqlalchemy import create_engine, event, text
+from sqlalchemy import create_engine, text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.orm import Session
 
 from education_platform.core.config import get_settings
 from education_platform.db import models as _models
 from education_platform.db.session import get_session, reset_engine
+from education_platform.db.url import to_async_url, to_sync_url
 from education_platform.main import app
 from education_platform.modules.materials.seed import seed_approved_materials
 
@@ -30,47 +31,51 @@ MATERIALS_DIR = REPO_ROOT / "docs" / "curriculum"
 STUDENT_EMAIL = "student@example.com"
 STUDENT_PASSWORD = "password123"
 
-
-@pytest.fixture()
-def sqlite_path(tmp_path: Path) -> Path:
-    return tmp_path / "test.db"
+DEFAULT_TEST_DATABASE_URL = "postgresql+asyncpg://education:education@localhost:5432/education_test"
 
 
-@pytest.fixture()
-def migrated_db(sqlite_path: Path, tmp_path: Path) -> Iterator[Path]:
-    database_url = f"sqlite+aiosqlite:///{sqlite_path}"
+def _test_database_url() -> str:
+    return os.environ.get("DATABASE_URL", DEFAULT_TEST_DATABASE_URL)
+
+
+@pytest.fixture(scope="session")
+def migrated_database() -> Iterator[str]:
+    """Migrate education_test once per session; fail clearly if Postgres is down."""
+    database_url = _test_database_url()
+    sync_url = to_sync_url(database_url)
     previous_database_url = os.environ.get("DATABASE_URL")
     previous_jwt_secret = os.environ.get("JWT_SECRET")
-    previous_upload_dir = os.environ.get("UPLOAD_DIR")
-    previous_vector_db = os.environ.get("VECTOR_DB_PATH")
+
     os.environ["DATABASE_URL"] = database_url
     os.environ["JWT_SECRET"] = "test-secret-key-at-least-32-bytes-long!!"
-    os.environ["UPLOAD_DIR"] = str(tmp_path / "uploads")
-    os.environ["VECTOR_DB_PATH"] = str(tmp_path / "vectors.db")
     get_settings.cache_clear()
     reset_engine()
 
+    engine = create_engine(sync_url, pool_pre_ping=True)
+    try:
+        with engine.connect() as conn:
+            conn.execute(text("SELECT 1"))
+    except Exception as exc:  # noqa: BLE001 — surface infra failures to pytest
+        engine.dispose()
+        pytest.fail(
+            "Postgres test database unreachable. "
+            "Run `docker compose up -d postgres` then retry. "
+            f"Detail: {exc}"
+        )
+
     alembic_cfg = Config(str(BACKEND_ROOT / "alembic.ini"))
     alembic_cfg.set_main_option("script_location", str(BACKEND_ROOT / "alembic"))
-    alembic_cfg.set_main_option("sqlalchemy.url", f"sqlite:///{sqlite_path}")
+    alembic_cfg.set_main_option("sqlalchemy.url", sync_url)
     command.upgrade(alembic_cfg, "head")
 
-    sync_engine = create_engine(f"sqlite:///{sqlite_path}")
-
-    @event.listens_for(sync_engine, "connect")
-    def _fk(dbapi_connection: object, _record: object) -> None:
-        cursor = dbapi_connection.cursor()  # type: ignore[attr-defined]
-        cursor.execute("PRAGMA foreign_keys=ON")
-        cursor.close()
-
-    with sync_engine.connect() as conn:
+    with engine.connect() as conn:
         tables = conn.execute(
-            text("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name")
+            text("SELECT tablename FROM pg_tables WHERE schemaname = 'public' ORDER BY tablename")
         ).fetchall()
         assert len(tables) >= 33
 
-    sync_engine.dispose()
-    yield sqlite_path
+    engine.dispose()
+    yield database_url
 
     reset_engine()
     get_settings.cache_clear()
@@ -82,26 +87,45 @@ def migrated_db(sqlite_path: Path, tmp_path: Path) -> Iterator[Path]:
         os.environ.pop("JWT_SECRET", None)
     else:
         os.environ["JWT_SECRET"] = previous_jwt_secret
+
+
+@pytest.fixture()
+def clean_db(migrated_database: str, tmp_path: Path) -> Iterator[str]:
+    """Truncate all public tables (except alembic_version) before each test."""
+    database_url = migrated_database
+    sync_url = to_sync_url(database_url)
+    previous_upload_dir = os.environ.get("UPLOAD_DIR")
+    os.environ["DATABASE_URL"] = database_url
+    os.environ["UPLOAD_DIR"] = str(tmp_path / "uploads")
+    get_settings.cache_clear()
+    reset_engine()
+
+    engine = create_engine(sync_url, pool_pre_ping=True)
+    with engine.begin() as conn:
+        rows = conn.execute(
+            text(
+                "SELECT tablename FROM pg_tables "
+                "WHERE schemaname = 'public' AND tablename <> 'alembic_version'"
+            )
+        ).fetchall()
+        table_names = [row[0] for row in rows]
+        if table_names:
+            quoted = ", ".join(f'"{name}"' for name in table_names)
+            conn.execute(text(f"TRUNCATE {quoted} RESTART IDENTITY CASCADE"))
+    engine.dispose()
+    yield database_url
+
+    reset_engine()
+    get_settings.cache_clear()
     if previous_upload_dir is None:
         os.environ.pop("UPLOAD_DIR", None)
     else:
         os.environ["UPLOAD_DIR"] = previous_upload_dir
-    if previous_vector_db is None:
-        os.environ.pop("VECTOR_DB_PATH", None)
-    else:
-        os.environ["VECTOR_DB_PATH"] = previous_vector_db
 
 
 @pytest.fixture()
-def db_session(migrated_db: Path) -> Iterator[Session]:
-    engine = create_engine(f"sqlite:///{migrated_db}")
-
-    @event.listens_for(engine, "connect")
-    def _fk(dbapi_connection: object, _record: object) -> None:
-        cursor = dbapi_connection.cursor()  # type: ignore[attr-defined]
-        cursor.execute("PRAGMA foreign_keys=ON")
-        cursor.close()
-
+def db_session(clean_db: str) -> Iterator[Session]:
+    engine = create_engine(to_sync_url(clean_db), pool_pre_ping=True)
     with Session(engine) as session:
         yield session
     engine.dispose()
@@ -116,15 +140,8 @@ def seeded_db(db_session: Session) -> Session:
 
 
 @pytest_asyncio.fixture()
-async def async_db_session(migrated_db: Path) -> AsyncIterator[AsyncSession]:
-    engine = create_async_engine(f"sqlite+aiosqlite:///{migrated_db}")
-
-    @event.listens_for(engine.sync_engine, "connect")
-    def _fk(dbapi_connection: object, _record: object) -> None:
-        cursor = dbapi_connection.cursor()  # type: ignore[attr-defined]
-        cursor.execute("PRAGMA foreign_keys=ON")
-        cursor.close()
-
+async def async_db_session(clean_db: str) -> AsyncIterator[AsyncSession]:
+    engine = create_async_engine(to_async_url(clean_db), pool_pre_ping=True)
     session_factory = async_sessionmaker(engine, expire_on_commit=False, class_=AsyncSession)
     async with session_factory() as session:
         yield session
@@ -132,10 +149,10 @@ async def async_db_session(migrated_db: Path) -> AsyncIterator[AsyncSession]:
 
 
 @pytest.fixture()
-def client(seeded_db: Session, migrated_db: Path) -> Iterator[TestClient]:
-    """HTTP client bound to a migrated + seeded temp SQLite database."""
+def client(seeded_db: Session, clean_db: str) -> Iterator[TestClient]:
+    """HTTP client bound to a migrated + seeded Postgres database."""
     _ = seeded_db
-    engine = create_async_engine(f"sqlite+aiosqlite:///{migrated_db}")
+    engine = create_async_engine(to_async_url(clean_db), pool_pre_ping=True)
     session_factory = async_sessionmaker(engine, expire_on_commit=False, class_=AsyncSession)
 
     async def _override_session() -> AsyncIterator[AsyncSession]:
