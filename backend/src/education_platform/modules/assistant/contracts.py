@@ -6,6 +6,8 @@ from typing import Any, Literal, Self
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
+from education_platform.modules.rag.contracts import DocKind
+
 
 class ChatHistoryTurn(BaseModel):
     model_config = ConfigDict(extra="forbid")
@@ -39,7 +41,7 @@ class RetrieveChunksArgs(BaseModel):
 
     query: str = Field(min_length=1, max_length=4000)
     limit: int | None = Field(default=None, ge=1, le=20)
-    doc_kind: Literal["knowledge_document_version", "source_material_version"] | None = None
+    doc_kind: DocKind | None = None
 
     @field_validator("query")
     @classmethod

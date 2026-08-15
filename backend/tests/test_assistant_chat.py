@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any
 from unittest.mock import patch
 from uuid import uuid4
@@ -9,6 +10,8 @@ from uuid import uuid4
 import pytest
 from fastapi.testclient import TestClient
 from pydantic import ValidationError
+from sqlalchemy import select
+from sqlalchemy.orm import Session
 
 from education_platform.api.deps import Principal
 from education_platform.core.config import get_settings
@@ -24,6 +27,33 @@ from education_platform.modules.assistant.tokens import context_percent, estimat
 from education_platform.modules.assistant.tools.registry import (
     ToolValidationError,
     get_tool_registry,
+)
+from education_platform.modules.assistant.tools.retrieve_chunks import retrieve_chunks_handler
+from education_platform.modules.rag.chunking import TextChunk, content_hash
+from education_platform.modules.rag.models import (
+    IngestJob,
+    IngestJobStatus,
+    IngestTargetKind,
+    KnowledgeDocument,
+    KnowledgeDocumentVersion,
+    KnowledgeDocumentVersionStatus,
+)
+from education_platform.workers.ingest import process_ingest_job_sync
+
+TINY_PDF = (
+    b"%PDF-1.1\n"
+    b"1 0 obj<<>>endobj\n"
+    b"2 0 obj<< /Length 44 >>stream\n"
+    b"BT /F1 12 Tf 100 700 Td (Hello RAG) Tj ET\n"
+    b"endstream\nendobj\n"
+    b"3 0 obj<< /Type /Page /Parent 4 0 R /Contents 2 0 R >>endobj\n"
+    b"4 0 obj<< /Type /Pages /Kids [3 0 R] /Count 1 >>endobj\n"
+    b"5 0 obj<< /Type /Catalog /Pages 4 0 R >>endobj\n"
+    b"xref\n0 6\n0000000000 65535 f \n"
+    b"trailer<< /Size 6 /Root 5 0 R >>\nstartxref\n0\n%%EOF\n"
+)
+ATTENDANCE_CHUNK = (
+    "Learner Attendance Policy\nStudents must notify the office after three absences."
 )
 
 
@@ -88,7 +118,7 @@ def test_chat_crud_and_message_without_openrouter(client: TestClient) -> None:
                     "id": str(uuid4()),
                     "label": "Attendance Handbook",
                     "excerpt": "Students must notify the office after three absences.",
-                    "doc_kind": "knowledge_document_version",
+                    "doc_kind": "knowledge_document",
                     "doc_id": str(uuid4()),
                     "distance": 0.1,
                 }
@@ -187,13 +217,18 @@ def test_graph_state_and_tool_contracts() -> None:
     with pytest.raises(ValidationError):
         RetrieveChunksArgs(query="attendance", limit=99)
     with pytest.raises(ValidationError):
+        RetrieveChunksArgs(query="ok", doc_kind="knowledge_document_version")
+    assert RetrieveChunksArgs(query="ok", doc_kind="knowledge_document").doc_kind == (
+        "knowledge_document"
+    )
+    with pytest.raises(ValidationError):
         RetrieveChunksResult(chunks=[], count=1)
 
     chunk = RetrievedChunk(
         id="c1",
         label="Policy",
         excerpt="Three absences trigger escalation.",
-        doc_kind="knowledge_document_version",
+        doc_kind="knowledge_document",
         doc_id="d1",
         distance=0.2,
     )
@@ -207,3 +242,94 @@ def test_graph_state_and_tool_contracts() -> None:
         }
     )
     assert state.retrieved_chunks[0].label == "Policy"
+
+
+@pytest.mark.asyncio
+async def test_retrieve_chunks_hydrates_ingested_knowledge_document(
+    seeded_db: Session,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    from education_platform.modules.auth.models import Institution
+    from education_platform.modules.rag import storage
+
+    monkeypatch.setenv("UPLOAD_DIR", str(tmp_path / "uploads"))
+    get_settings.cache_clear()
+    fake_embedding = [[0.11] * 384]
+    monkeypatch.setattr(
+        "education_platform.workers.ingest.embed_texts",
+        lambda _texts: fake_embedding,
+    )
+    monkeypatch.setattr(
+        "education_platform.modules.assistant.tools.retrieve_chunks.embed_texts",
+        lambda _texts: fake_embedding,
+    )
+
+    institution = seeded_db.scalar(select(Institution).limit(1))
+    assert institution is not None
+    document = KnowledgeDocument(
+        institution_id=institution.id,
+        title="Learner Attendance Policy",
+        slug=f"attendance-{uuid4().hex[:8]}",
+        doc_type="policy",
+        required_roles=["administrator", "teacher"],
+    )
+    seeded_db.add(document)
+    seeded_db.flush()
+    object_key = storage.build_object_key(
+        institution_id=document.institution_id,
+        kind="knowledge_documents",
+        filename="attendance.pdf",
+    )
+    storage.store_bytes(object_key, TINY_PDF)
+    version = KnowledgeDocumentVersion(
+        document_id=document.id,
+        version_number=1,
+        lifecycle_status=KnowledgeDocumentVersionStatus.PROCESSING,
+        blob_object_key=object_key,
+        blob_content_type="application/pdf",
+        checksum=storage.sha256_hex(TINY_PDF),
+    )
+    seeded_db.add(version)
+    seeded_db.flush()
+    job = IngestJob(
+        target_kind=IngestTargetKind.KNOWLEDGE_DOCUMENT_VERSION,
+        target_id=version.id,
+        status=IngestJobStatus.QUEUED,
+    )
+    seeded_db.add(job)
+    seeded_db.commit()
+
+    digest = content_hash(ATTENDANCE_CHUNK)
+    process_ingest_job_sync(
+        str(job.id),
+        parse_pdf=lambda _path: [
+            TextChunk(
+                ordinal=1,
+                text=ATTENDANCE_CHUNK,
+                content_hash=digest,
+                token_count=len(ATTENDANCE_CHUNK.split()),
+                page_number=1,
+                section_heading="Learner Attendance Policy",
+            )
+        ],
+    )
+
+    principal = Principal(
+        user_id=uuid4(),
+        institution_id=institution.id,
+        email="admin@demo.school",
+        roles=frozenset({"administrator"}),
+        student_profile_id=None,
+        status="active",
+    )
+    result = await retrieve_chunks_handler(
+        principal=principal,
+        query="what is the attendance policy of my school",
+    )
+    assert result["count"] >= 1
+    chunk = result["chunks"][0]
+    assert chunk["label"] == "Learner Attendance Policy"
+    assert "three absences" in chunk["excerpt"].lower()
+    assert chunk["doc_kind"] == "knowledge_document"
+    get_settings.cache_clear()
