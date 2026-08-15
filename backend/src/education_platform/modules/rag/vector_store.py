@@ -13,20 +13,17 @@ from sqlalchemy.orm import Session
 
 from education_platform.core.config import get_settings
 from education_platform.db.url import to_sync_url
+from education_platform.modules.rag.contracts import VectorRow
 from education_platform.modules.rag.models import ChunkEmbedding
 
-
-@dataclass(frozen=True, slots=True)
-class VectorRow:
-    chunk_id: UUID
-    embedding: list[float]
-    doc_id: UUID
-    doc_kind: str
-    institution_id: UUID
-    required_roles: list[str]
-    doc_type: str | None
-    page_number: int | None
-    version_id: UUID
+__all__ = [
+    "SimilarChunk",
+    "VectorRow",
+    "count_for_version",
+    "delete_by_version",
+    "search_similar",
+    "upsert_rows",
+]
 
 
 @dataclass(frozen=True, slots=True)
@@ -61,8 +58,9 @@ def delete_by_version(version_id: UUID) -> int:
 def upsert_rows(rows: list[VectorRow]) -> None:
     if not rows:
         return
+    validated = [VectorRow.model_validate(row) for row in rows]
     with _session() as session:
-        for row in rows:
+        for row in validated:
             stmt = insert(ChunkEmbedding).values(
                 chunk_id=row.chunk_id,
                 embedding=row.embedding,

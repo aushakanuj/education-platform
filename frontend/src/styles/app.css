@@ -2691,8 +2691,6 @@ button.card {
 .policy-chat {
   display: grid;
   gap: 0.85rem;
-  min-height: min(70dvh, 36rem);
-  grid-template-rows: auto auto 1fr auto;
 }
 
 .policy-chat__disclaimer {
@@ -2705,6 +2703,126 @@ button.card {
   font-family: var(--font-mono);
   font-size: 0.72rem;
   font-weight: 500;
+}
+
+.policy-chat__layout {
+  display: grid;
+  grid-template-columns: minmax(11rem, 15rem) minmax(0, 1fr);
+  gap: 0.85rem;
+  min-height: min(70dvh, 36rem);
+  align-items: stretch;
+}
+
+.policy-chat__sidebar {
+  display: grid;
+  grid-template-rows: auto 1fr;
+  gap: 0.55rem;
+  padding: 0.75rem;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+}
+
+.policy-chat__sidebar-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+
+.policy-chat__sidebar-head h2 {
+  margin: 0;
+  font-size: 0.95rem;
+}
+
+.policy-chat__conv-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 0.35rem;
+  align-content: start;
+  overflow-y: auto;
+}
+
+.policy-chat__conv-list li {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 0.25rem;
+  align-items: stretch;
+}
+
+.policy-chat__conv {
+  text-align: left;
+  border: 1px solid var(--border);
+  background: var(--bg);
+  border-radius: var(--radius-sm);
+  padding: 0.45rem 0.55rem;
+  cursor: pointer;
+  display: grid;
+  gap: 0.15rem;
+}
+
+.policy-chat__conv--active {
+  border-color: color-mix(in srgb, var(--accent) 40%, var(--border));
+  background: var(--accent-soft);
+}
+
+.policy-chat__conv-title {
+  font-size: 0.85rem;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.policy-chat__conv-meta {
+  font-family: var(--font-mono);
+  font-size: 0.65rem;
+  color: var(--ink-muted);
+}
+
+.policy-chat__conv-delete {
+  border: 1px solid var(--border);
+  background: var(--bg);
+  border-radius: var(--radius-sm);
+  width: 1.75rem;
+  cursor: pointer;
+  color: var(--ink-muted);
+}
+
+.policy-chat__main {
+  display: grid;
+  grid-template-rows: auto 1fr auto;
+  gap: 0.65rem;
+  min-width: 0;
+}
+
+.policy-chat__context {
+  display: grid;
+  gap: 0.35rem;
+}
+
+.policy-chat__context-label {
+  display: flex;
+  justify-content: space-between;
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  color: var(--ink-muted);
+}
+
+.policy-chat__context-track {
+  height: 0.45rem;
+  border-radius: 999px;
+  background: var(--border);
+  overflow: hidden;
+}
+
+.policy-chat__context-fill {
+  height: 100%;
+  background: var(--accent);
+  transition: width 180ms ease;
 }
 
 .policy-chat__thread {
@@ -2750,6 +2868,7 @@ button.card {
 
 .policy-chat__body {
   margin: 0;
+  white-space: pre-wrap;
 }
 
 .policy-chat__citations {
@@ -2811,6 +2930,10 @@ button.card {
 }
 
 @media (max-width: 40rem) {
+  .policy-chat__layout {
+    grid-template-columns: 1fr;
+  }
+
   .policy-chat__composer {
     grid-template-columns: 1fr;
   }

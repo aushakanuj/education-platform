@@ -35,7 +35,7 @@ Browse the schema visually:
 | Enrollment gate + learning directory | **Built** |
 | Curriculum seed + student quiz loop | **Built** |
 | Admin materials browser | **Built** |
-| Teacher workspace / policy assistant | **Mock** |
+| Teacher workspace / policy assistant | **Partial** (policy chat live; teacher still mock) |
 | Four-pillar analytics, ingestion, AI | **Deferred** |
 
 Full matrix: [docs/README.md#implementation-status](docs/README.md#implementation-status).
