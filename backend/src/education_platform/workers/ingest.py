@@ -1,4 +1,4 @@
-"""ARQ worker: parse → chunk → embed → index uploaded PDFs."""
+"""Ingest worker: parse → chunk → embed → index uploaded PDFs."""
 
 from __future__ import annotations
 
@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any
 from uuid import UUID
 
+from pydantic import ValidationError
 from sqlalchemy import create_engine, delete, select
 from sqlalchemy.orm import Session
 
@@ -26,7 +27,8 @@ from education_platform.modules.materials.models import (
     SourceMaterialVersionStatus,
 )
 from education_platform.modules.rag import storage
-from education_platform.modules.rag.chunking import TextChunk, chunk_text
+from education_platform.modules.rag.chunking import TextChunk, chunk_docling_document
+from education_platform.modules.rag.contracts import IngestJobClaim
 from education_platform.modules.rag.embeddings import embed_texts
 from education_platform.modules.rag.models import (
     IngestJob,
@@ -41,27 +43,29 @@ from education_platform.modules.rag.vector_store import VectorRow, delete_by_ver
 
 logger = logging.getLogger(__name__)
 
-ExtractTextFn = Callable[[Path], str]
+ParsePdfFn = Callable[[Path], list[TextChunk]]
 
 
-def extract_text_with_docling(path: Path) -> str:
-    """Extract plain text from a PDF via Docling (lazy import)."""
+def convert_pdf_with_docling(path: Path) -> Any:
+    """Convert a PDF to a DoclingDocument (lazy import; keeps layout structure)."""
     from docling.document_converter import DocumentConverter
 
     converter = DocumentConverter()
     result = converter.convert(str(path))
-    document = result.document
-    if hasattr(document, "export_to_markdown"):
-        return str(document.export_to_markdown())
-    if hasattr(document, "export_to_text"):
-        return str(document.export_to_text())
-    return str(document)
+    return result.document
+
+
+def parse_pdf_with_docling(path: Path) -> list[TextChunk]:
+    """Parse a PDF with Docling and chunk via HybridChunker."""
+    document = convert_pdf_with_docling(path)
+    return chunk_docling_document(document)
 
 
 def _sync_session() -> Session:
+    from education_platform.db.url import to_sync_url
+
     settings = get_settings()
-    url = settings.database_url.replace("+aiosqlite", "")
-    engine = create_engine(url)
+    engine = create_engine(to_sync_url(settings.database_url))
     return Session(engine)
 
 
@@ -128,9 +132,9 @@ def _persist_and_embed(
 def process_ingest_job_sync(
     ingest_job_id: str,
     *,
-    extract_text: ExtractTextFn | None = None,
+    parse_pdf: ParsePdfFn | None = None,
 ) -> None:
-    extract = extract_text or extract_text_with_docling
+    parse = parse_pdf or parse_pdf_with_docling
     session = _sync_session()
     try:
         job = session.get(IngestJob, UUID(ingest_job_id))
@@ -138,16 +142,25 @@ def process_ingest_job_sync(
             logger.error("Ingest job %s not found", ingest_job_id)
             return
 
+        try:
+            claim = IngestJobClaim.model_validate(job)
+        except ValidationError as exc:
+            logger.error("Ingest job %s failed claim validation: %s", ingest_job_id, exc)
+            job.status = IngestJobStatus.FAILED
+            job.error = f"Invalid ingest job claim: {exc}"[:2000]
+            session.commit()
+            return
+
         job.status = IngestJobStatus.RUNNING
         session.commit()
 
         try:
-            if job.target_kind == IngestTargetKind.SOURCE_MATERIAL_VERSION:
-                _process_source_material(session, job, extract)
-            elif job.target_kind == IngestTargetKind.KNOWLEDGE_DOCUMENT_VERSION:
-                _process_knowledge_document(session, job, extract)
+            if claim.target_kind == IngestTargetKind.SOURCE_MATERIAL_VERSION:
+                _process_source_material(session, job, parse)
+            elif claim.target_kind == IngestTargetKind.KNOWLEDGE_DOCUMENT_VERSION:
+                _process_knowledge_document(session, job, parse)
             else:
-                _fail_job(session, job, f"Unknown target kind: {job.target_kind}")
+                _fail_job(session, job, f"Unknown target kind: {claim.target_kind}")
         except Exception as exc:
             logger.exception("Ingest job %s failed", ingest_job_id)
             session.rollback()
@@ -170,7 +183,7 @@ def process_ingest_job_sync(
         session.close()
 
 
-def _process_source_material(session: Session, job: IngestJob, extract: ExtractTextFn) -> None:
+def _process_source_material(session: Session, job: IngestJob, parse: ParsePdfFn) -> None:
     version = session.get(SourceMaterialVersion, job.target_id)
     if version is None:
         _fail_job(session, job, "Source material version not found")
@@ -186,8 +199,7 @@ def _process_source_material(session: Session, job: IngestJob, extract: ExtractT
         return
 
     path = storage.resolve_blob_path(version.blob_object_key)
-    text = extract(path)
-    chunks = chunk_text(text)
+    chunks = parse(path)
     if not chunks:
         _mark_source_failed(session, version, "No extractable text")
         _fail_job(session, job, "No extractable text")
@@ -248,7 +260,7 @@ def _process_source_material(session: Session, job: IngestJob, extract: ExtractT
     session.commit()
 
 
-def _process_knowledge_document(session: Session, job: IngestJob, extract: ExtractTextFn) -> None:
+def _process_knowledge_document(session: Session, job: IngestJob, parse: ParsePdfFn) -> None:
     version = session.get(KnowledgeDocumentVersion, job.target_id)
     if version is None:
         _fail_job(session, job, "Knowledge document version not found")
@@ -264,8 +276,7 @@ def _process_knowledge_document(session: Session, job: IngestJob, extract: Extra
         return
 
     path = storage.resolve_blob_path(version.blob_object_key)
-    text = extract(path)
-    chunks = chunk_text(text)
+    chunks = parse(path)
     if not chunks:
         _mark_knowledge_failed(session, version, "No extractable text")
         _fail_job(session, job, "No extractable text")
@@ -312,8 +323,3 @@ def _process_knowledge_document(session: Session, job: IngestJob, extract: Extra
     job.status = IngestJobStatus.SUCCEEDED
     job.error = None
     session.commit()
-
-
-async def process_ingest_job(ctx: dict[str, Any], ingest_job_id: str) -> None:
-    _ = ctx
-    process_ingest_job_sync(ingest_job_id)

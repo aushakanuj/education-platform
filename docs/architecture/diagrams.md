@@ -225,9 +225,8 @@ flowchart TB
     end
 
     subgraph Data[Data_plane]
-        Pg["PostgreSQL_pgvector"]
+        Pg["PostgreSQL_pgvector_ingest_jobs"]
         Objects[ObjectStorage]
-        Redis[Redis_queue]
     end
 
     Web --> Api
@@ -235,17 +234,18 @@ flowchart TB
     Api --> Pg
     Api --> Objects
     Api --> AiPorts
-    Api --> Redis
-    Worker --> Redis
     Worker --> Objects
     Worker --> Pg
     Worker --> AiPorts
 
-    LocalDev["Local_dev: SQLite_local_files_in_process"] -.-> Api
-    Compose["Compose: Postgres_Redis_MinIO"] -.-> Data
+    LocalDev["Local_dev: Postgres_local_uploads_claim_worker"] -.-> Api
+    Compose["Compose: Postgres_MinIO"] -.-> Data
 ```
 
-**Implementation overlay:** dashed paths label target infrastructure. POC today uses SQLite, local markdown seed (`docs/curriculum/`), and in-process workers; target adds PostgreSQL + pgvector, Redis queue, MinIO object storage, and dedicated ingestion workers.
+**Implementation overlay:** dashed paths label remaining target infrastructure. POC today uses
+Compose PostgreSQL + pgvector, local markdown seed (`docs/curriculum/`), local `UPLOAD_DIR` blobs,
+and a Postgres `ingest_jobs` claim worker; target still adds MinIO object storage and grounded
+assistant APIs.
 
 ## 10. Trust boundaries
 

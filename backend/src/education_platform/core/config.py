@@ -7,9 +7,8 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 _BACKEND_ROOT = Path(__file__).resolve().parents[3]
 _REPO_ROOT = Path(__file__).resolve().parents[4]
 _DEFAULT_MATERIALS_DIR = _REPO_ROOT / "docs" / "curriculum"
-_DEFAULT_DATABASE_URL = f"sqlite+aiosqlite:///{_BACKEND_ROOT / 'education.db'}"
+_DEFAULT_DATABASE_URL = "postgresql+asyncpg://education:education@localhost:5432/education"
 _DEFAULT_UPLOAD_DIR = _BACKEND_ROOT / "var" / "uploads"
-_DEFAULT_VECTOR_DB_PATH = _BACKEND_ROOT / "education_vectors.db"
 
 
 class Settings(BaseSettings):
@@ -39,20 +38,15 @@ class Settings(BaseSettings):
     demo_student_password: str = "demo1234"
     demo_admin_email: str = "admin@demo.school"
     demo_admin_password: str = "demo1234"
-    redis_url: str = "redis://localhost:6379/0"
     upload_dir: Path = _DEFAULT_UPLOAD_DIR
-    vector_db_path: Path = _DEFAULT_VECTOR_DB_PATH
     embedding_model_name: str = "all-MiniLM-L6-v2"
     max_upload_bytes: int = 20 * 1024 * 1024
     ingest_allowed_content_types: list[str] = ["application/pdf"]
-
-    # Language model. Provider choice is task 0.3 and is still open; `echo` is a
-    # deterministic offline stub so nothing is blocked on the decision. Never put a real
-    # key in this file -- set LLM_API_KEY in the environment.
-    llm_provider: str = "echo"
-    llm_model: str | None = None
-    llm_api_key: str | None = None
-    llm_timeout_seconds: int = 30
+    openrouter_api_key: str | None = None
+    openrouter_base_url: str = "https://openrouter.ai/api/v1"
+    openrouter_model: str = "openai/gpt-4o-mini"
+    chat_context_limit_tokens: int = 8192
+    chat_retrieval_limit: int = 6
 
     # Attendance below this percentage of the term makes a student exam-ineligible.
     # Sourced from Attendance Policy v3 section 2.1; the early-warning engine reads it.
@@ -61,6 +55,10 @@ class Settings(BaseSettings):
     @property
     def is_development(self) -> bool:
         return self.environment.lower() == "development"
+
+    @property
+    def openrouter_configured(self) -> bool:
+        return bool(self.openrouter_api_key and self.openrouter_api_key.strip())
 
 
 @lru_cache

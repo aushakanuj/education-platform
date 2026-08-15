@@ -7,16 +7,17 @@ role-based access actually holds.
 
 from __future__ import annotations
 
+from collections.abc import AsyncIterator, Iterator
 from dataclasses import dataclass
-from pathlib import Path
 from uuid import UUID
 
 import pytest
 import pytest_asyncio
-from sqlalchemy import create_engine, event, select, text
+from sqlalchemy import create_engine, func, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.orm import Session
 
+from education_platform.db.url import to_async_url, to_sync_url
 from education_platform.modules.academics.models import GradeSubjectOffering, Subject
 from education_platform.modules.auth.models import RoleName, StudentProfile, User, UserRole
 from education_platform.modules.authorization.scope import scope_for
@@ -29,6 +30,8 @@ TEST_SPEC = SchoolSpec(sections_per_grade=2, students_per_section=3, term_weeks=
 
 @dataclass(frozen=True)
 class FakePrincipal:
+    """Stands in for api.deps.Principal without needing an HTTP request."""
+
     user_id: UUID
     institution_id: UUID
     email: str
@@ -38,25 +41,19 @@ class FakePrincipal:
 
 
 @pytest.fixture()
-def synthetic_db(migrated_db: Path) -> Path:
-    engine = create_engine(f"sqlite:///{migrated_db}")
-
-    @event.listens_for(engine, "connect")
-    def _fk(dbapi_connection: object, _record: object) -> None:
-        cursor = dbapi_connection.cursor()  # type: ignore[attr-defined]
-        cursor.execute("PRAGMA foreign_keys=ON")
-        cursor.close()
-
+def synthetic_db(clean_db: str) -> Iterator[str]:
+    """A generated school in the shared Postgres test database."""
+    engine = create_engine(to_sync_url(clean_db), pool_pre_ping=True)
     with Session(engine) as session:
         generate_school(session, TEST_SPEC)
         session.commit()
     engine.dispose()
-    return migrated_db
+    yield clean_db
 
 
 @pytest_asyncio.fixture()
-async def async_session(synthetic_db: Path):
-    engine = create_async_engine(f"sqlite+aiosqlite:///{synthetic_db}")
+async def async_session(synthetic_db: str) -> AsyncIterator[AsyncSession]:
+    engine = create_async_engine(to_async_url(synthetic_db), pool_pre_ping=True)
     factory = async_sessionmaker(engine, expire_on_commit=False, class_=AsyncSession)
     async with factory() as session:
         yield session
@@ -123,19 +120,19 @@ async def test_rule_03_teacher_of_two_subjects_cannot_cross_into_the_third(
     scope = await scope_for(async_session, principal)
 
     maths = await async_session.scalar(select(Subject).where(Subject.code == "MATH"))
-    grade9_maths = await async_session.scalar(
-        select(GradeSubjectOffering.id)
-        .join(Subject, Subject.id == GradeSubjectOffering.subject_id)
-        .where(Subject.id == maths.id, GradeSubjectOffering.id.notin_(scope.offering_ids))
+    assert maths is not None
+    other_grade_maths = await async_session.scalar(
+        select(GradeSubjectOffering.id).where(
+            GradeSubjectOffering.subject_id == maths.id,
+            GradeSubjectOffering.id.notin_(scope.offering_ids),
+        )
     )
-    assert grade9_maths is not None
-    assert scope.allows_offering(grade9_maths) is False
+    assert other_grade_maths is not None
+    assert scope.allows_offering(other_grade_maths) is False
 
 
 @pytest.mark.asyncio
-async def test_rule_04_student_scope_is_exactly_themselves(
-    async_session: AsyncSession,
-) -> None:
+async def test_rule_04_student_scope_is_exactly_themselves(async_session: AsyncSession) -> None:
     principal = await _aisha(async_session)
     scope = await scope_for(async_session, principal)
     assert scope.unrestricted is False
@@ -160,9 +157,8 @@ async def test_rule_06_teacher_reaches_only_their_own_students(
     principal = await _principal_for(async_session, "meera.krishnan@alnoor.school")
     scope = await scope_for(async_session, principal)
 
-    total_students = await async_session.scalar(
-        select(text("COUNT(*)")).select_from(StudentProfile)
-    )
+    total_students = await async_session.scalar(select(func.count()).select_from(StudentProfile))
+    assert total_students is not None
     assert 0 < len(scope.student_ids) < int(total_students)
 
 

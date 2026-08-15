@@ -5,7 +5,7 @@ early-warning engine all read from, so they cannot drift apart. Grain: one row p
 student per subject offering per academic period.
 
 Revision ID: d3e4f5a6b7c8
-Revises: b2c3d4e5f6a7
+Revises: e5f6a7b8c9d0
 Create Date: 2026-08-12 00:00:00.000000
 """
 
@@ -15,7 +15,7 @@ import sqlalchemy as sa
 from alembic import op
 
 revision: str | Sequence[str] | None = "d3e4f5a6b7c8"
-down_revision: str | Sequence[str] | None = "b2c3d4e5f6a7"
+down_revision: str | Sequence[str] | None = "e5f6a7b8c9d0"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
@@ -27,7 +27,7 @@ WITH quiz_stats AS (
         qa.student_id                                        AS student_id,
         sse.grade_subject_offering_id                        AS grade_subject_offering_id,
         COUNT(*)                                             AS quizzes_taken,
-        SUM(CASE WHEN qa.passed = 1 THEN 1 ELSE 0 END)       AS quizzes_passed,
+        SUM(CASE WHEN qa.passed IS TRUE THEN 1 ELSE 0 END)   AS quizzes_passed,
         AVG(qa.score_percent)                                AS avg_score_percent,
         MAX(qa.submitted_at)                                 AS last_attempt_at
     FROM quiz_attempts qa
@@ -77,7 +77,7 @@ SELECT
     sse.id                         AS student_subject_enrollment_id,
     COALESCE(qs.quizzes_taken, 0)  AS quizzes_taken,
     COALESCE(qs.quizzes_passed, 0) AS quizzes_passed,
-    ROUND(COALESCE(qs.avg_score_percent, 0), 2) AS mastery_percent,
+    ROUND(COALESCE(qs.avg_score_percent, 0)::numeric, 2) AS mastery_percent,
     qs.last_attempt_at             AS last_attempt_at,
     COALESCE(ps.lessons_completed, 0) AS lessons_completed,
     COALESCE(ps.lessons_started, 0)   AS lessons_started,
@@ -86,7 +86,7 @@ SELECT
     COALESCE(ats.days_counted, 0)  AS days_counted,
     CASE
         WHEN COALESCE(ats.days_counted, 0) = 0 THEN NULL
-        ELSE ROUND(ats.days_present * 100.0 / ats.days_counted, 2)
+        ELSE ROUND((ats.days_present * 100.0 / ats.days_counted)::numeric, 2)
     END                            AS attendance_percent
 FROM student_subject_enrollments sse
 JOIN student_profiles sp            ON sp.id = sse.student_id
@@ -199,14 +199,14 @@ def upgrade() -> None:
         "attendance_records",
         ["student_id", "on_date"],
         unique=True,
-        sqlite_where=sa.text("grade_subject_offering_id IS NULL"),
+        postgresql_where=sa.text("grade_subject_offering_id IS NULL"),
     )
     op.create_index(
         "uq_attendance_records_subject_day",
         "attendance_records",
         ["student_id", "on_date", "grade_subject_offering_id"],
         unique=True,
-        sqlite_where=sa.text("grade_subject_offering_id IS NOT NULL"),
+        postgresql_where=sa.text("grade_subject_offering_id IS NOT NULL"),
     )
 
     op.execute(STUDENT_360_SQL)

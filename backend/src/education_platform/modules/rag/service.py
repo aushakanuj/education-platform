@@ -1,16 +1,13 @@
-"""Admin knowledge-document uploads and shared ingest enqueue."""
+"""Admin knowledge-document uploads; queue is Postgres ``ingest_jobs``."""
 
 from __future__ import annotations
 
-import json
-import logging
 import re
-from typing import Any, cast
+from typing import cast
 from uuid import UUID, uuid4
 
-from arq import create_pool
-from arq.connections import RedisSettings
 from fastapi import HTTPException, UploadFile, status
+from pydantic import ValidationError
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -32,6 +29,7 @@ from education_platform.modules.materials.models import (
     SourceMaterialVersionStatus,
 )
 from education_platform.modules.rag import storage
+from education_platform.modules.rag.contracts import parse_required_roles
 from education_platform.modules.rag.models import (
     IngestJob,
     IngestJobStatus,
@@ -52,8 +50,6 @@ from education_platform.modules.rag.schemas import (
     MaterialVersionStatusOut,
 )
 
-logger = logging.getLogger(__name__)
-
 _SLUG_RE = re.compile(r"[^a-z0-9]+")
 
 
@@ -62,17 +58,14 @@ def slugify(value: str, *, fallback: str = "document") -> str:
     return (slug[:100] or fallback)[:100]
 
 
-async def enqueue_ingest_job(ingest_job_id: UUID) -> str:
-    """Enqueue an ARQ ingest job. Raises on Redis failure."""
-    settings = get_settings()
-    redis = await create_pool(RedisSettings.from_dsn(settings.redis_url))
+def _validated_required_roles(raw: str | None) -> list[str]:
     try:
-        job = await redis.enqueue_job("process_ingest_job", str(ingest_job_id))
-        if job is None:
-            raise RuntimeError("ARQ returned no job")
-        return job.job_id
-    finally:
-        await redis.close(close_connection_pool=True)
+        return parse_required_roles(raw)
+    except ValidationError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Invalid required_roles: {exc.errors()[0]['msg']}",
+        ) from exc
 
 
 def _validate_upload(file: UploadFile, data: bytes) -> str:
@@ -176,20 +169,6 @@ async def upload_curriculum_material(
         status=IngestJobStatus.QUEUED,
     )
     session.add(job)
-    await session.flush()
-
-    try:
-        redis_job_id = await enqueue_ingest_job(job.id)
-    except Exception as exc:
-        logger.exception("Failed to enqueue curriculum ingest job")
-        storage.delete_blob(object_key)
-        await session.rollback()
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="Ingest queue unavailable",
-        ) from exc
-
-    job.redis_job_id = redis_job_id
     await session.commit()
     await session.refresh(version)
     await session.refresh(job)
@@ -244,21 +223,6 @@ async def get_material_version_status(
     )
 
 
-def _parse_required_roles(raw: str | None) -> list[str]:
-    if raw is None or not raw.strip():
-        return ["administrator", "teacher"]
-    raw = raw.strip()
-    if raw.startswith("["):
-        try:
-            parsed: Any = json.loads(raw)
-            if isinstance(parsed, list) and all(isinstance(item, str) for item in parsed):
-                return list(parsed) or ["administrator", "teacher"]
-        except json.JSONDecodeError:
-            pass
-    roles = [part.strip() for part in raw.split(",") if part.strip()]
-    return roles or ["administrator", "teacher"]
-
-
 async def upload_knowledge_document(
     session: AsyncSession,
     principal: Principal,
@@ -296,7 +260,7 @@ async def upload_knowledge_document(
         slug=slug,
         doc_type=doc_type.strip() or "policy",
         status=KnowledgeDocumentStatus.DRAFT,
-        required_roles=_parse_required_roles(required_roles_raw),
+        required_roles=_validated_required_roles(required_roles_raw),
     )
     session.add(document)
     await session.flush()
@@ -319,20 +283,6 @@ async def upload_knowledge_document(
         status=IngestJobStatus.QUEUED,
     )
     session.add(job)
-    await session.flush()
-
-    try:
-        redis_job_id = await enqueue_ingest_job(job.id)
-    except Exception as exc:
-        logger.exception("Failed to enqueue knowledge ingest job")
-        storage.delete_blob(object_key)
-        await session.rollback()
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="Ingest queue unavailable",
-        ) from exc
-
-    job.redis_job_id = redis_job_id
     await session.commit()
     await session.refresh(document)
     await session.refresh(version)

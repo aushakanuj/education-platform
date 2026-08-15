@@ -1,6 +1,5 @@
 from collections.abc import AsyncGenerator
 
-from sqlalchemy import event
 from sqlalchemy.ext.asyncio import (
     AsyncEngine,
     AsyncSession,
@@ -9,16 +8,11 @@ from sqlalchemy.ext.asyncio import (
 )
 
 from education_platform.core.config import get_settings
+from education_platform.db.url import to_async_url
 
 _engine: AsyncEngine | None = None
 _session_factory: async_sessionmaker[AsyncSession] | None = None
 _bound_url: str | None = None
-
-
-def _enable_sqlite_foreign_keys(dbapi_connection: object, _connection_record: object) -> None:
-    cursor = dbapi_connection.cursor()  # type: ignore[attr-defined]
-    cursor.execute("PRAGMA foreign_keys=ON")
-    cursor.close()
 
 
 def reset_engine() -> None:
@@ -35,13 +29,12 @@ def reset_engine() -> None:
 def get_engine() -> AsyncEngine:
     global _engine, _session_factory, _bound_url
     settings = get_settings()
-    if _engine is None or _bound_url != settings.database_url:
+    database_url = to_async_url(settings.database_url)
+    if _engine is None or _bound_url != database_url:
         if _engine is not None:
             _engine.sync_engine.dispose()
-        _bound_url = settings.database_url
-        _engine = create_async_engine(settings.database_url, pool_pre_ping=True)
-        if settings.database_url.startswith("sqlite"):
-            event.listen(_engine.sync_engine, "connect", _enable_sqlite_foreign_keys)
+        _bound_url = database_url
+        _engine = create_async_engine(database_url, pool_pre_ping=True)
         _session_factory = async_sessionmaker(_engine, expire_on_commit=False, class_=AsyncSession)
     return _engine
 

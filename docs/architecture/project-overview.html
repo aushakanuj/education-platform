@@ -897,22 +897,19 @@ flowchart TB
         AiPorts[LLM_Embedding_Ports]
     end
     subgraph Data[Data_plane]
-        Pg["PostgreSQL_pgvector"]
+        Pg["PostgreSQL_pgvector_ingest_jobs"]
         Objects[ObjectStorage]
-        Redis[Redis_queue]
     end
     Web --> Api
     Mobile --> Api
     Api --> Pg
     Api --> Objects
     Api --> AiPorts
-    Api --> Redis
-    Worker --> Redis
     Worker --> Objects
     Worker --> Pg
     Worker --> AiPorts
-    LocalDev["Local_dev: SQLite_local_files_in_process"] -.-> Api
-    Compose["Compose: Postgres_Redis_MinIO"] -.-> Data
+    LocalDev["Local_dev: Postgres_local_uploads_claim_worker"] -.-> Api
+    Compose["Compose: Postgres_MinIO"] -.-> Data
           </pre>
         </div>
         <h3>Repository conventions</h3>
@@ -921,7 +918,7 @@ flowchart TB
           <li>Thin HTTP routes; business logic in module services; persistence in models/repositories.</li>
           <li>Alembic migrations for schema; do not rely on <code class="inline">create_all</code> for production.</li>
           <li>Package layout under <code class="inline">src/education_platform/</code>: <code class="inline">core</code>, <code class="inline">api</code>, <code class="inline">db</code>, <code class="inline">modules</code> (auth, curriculum, ai).</li>
-          <li>Compose stack: PostgreSQL + pgvector, Redis, MinIO.</li>
+          <li>Compose stack: PostgreSQL + pgvector (ingest queue in Postgres; MinIO deferred).</li>
           <li>Provider-neutral LLM/embedding ports; OpenAI-compatible adapter configurable via environment.</li>
           <li>Clients: React web app and React Native mobile app against the same FastAPI OpenAPI / JWT contract (Flutter is not used).</li>
         </ul>
@@ -1027,7 +1024,7 @@ flowchart TB
         <h2>16. Local setup &amp; quality gates</h2>
         <h3>Prerequisites</h3>
         <ul>
-          <li>Docker Desktop (PostgreSQL, Redis, MinIO via Compose)</li>
+          <li>Docker Desktop (PostgreSQL + pgvector via Compose)</li>
           <li>macOS/Linux: bash + curl; Windows: PowerShell</li>
         </ul>
         <h3>Bootstrap</h3>

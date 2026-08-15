@@ -112,7 +112,7 @@ export function AdminDocumentsPage() {
         <h1>Documents</h1>
         <p>
           Upload policy and handbook PDFs for async indexing. Processing status updates after
-          upload; grounded Policy chat stays fixture-backed for now.
+          upload; Policy chat retrieves from indexed documents via the live assistant API.
         </p>
       </header>
 

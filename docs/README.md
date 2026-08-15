@@ -45,15 +45,17 @@ Status legend: **Built** | **Partial** | **Mock** | **Deferred**
 | Roles in schema/API | **Built** | `administrator`, `teacher`, `student` |
 | Grade + Grade–Subject enrollment gate | **Built** | Students require active enrollments |
 | `GET /me/learning-directory` | **Built** | Primary catalog API; admin bypasses enrollment |
-| Curriculum seed from markdown | **Built** | [`docs/curriculum/`](./curriculum/) → SQLite |
+| Curriculum seed from markdown | **Built** | [`docs/curriculum/`](./curriculum/) → Postgres |
 | Student study + quiz + scoring | **Built** | No answer keys on student APIs |
 | Legacy `GET /materials` | **Built** | Flat list; prefer learning-directory |
 | Admin materials browser (`/admin/materials`) | **Built** | Read-only; live API |
-| Admin policy assistant | **Mock** | Frontend fixture only |
+| Admin policy assistant | **Partial** | Live multi-chat + LangGraph (injection → validate → retrieve → summarize) via OpenRouter; needs `OPENROUTER_API_KEY` for LLM stages |
 | Teacher workspace (`/teacher/*`) | **Mock** | Frontend fixtures; no teacher backend APIs |
 | Material upload / publish UI | **Deferred** | Design in [04](./design/04-material-lifecycle-and-ai-artifacts.md); admin UI stubs disabled |
 | Four-pillar evaluation snapshots | **Deferred** | Designed in [06](./design/06-analytics-and-comparison-insights.md); not in backend/frontend yet |
-| Ingestion + vector indexing | **Partial** | Ingest/index only (admin PDF upload → ARQ → chunks + sqlite-vec); grounded assistant still Deferred |
+| Ingestion + vector indexing | **Partial** | Ingest/index only (admin PDF upload → Postgres queue → chunks + pgvector); grounded assistant still Deferred |
 | Grounded AI assistant | **Deferred** | Bounded component; POC foundation only |
-| Postgres / pgvector / MinIO / workers | **Deferred** | Local SQLite + in-process for POC |
+| Postgres / pgvector | **Built** | Compose `pgvector/pgvector:pg16`; embeddings in `chunk_embeddings` |
+| Postgres ingest workers | **Built** | `ingest_jobs` + `FOR UPDATE SKIP LOCKED`; local `UPLOAD_DIR` blobs (MinIO still Deferred) |
+| MinIO object storage | **Deferred** | Local uploads for POC |
 | React Native client | **Deferred** | Target in [architecture diagrams](./architecture/diagrams.md) |

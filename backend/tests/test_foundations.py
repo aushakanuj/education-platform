@@ -1,16 +1,17 @@
-"""Audit trail, attendance, the master register, and the AI gateway."""
+"""Audit trail, attendance, the master register, and the synthetic school generator."""
 
 from __future__ import annotations
 
-from pathlib import Path
+from collections.abc import AsyncIterator, Iterator
 
 import pytest
 import pytest_asyncio
-from sqlalchemy import create_engine, event, func, select, text
+from sqlalchemy import create_engine, func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.orm import Session
 
-from education_platform.modules.ai.gateway import EchoProvider, LLMResponse, get_provider
+from education_platform.db.url import to_async_url, to_sync_url
+from education_platform.modules.academics.models import Section, TeachingAssignment
 from education_platform.modules.attendance.models import AttendanceRecord, AttendanceStatus
 from education_platform.modules.audit.service import AuditAction, list_events, record_event
 from education_platform.modules.auth.models import (
@@ -32,15 +33,9 @@ TEST_SPEC = SchoolSpec(sections_per_grade=2, students_per_section=3, term_weeks=
 
 
 @pytest.fixture()
-def synthetic_session(migrated_db: Path) -> Session:
-    engine = create_engine(f"sqlite:///{migrated_db}")
-
-    @event.listens_for(engine, "connect")
-    def _fk(dbapi_connection: object, _record: object) -> None:
-        cursor = dbapi_connection.cursor()  # type: ignore[attr-defined]
-        cursor.execute("PRAGMA foreign_keys=ON")
-        cursor.close()
-
+def synthetic_session(clean_db: str) -> Iterator[Session]:
+    """A generated school, with an open session on the same database."""
+    engine = create_engine(to_sync_url(clean_db), pool_pre_ping=True)
     with Session(engine) as session:
         generate_school(session, TEST_SPEC)
         session.commit()
@@ -48,9 +43,18 @@ def synthetic_session(migrated_db: Path) -> Session:
     engine.dispose()
 
 
+@pytest.fixture()
+def sync_session(clean_db: str) -> Iterator[Session]:
+    """An empty database with a sync session -- for tests that build their own rows."""
+    engine = create_engine(to_sync_url(clean_db), pool_pre_ping=True)
+    with Session(engine) as session:
+        yield session
+    engine.dispose()
+
+
 @pytest_asyncio.fixture()
-async def async_session(migrated_db: Path):
-    engine = create_async_engine(f"sqlite+aiosqlite:///{migrated_db}")
+async def async_session(clean_db: str) -> AsyncIterator[AsyncSession]:
+    engine = create_async_engine(to_async_url(clean_db), pool_pre_ping=True)
     factory = async_sessionmaker(engine, expire_on_commit=False, class_=AsyncSession)
     async with factory() as session:
         yield session
@@ -64,38 +68,37 @@ def test_generator_produces_a_school_with_teachers_and_sections(
     synthetic_session: Session,
 ) -> None:
     """Before this task the database had one student, no teachers and no sections."""
-    students = synthetic_session.scalar(select(func.count()).select_from(text("student_profiles")))
+    students = synthetic_session.scalar(select(func.count()).select_from(StudentProfile))
     teachers = synthetic_session.scalar(
         select(func.count()).select_from(UserRole).where(UserRole.role == RoleName.TEACHER)
     )
-    sections = synthetic_session.scalar(select(func.count()).select_from(text("sections")))
-    assignments = synthetic_session.scalar(
-        select(func.count()).select_from(text("teaching_assignments"))
-    )
+    sections = synthetic_session.scalar(select(func.count()).select_from(Section))
+    assignments = synthetic_session.scalar(select(func.count()).select_from(TeachingAssignment))
 
     assert students == len(TEST_SPEC.grades) * TEST_SPEC.sections_per_grade * 3
-    assert teachers > 0, "a teacher must be able to exist and log in"
+    assert teachers is not None and teachers > 0, "a teacher must be able to exist and log in"
     assert sections == len(TEST_SPEC.grades) * TEST_SPEC.sections_per_grade
-    assert assignments > 0
+    assert assignments is not None and assignments > 0
 
 
-def test_generator_is_deterministic(migrated_db: Path) -> None:
+def test_generator_is_deterministic(sync_session: Session) -> None:
     """Same seed, same school -- so a demo can be reset to a known state."""
-    engine = create_engine(f"sqlite:///{migrated_db}")
-    with Session(engine) as session:
-        first = generate_school(session, TEST_SPEC)
-        session.commit()
-        first_scores = session.execute(
-            text("SELECT student_identifier, mastery_percent FROM student_360 ORDER BY 1, 2")
-        ).all()
+    first = generate_school(sync_session, TEST_SPEC)
+    sync_session.commit()
+    first_scores = sync_session.execute(
+        select(student_360.c.student_identifier, student_360.c.mastery_percent).order_by(
+            student_360.c.student_identifier, student_360.c.mastery_percent
+        )
+    ).all()
 
-        second = generate_school(session, TEST_SPEC)
-        session.commit()
-        second_scores = session.execute(
-            text("SELECT student_identifier, mastery_percent FROM student_360 ORDER BY 1, 2")
-        ).all()
+    second = generate_school(sync_session, TEST_SPEC)
+    sync_session.commit()
+    second_scores = sync_session.execute(
+        select(student_360.c.student_identifier, student_360.c.mastery_percent).order_by(
+            student_360.c.student_identifier, student_360.c.mastery_percent
+        )
+    ).all()
 
-    engine.dispose()
     assert first.students == second.students
     assert first_scores == second_scores
 
@@ -113,9 +116,7 @@ def test_planted_declining_student_is_actually_declining(synthetic_session: Sess
     assert attendance < 75, "and must sit below the exam-eligibility threshold"
 
 
-def test_planted_student_name_is_unique_across_the_school(
-    synthetic_session: Session,
-) -> None:
+def test_planted_student_name_is_unique_across_the_school(synthetic_session: Session) -> None:
     """Both halves of the planted name are also in the random pools.
 
     A second student of the same name makes the demo ambiguous and breaks any query that
@@ -150,11 +151,10 @@ def test_attendance_percentages_are_exact_not_sampled(synthetic_session: Session
 
 def test_planted_section_gap_is_visible(synthetic_session: Session) -> None:
     rows = synthetic_session.execute(
-        text(
-            "SELECT section, AVG(mastery_percent) FROM student_360 "
-            "WHERE grade = 'Grade 8' AND subject = 'Mathematics' "
-            "GROUP BY section ORDER BY section"
-        )
+        select(student_360.c.section, func.avg(student_360.c.mastery_percent))
+        .where(student_360.c.grade == "Grade 8", student_360.c.subject == "Mathematics")
+        .group_by(student_360.c.section)
+        .order_by(student_360.c.section)
     ).all()
     assert len(rows) == 2
     section_a, section_b = float(rows[0][1]), float(rows[1][1])
@@ -167,8 +167,10 @@ def test_planted_section_gap_is_visible(synthetic_session: Session) -> None:
 def test_student_360_has_one_row_per_student_per_subject(synthetic_session: Session) -> None:
     duplicates = synthetic_session.execute(
         text(
-            "SELECT COUNT(*) FROM (SELECT student_id, subject, academic_period_id "
-            "FROM student_360 GROUP BY 1,2,3 HAVING COUNT(*) > 1)"
+            "SELECT COUNT(*) FROM ("
+            "  SELECT student_id, subject, academic_period_id FROM student_360"
+            "  GROUP BY student_id, subject, academic_period_id HAVING COUNT(*) > 1"
+            ") AS dupes"
         )
     ).scalar()
     assert duplicates == 0
@@ -179,7 +181,13 @@ def test_student_360_carries_the_columns_the_scope_filter_needs(
 ) -> None:
     """Without these the permission boundary cannot be applied to analytics at all."""
     columns = {
-        row[1] for row in synthetic_session.execute(text("PRAGMA table_info(student_360)")).all()
+        row[0]
+        for row in synthetic_session.execute(
+            text(
+                "SELECT column_name FROM information_schema.columns "
+                "WHERE table_name = 'student_360'"
+            )
+        ).all()
     }
     for required in ("institution_id", "student_id", "section_id", "subject", "grade"):
         assert required in columns
@@ -281,21 +289,3 @@ async def test_audit_is_scoped_to_one_institution(async_session: AsyncSession) -
     assert len(await list_events(async_session, institution_id=first.id)) == 1
     total = await async_session.scalar(select(func.count()).select_from(AuditEvent))
     assert total == 2
-
-
-# ----------------------------------------------------------------- ai gateway
-
-
-def test_ai_gateway_defaults_to_the_offline_stub() -> None:
-    """Provider choice is task 0.3 and still open; nothing may call out by default."""
-    provider = get_provider()
-    assert isinstance(provider, EchoProvider)
-
-
-def test_ai_gateway_is_deterministic_and_offline() -> None:
-    provider = EchoProvider()
-    first = provider.complete("Write SQL for average mastery")
-    second = provider.complete("Write SQL for average mastery")
-    assert isinstance(first, LLMResponse)
-    assert first.text == second.text
-    assert first.meta["stub"] is True

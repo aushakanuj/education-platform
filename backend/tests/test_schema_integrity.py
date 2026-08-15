@@ -1,4 +1,4 @@
-"""SQLite schema integrity tests for the evaluation POC data model."""
+"""Postgres schema integrity tests for the evaluation POC data model."""
 
 from __future__ import annotations
 
@@ -7,10 +7,11 @@ from decimal import Decimal
 from uuid import uuid4
 
 import pytest
-from sqlalchemy import inspect, select
+from sqlalchemy import create_engine, inspect, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
+from education_platform.db.url import to_sync_url
 from education_platform.modules.academics.models import (
     AcademicPeriod,
     AcademicPeriodStatus,
@@ -58,10 +59,8 @@ def _institution(session: Session) -> Institution:
     return institution
 
 
-def test_migration_creates_core_tables(migrated_db: object) -> None:
-    from sqlalchemy import create_engine
-
-    engine = create_engine(f"sqlite:///{migrated_db}")
+def test_migration_creates_core_tables(clean_db: str) -> None:
+    engine = create_engine(to_sync_url(clean_db))
     names = set(inspect(engine).get_table_names())
     engine.dispose()
     for required in {
@@ -79,6 +78,7 @@ def test_migration_creates_core_tables(migrated_db: object) -> None:
         "knowledge_document_versions",
         "knowledge_chunks",
         "ingest_jobs",
+        "chunk_embeddings",
         "student_material_progress",
         "question_answer_keys",
         "quiz_attempts",

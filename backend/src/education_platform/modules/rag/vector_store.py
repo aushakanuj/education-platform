@@ -1,126 +1,145 @@
-"""sqlite-vec sidecar store for chunk embeddings."""
+"""pgvector store for chunk embeddings (same Postgres as relational tables)."""
 
 from __future__ import annotations
 
-import json
-import sqlite3
+from collections.abc import Iterator
+from contextlib import contextmanager
 from dataclasses import dataclass
-from pathlib import Path
-from typing import Any
 from uuid import UUID
 
-from education_platform.core.config import get_settings
-from education_platform.modules.rag.embeddings import embedding_dimensions
+from sqlalchemy import cast, create_engine, delete, func, select
+from sqlalchemy.dialects.postgresql import JSONB, insert
+from sqlalchemy.orm import Session
 
-_TABLE = "chunk_embeddings"
+from education_platform.core.config import get_settings
+from education_platform.db.url import to_sync_url
+from education_platform.modules.rag.contracts import VectorRow
+from education_platform.modules.rag.models import ChunkEmbedding
+
+__all__ = [
+    "SimilarChunk",
+    "VectorRow",
+    "count_for_version",
+    "delete_by_version",
+    "search_similar",
+    "upsert_rows",
+]
 
 
 @dataclass(frozen=True, slots=True)
-class VectorRow:
+class SimilarChunk:
     chunk_id: UUID
-    embedding: list[float]
+    version_id: UUID
     doc_id: UUID
     doc_kind: str
-    institution_id: UUID
-    required_roles: list[str]
-    doc_type: str | None
-    page_number: int | None
-    version_id: UUID
+    distance: float
 
 
-def _connect(path: Path | None = None) -> sqlite3.Connection:
+@contextmanager
+def _session() -> Iterator[Session]:
     settings = get_settings()
-    db_path = path or settings.vector_db_path
-    db_path.parent.mkdir(parents=True, exist_ok=True)
-    conn = sqlite3.connect(str(db_path))
-    conn.enable_load_extension(True)
-    import sqlite_vec
-
-    sqlite_vec.load(conn)
-    conn.enable_load_extension(False)
-    return conn
+    engine = create_engine(to_sync_url(settings.database_url), pool_pre_ping=True)
+    try:
+        with Session(engine) as session:
+            yield session
+    finally:
+        engine.dispose()
 
 
-def ensure_schema(path: Path | None = None) -> None:
-    dims = embedding_dimensions()
-    with _connect(path) as conn:
-        conn.execute(
-            f"""
-            CREATE VIRTUAL TABLE IF NOT EXISTS {_TABLE} USING vec0(
-              chunk_id TEXT PRIMARY KEY,
-              embedding float[{dims}],
-              +doc_id TEXT,
-              +doc_kind TEXT,
-              +institution_id TEXT,
-              +required_roles TEXT,
-              +doc_type TEXT,
-              +page_number INTEGER,
-              +version_id TEXT
-            )
-            """
+def delete_by_version(version_id: UUID) -> int:
+    with _session() as session:
+        result = session.execute(
+            delete(ChunkEmbedding).where(ChunkEmbedding.version_id == version_id)
         )
-        conn.commit()
+        session.commit()
+        return int(result.rowcount)  # type: ignore[attr-defined]
 
 
-def delete_by_version(version_id: UUID, *, path: Path | None = None) -> int:
-    ensure_schema(path)
-    with _connect(path) as conn:
-        cur = conn.execute(
-            f"DELETE FROM {_TABLE} WHERE version_id = ?",
-            (str(version_id),),
-        )
-        conn.commit()
-        return int(cur.rowcount or 0)
-
-
-def upsert_rows(rows: list[VectorRow], *, path: Path | None = None) -> None:
+def upsert_rows(rows: list[VectorRow]) -> None:
     if not rows:
         return
-    ensure_schema(path)
-    with _connect(path) as conn:
-        for row in rows:
-            conn.execute(
-                f"DELETE FROM {_TABLE} WHERE chunk_id = ?",
-                (str(row.chunk_id),),
+    validated = [VectorRow.model_validate(row) for row in rows]
+    with _session() as session:
+        for row in validated:
+            stmt = insert(ChunkEmbedding).values(
+                chunk_id=row.chunk_id,
+                embedding=row.embedding,
+                doc_id=row.doc_id,
+                doc_kind=row.doc_kind,
+                institution_id=row.institution_id,
+                required_roles=row.required_roles,
+                doc_type=row.doc_type,
+                page_number=row.page_number,
+                version_id=row.version_id,
             )
-            conn.execute(
-                f"""
-                INSERT INTO {_TABLE}(
-                  chunk_id, embedding, doc_id, doc_kind, institution_id,
-                  required_roles, doc_type, page_number, version_id
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """,
-                (
-                    str(row.chunk_id),
-                    _serialize_embedding(row.embedding),
-                    str(row.doc_id),
-                    row.doc_kind,
-                    str(row.institution_id),
-                    json.dumps(row.required_roles),
-                    row.doc_type,
-                    row.page_number,
-                    str(row.version_id),
-                ),
+            stmt = stmt.on_conflict_do_update(
+                index_elements=[ChunkEmbedding.chunk_id],
+                set_={
+                    "embedding": stmt.excluded.embedding,
+                    "doc_id": stmt.excluded.doc_id,
+                    "doc_kind": stmt.excluded.doc_kind,
+                    "institution_id": stmt.excluded.institution_id,
+                    "required_roles": stmt.excluded.required_roles,
+                    "doc_type": stmt.excluded.doc_type,
+                    "page_number": stmt.excluded.page_number,
+                    "version_id": stmt.excluded.version_id,
+                },
             )
-        conn.commit()
+            session.execute(stmt)
+        session.commit()
 
 
-def count_for_version(version_id: UUID, *, path: Path | None = None) -> int:
-    ensure_schema(path)
-    with _connect(path) as conn:
-        cur = conn.execute(
-            f"SELECT COUNT(*) FROM {_TABLE} WHERE version_id = ?",
-            (str(version_id),),
+def count_for_version(version_id: UUID) -> int:
+    with _session() as session:
+        return int(
+            session.scalar(
+                select(func.count())
+                .select_from(ChunkEmbedding)
+                .where(ChunkEmbedding.version_id == version_id)
+            )
+            or 0
         )
-        row = cur.fetchone()
-        return int(row[0]) if row else 0
 
 
-def _serialize_embedding(values: list[float]) -> Any:
-    try:
-        import sqlite_vec
+def search_similar(
+    query_embedding: list[float],
+    *,
+    institution_id: UUID,
+    limit: int = 10,
+    required_role: str | None = None,
+    doc_kind: str | None = None,
+    doc_type: str | None = None,
+) -> list[SimilarChunk]:
+    """Exact cosine-distance search (no IVFFlat/HNSW for POC volume)."""
+    distance = ChunkEmbedding.embedding.cosine_distance(query_embedding)
+    stmt = (
+        select(
+            ChunkEmbedding.chunk_id,
+            ChunkEmbedding.version_id,
+            ChunkEmbedding.doc_id,
+            ChunkEmbedding.doc_kind,
+            distance.label("distance"),
+        )
+        .where(ChunkEmbedding.institution_id == institution_id)
+        .order_by(distance)
+        .limit(limit)
+    )
+    if doc_kind is not None:
+        stmt = stmt.where(ChunkEmbedding.doc_kind == doc_kind)
+    if doc_type is not None:
+        stmt = stmt.where(ChunkEmbedding.doc_type == doc_type)
+    if required_role is not None:
+        stmt = stmt.where(cast(ChunkEmbedding.required_roles, JSONB).contains([required_role]))
 
-        return sqlite_vec.serialize_float32(values)
-    except Exception:
-        # Fallback for environments where serialize helper differs.
-        return values
+    with _session() as session:
+        rows = session.execute(stmt).all()
+    return [
+        SimilarChunk(
+            chunk_id=row.chunk_id,
+            version_id=row.version_id,
+            doc_id=row.doc_id,
+            doc_kind=row.doc_kind,
+            distance=float(row.distance),
+        )
+        for row in rows
+    ]

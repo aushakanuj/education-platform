@@ -1,4 +1,4 @@
-"""Shared SQLAlchemy helpers for the SQLite POC."""
+"""Shared SQLAlchemy helpers for the Postgres POC."""
 
 from __future__ import annotations
 
@@ -9,7 +9,7 @@ from sqlalchemy import JSON, Enum, Index, text
 
 
 def str_enum(enum_cls: type[enum.Enum], name: str) -> Enum:
-    """Store enums as VARCHAR values (portable; SQLite has no native enums)."""
+    """Store enums as VARCHAR values (portable; avoids native Postgres enums)."""
     return Enum(
         enum_cls,
         name=name,
@@ -20,8 +20,8 @@ def str_enum(enum_cls: type[enum.Enum], name: str) -> Enum:
 
 
 def partial_unique_index(name: str, *columns: Any, where: str) -> Index:
-    """Unique partial index with a SQLite-compatible WHERE clause."""
-    return Index(name, *columns, unique=True, sqlite_where=text(where))
+    """Unique partial index with a Postgres WHERE clause."""
+    return Index(name, *columns, unique=True, postgresql_where=text(where))
 
 
 JsonDict = JSON

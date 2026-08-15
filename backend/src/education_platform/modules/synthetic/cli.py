@@ -11,10 +11,11 @@ from __future__ import annotations
 
 import argparse
 
-from sqlalchemy import create_engine, event
+from sqlalchemy import create_engine
 from sqlalchemy.orm import Session
 
 from education_platform.core.config import get_settings
+from education_platform.db.url import to_sync_url
 from education_platform.modules.synthetic.generator import SchoolSpec, generate_school
 
 
@@ -39,15 +40,7 @@ def main() -> None:
     )
 
     settings = get_settings()
-    url = settings.database_url.replace("+aiosqlite", "")
-    engine = create_engine(url)
-
-    @event.listens_for(engine, "connect")
-    def _fk(dbapi_connection: object, _record: object) -> None:
-        if url.startswith("sqlite"):
-            cursor = dbapi_connection.cursor()  # type: ignore[attr-defined]
-            cursor.execute("PRAGMA foreign_keys=ON")
-            cursor.close()
+    engine = create_engine(to_sync_url(settings.database_url), pool_pre_ping=True)
 
     with Session(engine) as session:
         result = generate_school(session, spec)

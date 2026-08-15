@@ -3,13 +3,15 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from sqlalchemy import create_engine, event
+from sqlalchemy import create_engine
 from sqlalchemy.orm import Session
 
 from education_platform.core.config import get_settings
 from education_platform.db import models as _models
+from education_platform.db.url import to_sync_url
 from education_platform.modules.academics.router import router as academics_router
 from education_platform.modules.assessments.router import router as assessments_router
+from education_platform.modules.assistant.router import router as assistant_router
 from education_platform.modules.audit.router import router as audit_router
 from education_platform.modules.auth.router import router as auth_router
 from education_platform.modules.insights.router import router as insights_router
@@ -22,16 +24,7 @@ _ = _models
 
 def _seed_if_empty() -> None:
     settings = get_settings()
-    url = settings.database_url.replace("+aiosqlite", "")
-    engine = create_engine(url)
-
-    @event.listens_for(engine, "connect")
-    def _fk(dbapi_connection: object, _record: object) -> None:
-        if url.startswith("sqlite"):
-            cursor = dbapi_connection.cursor()  # type: ignore[attr-defined]
-            cursor.execute("PRAGMA foreign_keys=ON")
-            cursor.close()
-
+    engine = create_engine(to_sync_url(settings.database_url))
     with Session(engine) as session:
         seed_approved_materials(session, replace=False)
     engine.dispose()
@@ -57,6 +50,7 @@ app.include_router(auth_router, prefix=settings.api_v1_prefix)
 app.include_router(academics_router, prefix=settings.api_v1_prefix)
 app.include_router(materials_router, prefix=settings.api_v1_prefix)
 app.include_router(rag_router, prefix=settings.api_v1_prefix)
+app.include_router(assistant_router, prefix=settings.api_v1_prefix)
 app.include_router(assessments_router, prefix=settings.api_v1_prefix)
 app.include_router(audit_router, prefix=settings.api_v1_prefix)
 app.include_router(insights_router, prefix=settings.api_v1_prefix)
