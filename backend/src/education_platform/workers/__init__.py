@@ -1,1 +1,1 @@
-"""Background workers (ARQ)."""
+"""Background workers (Postgres ingest queue)."""

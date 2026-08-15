@@ -11,27 +11,26 @@ reconciles:
 - [Assessment: common subtopic mastery quizzes](./05-assessment-common-subtopic-mastery-quizzes.md)
 
 It defines tables, keys, lifecycle fields, uniqueness rules, and integrity invariants that the
-SQLite / SQLAlchemy / Alembic foundation must enforce.
+Postgres / SQLAlchemy / Alembic foundation must enforce.
 
 ### Engine choice (POC)
 
-- **SQLite** via `sqlite+aiosqlite` and a local `backend/education.db` file.
+- **PostgreSQL + pgvector** via Compose (`pgvector/pgvector:pg16`), default URL
+  `postgresql+asyncpg://education:education@localhost:5432/education`.
+- Sync tools (Alembic, seed, ARQ worker) use `postgresql+psycopg://...`.
 - Enums stored as VARCHAR values (`native_enum=False`).
 - JSON columns use SQLAlchemy `JSON` (not Postgres JSONB).
-- Partial unique indexes use SQLite `WHERE` clauses.
+- Partial unique indexes use Postgres `WHERE` clauses (`postgresql_where`).
 - Teaching-assignment uniqueness with nullable `section_id` uses two partial unique indexes
   (with/without section) instead of Postgres `NULLS NOT DISTINCT`.
-- Foreign keys are enabled with `PRAGMA foreign_keys=ON` on each connection.
-
-Postgres can be revisited later if multi-writer production needs arise; the relational contract
-stays the same.
+- Chunk embeddings live in `chunk_embeddings` (`vector(384)`); exact cosine search for POC volume.
 
 
 ### In this foundation milestone
 
 - Schema design document (this file)
-- ORM models and one initial Alembic migration
-- Local SQLite database file
+- ORM models and Alembic migrations
+- Dockerized Postgres + pgvector
 - Database integrity tests
 
 ### Deferred to later slices
@@ -54,7 +53,7 @@ stays the same.
 | Enums | VARCHAR values via SQLAlchemy `Enum(native_enum=False)` |
 | Tenant boundary | Every operational row belongs to one institution, directly or through a parent |
 | Answer keys | Stored only in `question_answer_keys`; student queries never join that table |
-| Engine | SQLite file for the POC (`aiosqlite`) |
+| Engine | PostgreSQL + pgvector (Compose) |
 | Cross-row business rules | Enforced in transactional services (not database triggers) when they span multiple entities |
 
 ## 3. Entity-relationship overview
@@ -506,8 +505,8 @@ Shared declarative base and naming conventions live in `education_platform.db.ba
 ## 11. Acceptance criteria for this foundation
 
 1. Design document matches implemented ORM models and the initial migration.
-2. `alembic upgrade head` creates the full schema on a clean SQLite database.
+2. `alembic upgrade head` creates the full schema on a clean Postgres database.
 3. Integrity tests cover tenant email uniqueness, single active period, enrollment uniqueness,
    version uniqueness, answer-key isolation, and attempt FK history.
-4. Existing file-backed materials API tests continue to pass unchanged.
-5. CI runs Alembic upgrade against SQLite before pytest.
+4. Existing materials API tests continue to pass unchanged.
+5. CI runs Alembic upgrade against Postgres (`education_test`) before pytest.

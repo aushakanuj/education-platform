@@ -17,7 +17,14 @@ from education_platform.modules.materials.models import (
     SourceMaterialVersion,
     SourceMaterialVersionStatus,
 )
-from education_platform.modules.rag.chunking import chunk_text
+from education_platform.modules.rag.chunking import (
+    SECTION_HEADING_MAX_LEN,
+    TextChunk,
+    _page_number_from_meta,
+    _section_heading_from_meta,
+    chunk_docling_document,
+    content_hash,
+)
 from education_platform.modules.rag.models import (
     IngestJob,
     IngestJobStatus,
@@ -31,9 +38,11 @@ from education_platform.modules.rag.vector_store import (
     VectorRow,
     count_for_version,
     delete_by_version,
+    search_similar,
     upsert_rows,
 )
 from education_platform.workers.ingest import process_ingest_job_sync
+from education_platform.workers.runner import claim_next_job, poll_once
 
 TINY_PDF = (
     b"%PDF-1.1\n"
@@ -47,6 +56,65 @@ TINY_PDF = (
     b"xref\n0 6\n0000000000 65535 f \n"
     b"trailer<< /Size 6 /Root 5 0 R >>\nstartxref\n0\n%%EOF\n"
 )
+
+SAMPLE_SECTION = "Properties of squares"
+SAMPLE_CHUNK_TEXT = f"{SAMPLE_SECTION}\nA square has four equal sides and four right angles."
+
+
+def _sample_chunks(*, text: str = SAMPLE_CHUNK_TEXT) -> list[TextChunk]:
+    digest = content_hash(text)
+    return [
+        TextChunk(
+            ordinal=1,
+            text=text,
+            content_hash=digest,
+            token_count=len(text.split()),
+            page_number=1,
+            section_heading=SAMPLE_SECTION,
+        )
+    ]
+
+
+class _StubProv:
+    def __init__(self, page_no: int) -> None:
+        self.page_no = page_no
+
+
+class _StubDocItem:
+    def __init__(self, *page_nos: int) -> None:
+        self.prov = [_StubProv(n) for n in page_nos]
+
+
+class _StubMeta:
+    def __init__(
+        self,
+        *,
+        headings: list[str] | None = None,
+        doc_items: list[_StubDocItem] | None = None,
+    ) -> None:
+        self.headings = headings
+        self.doc_items = doc_items or []
+
+
+class _StubChunk:
+    def __init__(self, text: str, meta: _StubMeta) -> None:
+        self.text = text
+        self.meta = meta
+
+
+class _StubChunker:
+    def __init__(self, chunks: list[_StubChunk]) -> None:
+        self._chunks = chunks
+
+    def chunk(self, dl_doc: object, **_kwargs: object) -> list[_StubChunk]:
+        _ = dl_doc
+        return list(self._chunks)
+
+    def contextualize(self, chunk: _StubChunk) -> str:
+        headings = chunk.meta.headings or []
+        if headings:
+            return "\n".join([*headings, chunk.text])
+        return chunk.text
 
 
 @pytest.fixture()
@@ -71,10 +139,6 @@ def seeded_subtopic_id(seeded_db: Session) -> UUID:
     )
     assert subtopic is not None
     return subtopic.id
-
-
-async def _fake_enqueue(ingest_job_id: UUID) -> str:
-    return f"job-{ingest_job_id}"
 
 
 def test_student_forbidden_on_curriculum_upload(
@@ -109,12 +173,7 @@ def test_admin_curriculum_upload_enqueues(
     admin_headers: dict[str, str],
     seeded_subtopic_id: UUID,
     seeded_db: Session,
-    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr(
-        "education_platform.modules.rag.service.enqueue_ingest_job",
-        _fake_enqueue,
-    )
     response = client.post(
         f"/api/v1/admin/subtopics/{seeded_subtopic_id}/materials",
         headers=admin_headers,
@@ -138,7 +197,7 @@ def test_admin_curriculum_upload_enqueues(
     job = seeded_db.get(IngestJob, UUID(body["ingest_job_id"]))
     assert job is not None
     assert job.target_kind == IngestTargetKind.SOURCE_MATERIAL_VERSION
-    assert job.redis_job_id == f"job-{job.id}"
+    assert job.status == IngestJobStatus.QUEUED
 
     status = client.get(
         f"/api/v1/admin/material-versions/{version_id}",
@@ -153,12 +212,7 @@ def test_admin_knowledge_upload_and_list(
     client: TestClient,
     admin_headers: dict[str, str],
     seeded_db: Session,
-    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr(
-        "education_platform.modules.rag.service.enqueue_ingest_job",
-        _fake_enqueue,
-    )
     response = client.post(
         "/api/v1/admin/knowledge-documents",
         headers=admin_headers,
@@ -196,47 +250,86 @@ def test_admin_knowledge_upload_and_list(
     document = seeded_db.get(KnowledgeDocument, document_id)
     assert document is not None
     assert document.doc_type == "policy"
+    job = seeded_db.get(IngestJob, UUID(body["ingest_job_id"]))
+    assert job is not None
+    assert job.status == IngestJobStatus.QUEUED
 
 
-def test_upload_returns_503_when_queue_down(
-    client: TestClient,
-    admin_headers: dict[str, str],
-    seeded_subtopic_id: UUID,
+def test_page_number_from_meta_uses_first_provenance() -> None:
+    meta = _StubMeta(doc_items=[_StubDocItem(2, 3), _StubDocItem(1)])
+    assert _page_number_from_meta(meta) == 2
+    assert _page_number_from_meta(_StubMeta()) is None
+
+
+def test_section_heading_from_meta_joins_and_clips() -> None:
+    meta = _StubMeta(headings=["Chapter 1", "Properties of squares"])
+    assert _section_heading_from_meta(meta) == "Chapter 1 > Properties of squares"
+
+    long_heading = "A" * (SECTION_HEADING_MAX_LEN + 40)
+    clipped = _section_heading_from_meta(_StubMeta(headings=[long_heading]))
+    assert clipped is not None
+    assert len(clipped) == SECTION_HEADING_MAX_LEN
+    assert _section_heading_from_meta(_StubMeta(headings=None)) is None
+
+
+def test_chunk_docling_document_preserves_tables_and_dedupes(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    async def _boom(_ingest_job_id: UUID) -> str:
-        raise ConnectionError("redis down")
+    table_md = "| col | value |\n| --- | --- |\n| a | 1 |"
+    stub_chunks = [
+        _StubChunk(table_md, _StubMeta(headings=["Tables"], doc_items=[_StubDocItem(1)])),
+        _StubChunk(table_md, _StubMeta(headings=["Tables"], doc_items=[_StubDocItem(1)])),
+        _StubChunk("Unique prose", _StubMeta(headings=["Prose"], doc_items=[_StubDocItem(2)])),
+    ]
+
+    class _FakeHybridChunker:
+        def __init__(self, *_args: object, **_kwargs: object) -> None:
+            self._inner = _StubChunker(stub_chunks)
+
+        def chunk(self, dl_doc: object, **kwargs: object) -> list[_StubChunk]:
+            return self._inner.chunk(dl_doc, **kwargs)
+
+        def contextualize(self, chunk: _StubChunk) -> str:
+            return self._inner.contextualize(chunk)
+
+    class _FakeTokenizer:
+        def count_tokens(self, text: str) -> int:
+            return len(text.split())
+
+        def get_max_tokens(self) -> int:
+            return 256
 
     monkeypatch.setattr(
-        "education_platform.modules.rag.service.enqueue_ingest_job",
-        _boom,
+        "docling_core.transforms.chunker.hybrid_chunker.HybridChunker",
+        _FakeHybridChunker,
     )
-    response = client.post(
-        f"/api/v1/admin/subtopics/{seeded_subtopic_id}/materials",
-        headers=admin_headers,
-        data={"title": "Geometry PDF"},
-        files={"file": ("lesson.pdf", TINY_PDF, "application/pdf")},
+    monkeypatch.setattr(
+        "docling_core.transforms.chunker.tokenizer.huggingface.HuggingFaceTokenizer",
+        lambda **_kwargs: _FakeTokenizer(),
     )
-    assert response.status_code == 503
-    assert "queue" in response.json()["detail"].lower()
+    monkeypatch.setattr(
+        "transformers.AutoTokenizer.from_pretrained",
+        lambda *_args, **_kwargs: object(),
+    )
+
+    chunks = chunk_docling_document(document=object())
+    assert len(chunks) == 2
+    assert "| col | value |" in chunks[0].text
+    assert "\n" in chunks[0].text
+    assert chunks[0].page_number == 1
+    assert chunks[0].section_heading == "Tables"
+    assert chunks[1].ordinal == 2
+    assert chunks[1].page_number == 2
+    assert len({c.content_hash for c in chunks}) == 2
 
 
-def test_chunk_text_dedupes_and_overlaps() -> None:
-    words = " ".join(f"word{i}" for i in range(50))
-    chunks = chunk_text(words, chunk_tokens=20, overlap_ratio=0.15)
-    assert len(chunks) >= 2
-    assert chunks[0].ordinal == 1
-    assert chunks[0].content_hash
-    assert len({c.content_hash for c in chunks}) == len(chunks)
-
-
-def test_sqlite_vec_upsert_and_delete(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    vector_path = tmp_path / "vec.db"
-    monkeypatch.setenv("VECTOR_DB_PATH", str(vector_path))
+def test_pgvector_upsert_delete_and_search(clean_db: str) -> None:
+    _ = clean_db
     get_settings.cache_clear()
 
     version_id = uuid4()
     chunk_id = uuid4()
+    institution_id = uuid4()
     embedding = [0.01] * 384
     upsert_rows(
         [
@@ -245,18 +338,101 @@ def test_sqlite_vec_upsert_and_delete(tmp_path: Path, monkeypatch: pytest.Monkey
                 embedding=embedding,
                 doc_id=uuid4(),
                 doc_kind="knowledge_document",
-                institution_id=uuid4(),
+                institution_id=institution_id,
                 required_roles=["administrator"],
                 doc_type="policy",
                 page_number=1,
                 version_id=version_id,
             )
-        ],
-        path=vector_path,
+        ]
     )
-    assert count_for_version(version_id, path=vector_path) == 1
-    assert delete_by_version(version_id, path=vector_path) == 1
-    assert count_for_version(version_id, path=vector_path) == 0
+    assert count_for_version(version_id) == 1
+    hits = search_similar(
+        embedding,
+        institution_id=institution_id,
+        limit=5,
+        required_role="administrator",
+        doc_kind="knowledge_document",
+        doc_type="policy",
+    )
+    assert len(hits) == 1
+    assert hits[0].chunk_id == chunk_id
+    assert delete_by_version(version_id) == 1
+    assert count_for_version(version_id) == 0
+    get_settings.cache_clear()
+
+
+def test_claim_loop_processes_queued_job(
+    seeded_db: Session,
+    seeded_subtopic_id: UUID,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    from education_platform.modules.materials.models import SourceMaterial
+    from education_platform.modules.rag import storage
+
+    monkeypatch.setenv("UPLOAD_DIR", str(tmp_path / "uploads"))
+    get_settings.cache_clear()
+    monkeypatch.setattr(
+        "education_platform.workers.ingest.embed_texts",
+        lambda texts: [[0.03] * 384 for _ in texts],
+    )
+
+    material = SourceMaterial(
+        subtopic_id=seeded_subtopic_id,
+        title="Claim loop lesson",
+        slug=f"claim-loop-{uuid4().hex[:8]}",
+    )
+    seeded_db.add(material)
+    seeded_db.flush()
+    object_key = storage.build_object_key(
+        institution_id=uuid4(),
+        kind="source_materials",
+        filename="lesson.pdf",
+    )
+    storage.store_bytes(object_key, TINY_PDF)
+    version = SourceMaterialVersion(
+        source_material_id=material.id,
+        version_number=1,
+        lifecycle_status=SourceMaterialVersionStatus.PROCESSING,
+        title="Claim loop lesson",
+        content_format="pdf",
+        blob_object_key=object_key,
+        blob_content_type="application/pdf",
+        checksum=storage.sha256_hex(TINY_PDF),
+    )
+    seeded_db.add(version)
+    seeded_db.flush()
+    job = IngestJob(
+        target_kind=IngestTargetKind.SOURCE_MATERIAL_VERSION,
+        target_id=version.id,
+        status=IngestJobStatus.QUEUED,
+    )
+    seeded_db.add(job)
+    seeded_db.commit()
+
+    claimed = claim_next_job(seeded_db)
+    assert claimed == job.id
+    seeded_db.expire_all()
+    running = seeded_db.get(IngestJob, job.id)
+    assert running is not None
+    assert running.status == IngestJobStatus.RUNNING
+
+    process_ingest_job_sync(
+        str(job.id),
+        parse_pdf=lambda _path: _sample_chunks(),
+    )
+
+    seeded_db.expire_all()
+    done = seeded_db.get(IngestJob, job.id)
+    assert done is not None
+    assert done.status == IngestJobStatus.SUCCEEDED
+    refreshed = seeded_db.get(SourceMaterialVersion, version.id)
+    assert refreshed is not None
+    assert refreshed.lifecycle_status == SourceMaterialVersionStatus.READY
+    assert count_for_version(version.id) >= 1
+
+    assert poll_once(session=seeded_db) is None
     get_settings.cache_clear()
 
 
@@ -270,7 +446,6 @@ def test_worker_happy_path_source_material(
     from education_platform.modules.rag import storage
 
     monkeypatch.setenv("UPLOAD_DIR", str(tmp_path / "uploads"))
-    monkeypatch.setenv("VECTOR_DB_PATH", str(tmp_path / "vectors.db"))
     get_settings.cache_clear()
 
     monkeypatch.setattr(
@@ -313,7 +488,7 @@ def test_worker_happy_path_source_material(
 
     process_ingest_job_sync(
         str(job.id),
-        extract_text=lambda _path: "A square has four equal sides. " * 40,
+        parse_pdf=lambda _path: _sample_chunks(),
     )
 
     seeded_db.expire_all()
@@ -323,10 +498,82 @@ def test_worker_happy_path_source_material(
     chunks = seeded_db.scalars(
         select(SourceChunk).where(SourceChunk.source_material_version_id == version.id)
     ).all()
-    assert len(chunks) >= 1
+    assert len(chunks) == 1
+    assert chunks[0].page_number == 1
+    assert chunks[0].section_heading == SAMPLE_SECTION
     done = seeded_db.get(IngestJob, job.id)
     assert done is not None
     assert done.status == IngestJobStatus.SUCCEEDED
+    assert count_for_version(version.id) >= 1
+    get_settings.cache_clear()
+
+
+def test_worker_happy_path_knowledge_document(
+    seeded_db: Session,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    from education_platform.modules.rag import storage
+
+    monkeypatch.setenv("UPLOAD_DIR", str(tmp_path / "uploads"))
+    get_settings.cache_clear()
+    monkeypatch.setattr(
+        "education_platform.workers.ingest.embed_texts",
+        lambda texts: [[0.04] * 384 for _ in texts],
+    )
+
+    document = KnowledgeDocument(
+        institution_id=_institution_id(seeded_db),
+        title="Handbook",
+        slug=f"handbook-{uuid4().hex[:8]}",
+        doc_type="handbook",
+        required_roles=["administrator", "teacher"],
+    )
+    seeded_db.add(document)
+    seeded_db.flush()
+    object_key = storage.build_object_key(
+        institution_id=document.institution_id,
+        kind="knowledge_documents",
+        filename="handbook.pdf",
+    )
+    storage.store_bytes(object_key, TINY_PDF)
+    version = KnowledgeDocumentVersion(
+        document_id=document.id,
+        version_number=1,
+        lifecycle_status=KnowledgeDocumentVersionStatus.PROCESSING,
+        blob_object_key=object_key,
+        blob_content_type="application/pdf",
+        checksum=storage.sha256_hex(TINY_PDF),
+    )
+    seeded_db.add(version)
+    seeded_db.flush()
+    job = IngestJob(
+        target_kind=IngestTargetKind.KNOWLEDGE_DOCUMENT_VERSION,
+        target_id=version.id,
+        status=IngestJobStatus.QUEUED,
+    )
+    seeded_db.add(job)
+    seeded_db.commit()
+
+    process_ingest_job_sync(
+        str(job.id),
+        parse_pdf=lambda _path: _sample_chunks(),
+    )
+
+    seeded_db.expire_all()
+    refreshed = seeded_db.get(KnowledgeDocumentVersion, version.id)
+    assert refreshed is not None
+    assert refreshed.lifecycle_status == KnowledgeDocumentVersionStatus.READY
+    chunks = seeded_db.scalars(
+        select(KnowledgeChunk).where(KnowledgeChunk.knowledge_document_version_id == version.id)
+    ).all()
+    assert len(chunks) == 1
+    assert chunks[0].page_number == 1
+    assert chunks[0].section_heading == SAMPLE_SECTION
+    done = seeded_db.get(IngestJob, job.id)
+    assert done is not None
+    assert done.status == IngestJobStatus.SUCCEEDED
+    assert count_for_version(version.id) >= 1
     get_settings.cache_clear()
 
 
@@ -338,7 +585,6 @@ def test_worker_failed_parse_marks_failed(
     from education_platform.modules.rag import storage
 
     monkeypatch.setenv("UPLOAD_DIR", str(tmp_path / "uploads"))
-    monkeypatch.setenv("VECTOR_DB_PATH", str(tmp_path / "vectors.db"))
     get_settings.cache_clear()
 
     document = KnowledgeDocument(
@@ -374,10 +620,10 @@ def test_worker_failed_parse_marks_failed(
     seeded_db.add(job)
     seeded_db.commit()
 
-    def _boom(_path: Path) -> str:
+    def _boom(_path: Path) -> list[TextChunk]:
         raise RuntimeError("Docling parse failed")
 
-    process_ingest_job_sync(str(job.id), extract_text=_boom)
+    process_ingest_job_sync(str(job.id), parse_pdf=_boom)
 
     seeded_db.expire_all()
     refreshed = seeded_db.get(KnowledgeDocumentVersion, version.id)

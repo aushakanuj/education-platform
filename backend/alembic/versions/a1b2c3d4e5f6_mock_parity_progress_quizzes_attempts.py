@@ -136,14 +136,14 @@ def upgrade() -> None:
         "common_mastery_quizzes",
         ["subtopic_id"],
         unique=True,
-        sqlite_where=sa.text("subtopic_id IS NOT NULL"),
+        postgresql_where=sa.text("subtopic_id IS NOT NULL"),
     )
     op.create_index(
         "uq_common_mastery_quizzes_topic",
         "common_mastery_quizzes",
         ["topic_id"],
         unique=True,
-        sqlite_where=sa.text("topic_id IS NOT NULL"),
+        postgresql_where=sa.text("topic_id IS NOT NULL"),
     )
 
     with op.batch_alter_table("quiz_versions") as batch_op:
@@ -185,7 +185,7 @@ def upgrade() -> None:
         "quiz_releases",
         ["quiz_version_id"],
         unique=True,
-        sqlite_where=sa.text("status = 'open'"),
+        postgresql_where=sa.text("status = 'open'"),
     )
 
     with op.batch_alter_table("quiz_attempts") as batch_op:
@@ -234,7 +234,7 @@ def upgrade() -> None:
         "quiz_attempts",
         ["student_subject_enrollment_id", "quiz_version_id"],
         unique=True,
-        sqlite_where=sa.text("status = 'in_progress'"),
+        postgresql_where=sa.text("status = 'in_progress'"),
     )
 
     with op.batch_alter_table("question_versions") as batch_op:

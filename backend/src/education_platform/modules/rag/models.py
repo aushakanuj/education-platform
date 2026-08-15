@@ -7,10 +7,12 @@ from datetime import datetime
 from typing import Any
 from uuid import UUID
 
+from pgvector.sqlalchemy import Vector
 from sqlalchemy import (
     CheckConstraint,
     DateTime,
     ForeignKey,
+    Index,
     Integer,
     String,
     Text,
@@ -141,6 +143,7 @@ class IngestJob(UUIDTimestampMixin, Base):
             "target_kind IN ('source_material_version', 'knowledge_document_version')",
             name="ck_ingest_jobs_target_kind",
         ),
+        Index("ix_ingest_jobs_status_created_at", "status", "created_at"),
     )
 
     target_kind: Mapped[IngestTargetKind] = mapped_column(
@@ -148,10 +151,25 @@ class IngestJob(UUIDTimestampMixin, Base):
         index=True,
     )
     target_id: Mapped[UUID] = mapped_column(index=True)
-    redis_job_id: Mapped[str | None] = mapped_column(String(100), nullable=True)
     status: Mapped[IngestJobStatus] = mapped_column(
         str_enum(IngestJobStatus, "ingest_job_status"),
         default=IngestJobStatus.QUEUED,
         index=True,
     )
     error: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+
+class ChunkEmbedding(Base):
+    """pgvector row for a source/knowledge chunk embedding."""
+
+    __tablename__ = "chunk_embeddings"
+
+    chunk_id: Mapped[UUID] = mapped_column(primary_key=True)
+    embedding: Mapped[list[float]] = mapped_column(Vector(384))
+    doc_id: Mapped[UUID] = mapped_column()
+    doc_kind: Mapped[str] = mapped_column(String(50))
+    institution_id: Mapped[UUID] = mapped_column(index=True)
+    required_roles: Mapped[list[Any]] = mapped_column(JsonDict)
+    doc_type: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    page_number: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    version_id: Mapped[UUID] = mapped_column(index=True)

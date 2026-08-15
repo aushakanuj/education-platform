@@ -11,8 +11,22 @@ jobs:
     defaults:
       run:
         working-directory: backend
+    services:
+      postgres:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_USER: education
+          POSTGRES_PASSWORD: education
+          POSTGRES_DB: education_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U education -d education_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
     env:
-      DATABASE_URL: sqlite+aiosqlite:///./ci.db
+      DATABASE_URL: postgresql+asyncpg://education:education@localhost:5432/education_test
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v5

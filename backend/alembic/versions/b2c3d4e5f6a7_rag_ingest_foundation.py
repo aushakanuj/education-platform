@@ -195,7 +195,7 @@ def upgrade() -> None:
         "knowledge_document_versions",
         ["document_id"],
         unique=True,
-        sqlite_where=sa.text("lifecycle_status = 'published'"),
+        postgresql_where=sa.text("lifecycle_status = 'published'"),
     )
 
     op.create_table(

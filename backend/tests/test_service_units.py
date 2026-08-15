@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 from fastapi import HTTPException
-from sqlalchemy import create_engine, select
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Session
 
@@ -17,18 +17,15 @@ from education_platform.modules.materials.seed import seed_approved_materials
 from education_platform.modules.materials.service import get_subtopic_by_slug
 
 
-def _seed(migrated_db: object) -> None:
-    engine = create_engine(f"sqlite:///{migrated_db}")
-    with Session(engine) as sync:
-        seed_approved_materials(sync, replace=True)
-    engine.dispose()
+def _seed(session: Session) -> None:
+    seed_approved_materials(session, replace=True)
 
 
 @pytest.mark.asyncio
 async def test_assert_access_admin_bypasses_enrollment(
-    async_db_session: AsyncSession, migrated_db: object
+    async_db_session: AsyncSession, db_session: Session
 ) -> None:
-    _seed(migrated_db)
+    _seed(db_session)
     subtopic = await get_subtopic_by_slug(async_db_session, "rectangles_squares_properties")
     institution = await async_db_session.scalar(select(Institution))
     assert institution is not None
@@ -45,9 +42,9 @@ async def test_assert_access_admin_bypasses_enrollment(
 
 @pytest.mark.asyncio
 async def test_provision_duplicate_rejected(
-    async_db_session: AsyncSession, migrated_db: object
+    async_db_session: AsyncSession, db_session: Session
 ) -> None:
-    _seed(migrated_db)
+    _seed(db_session)
     payload = ProvisionStudentRequest(
         email="dup@example.com",
         password="password123",
@@ -62,9 +59,9 @@ async def test_provision_duplicate_rejected(
 
 @pytest.mark.asyncio
 async def test_login_unknown_institution(
-    async_db_session: AsyncSession, migrated_db: object
+    async_db_session: AsyncSession, db_session: Session
 ) -> None:
-    _seed(migrated_db)
+    _seed(db_session)
     await provision_student(
         async_db_session,
         ProvisionStudentRequest(

@@ -797,18 +797,13 @@ def seed_approved_materials(
 
 
 def main() -> None:
-    from sqlalchemy import create_engine, event
+    from sqlalchemy import create_engine
     from sqlalchemy.orm import Session as SyncSession
 
-    settings = get_settings()
-    url = settings.database_url.replace("+aiosqlite", "")
-    engine = create_engine(url)
+    from education_platform.db.url import to_sync_url
 
-    @event.listens_for(engine, "connect")
-    def _fk(dbapi_connection: object, _record: object) -> None:
-        cursor = dbapi_connection.cursor()  # type: ignore[attr-defined]
-        cursor.execute("PRAGMA foreign_keys=ON")
-        cursor.close()
+    settings = get_settings()
+    engine = create_engine(to_sync_url(settings.database_url))
 
     with SyncSession(engine) as session:
         seeded = seed_approved_materials(session, replace=False)
