@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { Link, Navigate, useParams } from "react-router-dom";
+import { Navigate, useParams } from "react-router-dom";
 
 import { Crumbs } from "../../components/Crumbs";
 import { CurriculumMaterialUpload } from "../../components/CurriculumMaterialUpload";
@@ -77,18 +77,6 @@ export function AdminMaterialsTopicDetailPage() {
           { label: topic?.unitLabel ?? "Unit" },
         ]}
       />
-      <div className="back-row">
-        <Link
-          to={
-            grade && subject
-              ? `/admin/materials/grades/${grade.key}/subjects/${subject.id}`
-              : "/admin/materials"
-          }
-          className="btn btn--matte btn--sm"
-        >
-          ← Back to units
-        </Link>
-      </div>
       <header className="page-head page-head--with-actions">
         <div>
           <p className="kicker">

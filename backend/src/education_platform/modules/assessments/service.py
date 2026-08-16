@@ -8,6 +8,7 @@ from uuid import UUID
 
 from fastapi import HTTPException, status
 from sqlalchemy import func, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from education_platform.api.deps import Principal
@@ -190,15 +191,48 @@ async def start_attempt(
     if release is None:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Quiz is not open")
 
+    last_error: BaseException | None = None
+    for _ in range(3):
+        try:
+            return await _open_new_attempt(
+                session,
+                principal=principal,
+                quiz=quiz,
+                quiz_version=quiz_version,
+                release_id=release.id,
+                enrollment_id=context.subject_enrollment.id,
+            )
+        except IntegrityError as exc:
+            last_error = exc
+            await session.rollback()
+    raise HTTPException(
+        status_code=status.HTTP_409_CONFLICT,
+        detail="Could not start a new quiz attempt. Try again.",
+    ) from last_error
+
+
+async def _open_new_attempt(
+    session: AsyncSession,
+    *,
+    principal: Principal,
+    quiz: CommonMasteryQuiz,
+    quiz_version: QuizVersion,
+    release_id: UUID,
+    enrollment_id: UUID,
+) -> StartAttemptResponse:
+    assert principal.student_profile_id is not None
     in_progress = await session.scalar(
-        select(QuizAttempt).where(
+        select(QuizAttempt)
+        .where(
             QuizAttempt.student_id == principal.student_profile_id,
             QuizAttempt.quiz_version_id == quiz_version.id,
             QuizAttempt.status == QuizAttemptStatus.IN_PROGRESS,
         )
+        .with_for_update()
     )
     if in_progress is not None:
-        return await _start_response(session, quiz, quiz_version, in_progress)
+        in_progress.status = QuizAttemptStatus.ABANDONED
+        await session.flush()
 
     current_max = await session.scalar(
         select(func.max(QuizAttempt.attempt_number)).where(
@@ -207,7 +241,14 @@ async def start_attempt(
         )
     )
     attempt_number = int(current_max or 0) + 1
-    if quiz_version.max_attempts is not None and attempt_number > quiz_version.max_attempts:
+    counted = await session.scalar(
+        select(func.count()).where(
+            QuizAttempt.student_id == principal.student_profile_id,
+            QuizAttempt.quiz_version_id == quiz_version.id,
+            QuizAttempt.status != QuizAttemptStatus.ABANDONED,
+        )
+    )
+    if quiz_version.max_attempts is not None and int(counted or 0) >= quiz_version.max_attempts:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Maximum attempts reached")
     now = datetime.now(UTC)
     deadline_at = (
@@ -217,9 +258,9 @@ async def start_attempt(
     )
     attempt = QuizAttempt(
         student_id=principal.student_profile_id,
-        student_subject_enrollment_id=context.subject_enrollment.id,
+        student_subject_enrollment_id=enrollment_id,
         quiz_version_id=quiz_version.id,
-        quiz_release_id=release.id,
+        quiz_release_id=release_id,
         attempt_number=attempt_number,
         status=QuizAttemptStatus.IN_PROGRESS,
         started_at=now,

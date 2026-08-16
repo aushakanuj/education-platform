@@ -128,6 +128,10 @@ describe("HomePage", () => {
     );
 
     expect(await screen.findByRole("heading", { name: "School material" })).toBeInTheDocument();
+    expect(screen.getByRole("navigation", { name: "Breadcrumb" })).toHaveTextContent(
+      /Subjects\s*\/\s*Mathematics/,
+    );
+    expect(screen.queryByRole("link", { name: /Back to subjects/i })).not.toBeInTheDocument();
     expect(screen.queryByRole("heading", { name: "Personal material" })).not.toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "Units" })).toBeInTheDocument();
     expect(screen.getByText("Properties of Rectangles and Squares")).toBeInTheDocument();

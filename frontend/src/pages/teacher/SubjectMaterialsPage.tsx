@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Link, Navigate, useParams } from "react-router-dom";
+import { Navigate, useParams } from "react-router-dom";
 
 import { Crumbs } from "../../components/Crumbs";
 import { getTeacherSubject } from "../../mocks/teacherAssignments";
@@ -29,14 +29,6 @@ export function SubjectMaterialsPage() {
           { label: subject.name },
         ]}
       />
-      <div className="back-row">
-        <Link
-          to={`/teacher/classes/${section.id}`}
-          className="btn btn--matte btn--sm"
-        >
-          ← Back to section
-        </Link>
-      </div>
       <header className="page-head">
         <p className="kicker">
           {section.label} · {subject.code}

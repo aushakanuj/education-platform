@@ -2,8 +2,9 @@ import { useState } from "react";
 import { Link } from "react-router-dom";
 
 import type { AttemptHistoryItem, MaterialProgress, QuizSummary, TopicNode } from "../api/types";
+import { quizActionLabel } from "../lib/quizAction";
 import { AttemptHistoryList, AttemptHistoryTrigger, formatAttemptWhen } from "./AttemptHistory";
-import { PushButton } from "./PushButton";
+import { Crumbs } from "./Crumbs";
 
 type Subtopic = TopicNode["subtopics"][number];
 
@@ -31,8 +32,8 @@ function QuizAttemptResult({ attempt }: { attempt: AttemptHistoryItem }) {
   const score =
     attempt.score_percent == null ? null : `${Math.round(Number(attempt.score_percent))}%`;
 
-  if (attempt.status === "in_progress") {
-    return <span className="quiz-meta quiz-meta--info">In progress</span>;
+  if (attempt.status === "in_progress" || attempt.status === "abandoned") {
+    return <span className="quiz-meta">Not finished</span>;
   }
   if (attempt.passed === true) {
     return (
@@ -55,7 +56,7 @@ function SubtopicQuizMeta({ quiz }: { quiz: QuizSummary | null }) {
   if (!quiz?.available) return null;
 
   if (quiz.in_progress_attempt_id) {
-    return <p className="subtopic-card__quiz-meta">Quiz in progress</p>;
+    return <p className="subtopic-card__quiz-meta">Unfinished · start again</p>;
   }
   if (!quiz.unlocked) {
     return <p className="subtopic-card__quiz-meta">Complete lesson to unlock</p>;
@@ -148,11 +149,13 @@ export function SchoolMaterialPanel({
       <div className="topic-layout__main">
         {historyView ? (
           <div className="school-material-stack">
-            <div className="topic-study-panel__back">
-              <PushButton variant="matte" size="sm" onClick={() => setHistoryView(null)}>
-                Back to units
-              </PushButton>
-            </div>
+            <Crumbs
+              local
+              parts={[
+                { label: "Units", onClick: () => setHistoryView(null) },
+                { label: historyLabel },
+              ]}
+            />
             <h2 className="school-material-stack__title">{historyLabel}</h2>
             <p className="reading__lede">
               Scores from previous quiz attempts. Open a result for full review.
@@ -221,9 +224,7 @@ export function SchoolMaterialPanel({
                   <div className="school-subject-quiz__actions">
                     {topic.overall_quiz.unlocked ? (
                       <Link to={`/quizzes/${topic.overall_quiz.id}`} className="btn btn--sm">
-                        {topic.overall_quiz.recent_attempts.length
-                          ? "Retake subject quiz"
-                          : "Start subject quiz"}
+                        {quizActionLabel(topic.overall_quiz).replace("quiz", "subject quiz")}
                       </Link>
                     ) : (
                       <button type="button" className="btn btn--sm" disabled>

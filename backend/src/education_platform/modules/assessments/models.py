@@ -71,6 +71,7 @@ class QuizAttemptStatus(str, enum.Enum):
     NOT_STARTED = "not_started"
     IN_PROGRESS = "in_progress"
     SUBMITTED = "submitted"
+    ABANDONED = "abandoned"
     EXPIRED = "expired"
     SCORED = "scored"
     RELEASED = "released"

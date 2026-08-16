@@ -2,36 +2,47 @@ import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import type { ReactNode } from "react";
 import { useLocation } from "react-router-dom";
 
+import { CrumbHost, HostedCrumbs } from "./Crumbs";
+
 const FADE = {
   enter: { opacity: 0 },
   center: { opacity: 1 },
   exit: { opacity: 0 },
 };
 
-/** Light fade for shell main content, keyed by pathname. */
+const FADE_TRANSITION = { duration: 0.2, ease: "easeOut" as const };
+
+/** Page body fades independently of the hosted breadcrumb trail. */
 export function RouteMotion({ children }: { children: ReactNode }) {
   const location = useLocation();
   const reduceMotion = useReducedMotion();
 
-  if (reduceMotion) {
-    return <div className="main__inner">{children}</div>;
-  }
+  const page = reduceMotion ? (
+    <div className="route-motion__page">{children}</div>
+  ) : (
+    <AnimatePresence mode="wait">
+      <motion.div
+        key={location.pathname}
+        className="route-motion__page"
+        variants={FADE}
+        initial="enter"
+        animate="center"
+        exit="exit"
+        transition={FADE_TRANSITION}
+      >
+        {children}
+      </motion.div>
+    </AnimatePresence>
+  );
 
   return (
-    <div className="route-motion">
-      <AnimatePresence mode="wait">
-        <motion.div
-          key={location.pathname}
-          className="main__inner route-motion__page"
-          variants={FADE}
-          initial="enter"
-          animate="center"
-          exit="exit"
-          transition={{ duration: 0.18, ease: "easeOut" }}
-        >
-          {children}
-        </motion.div>
-      </AnimatePresence>
-    </div>
+    <CrumbHost>
+      <div className="route-motion">
+        <div className="main__inner">
+          <HostedCrumbs />
+          {page}
+        </div>
+      </div>
+    </CrumbHost>
   );
 }

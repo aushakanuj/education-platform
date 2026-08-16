@@ -1,8 +1,14 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
-import { buildSubmitPayload } from "../api/attempts";
+import { buildSubmitPayload, startAttempt } from "../api/attempts";
 import { hasActiveSubjectEnrollment } from "../api/enrollments";
 import type { EnrollmentSummary } from "../api/types";
+
+vi.mock("./client", () => ({
+  apiRequest: vi.fn(),
+}));
+
+import { apiRequest } from "./client";
 
 describe("buildSubmitPayload", () => {
   it("maps question numbers to selected option labels sorted by number", () => {
@@ -65,5 +71,24 @@ describe("hasActiveSubjectEnrollment", () => {
     };
     expect(hasActiveSubjectEnrollment(empty)).toBe(false);
     expect(hasActiveSubjectEnrollment(inactive)).toBe(false);
+  });
+});
+
+describe("startAttempt", () => {
+  it("reuses an in-flight request so Strict Mode does not double-start", async () => {
+    let resolveRequest!: (value: { id: string }) => void;
+    vi.mocked(apiRequest).mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          resolveRequest = resolve;
+        }) as Promise<never>,
+    );
+
+    const first = startAttempt("quiz-1");
+    const second = startAttempt("quiz-1");
+    expect(apiRequest).toHaveBeenCalledTimes(1);
+    resolveRequest({ id: "att-1" });
+    await expect(first).resolves.toEqual({ id: "att-1" });
+    await expect(second).resolves.toEqual({ id: "att-1" });
   });
 });

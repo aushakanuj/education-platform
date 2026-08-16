@@ -21,11 +21,6 @@ export function AdminMaterialsSubjectsPage() {
           { label: grade?.name ?? "Grade" },
         ]}
       />
-      <div className="back-row">
-        <Link to="/admin/materials" className="btn btn--matte btn--sm">
-          ← Back to materials
-        </Link>
-      </div>
       <header className="page-head">
         <p className="kicker">{grade?.name ?? "…"} · subjects</p>
         <h1>Subjects</h1>

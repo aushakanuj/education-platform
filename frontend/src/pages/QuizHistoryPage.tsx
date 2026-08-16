@@ -3,8 +3,8 @@ import { Link } from "react-router-dom";
 import { AppShell } from "../components/AppShell";
 import { AttemptHistoryList } from "../components/AttemptHistory";
 import { Crumbs } from "../components/Crumbs";
-import { PushButton } from "../components/PushButton";
 import { QuizPerformanceChart } from "../components/QuizPerformanceChart";
+import { quizActionLabel } from "../lib/quizAction";
 import { useSubtopicLesson } from "../lib/useSubtopicLesson";
 
 export function QuizHistoryPage() {
@@ -21,11 +21,7 @@ export function QuizHistoryPage() {
   const quizUnlocked = Boolean(lesson?.quiz_unlocked && lesson.quiz_id);
   const quizId = lesson?.quiz_id ?? quizSummary?.id ?? null;
   const attempts = quizSummary?.recent_attempts ?? [];
-  const quizCta = quizSummary?.in_progress_attempt_id
-    ? "Resume quiz"
-    : attempts.length > 0
-      ? "Retake quiz"
-      : "Start quiz";
+  const quizCta = quizActionLabel(quizSummary);
   const passThreshold = quizSummary?.pass_threshold_percent ?? 70;
 
   return (
@@ -41,9 +37,6 @@ export function QuizHistoryPage() {
           <p className="form__error" role="alert">
             {error}
           </p>
-          <Link to={lessonPath}>
-            <PushButton variant="matte">Back to lesson</PushButton>
-          </Link>
         </div>
       )}
 
@@ -57,11 +50,6 @@ export function QuizHistoryPage() {
               { label: "Quiz history" },
             ]}
           />
-          <div className="back-row">
-            <Link to={lessonPath} className="btn btn--matte btn--sm">
-              ← Back to lesson overview
-            </Link>
-          </div>
 
           <div className="quiz-history-page">
             <div className="lesson-quiz-panel">
