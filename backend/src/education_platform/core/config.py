@@ -48,6 +48,10 @@ class Settings(BaseSettings):
     chat_context_limit_tokens: int = 20_000
     chat_retrieval_limit: int = 6
 
+    # Attendance below this percentage of the term makes a student exam-ineligible.
+    # Sourced from Attendance Policy v3 section 2.1; the early-warning engine reads it.
+    attendance_eligibility_percent: float = 75.0
+
     @property
     def is_development(self) -> bool:
         return self.environment.lower() == "development"
