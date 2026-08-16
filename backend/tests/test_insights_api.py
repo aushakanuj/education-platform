@@ -81,6 +81,16 @@ def test_teacher_asking_about_another_grade_gets_empty_not_forbidden(
     assert response.json()["rows_returned"] == 0
 
 
+def test_teacher_asking_about_a_subject_they_do_not_teach_gets_empty(api: TestClient) -> None:
+    """Her Grade 8 pupils all take English; she teaches them Mathematics, so: nothing."""
+    headers = _headers(api, TEACHER)
+    english = api.get("/api/v1/insights/students?subject=English", headers=headers).json()
+    maths = api.get("/api/v1/insights/students?subject=Mathematics", headers=headers).json()
+
+    assert english["rows_returned"] == 0
+    assert maths["rows_returned"] > 0
+
+
 def test_teacher_cannot_open_the_admin_audit_screen(api: TestClient) -> None:
     """Capability is refused even though content is empty. Different failures."""
     response = api.get("/api/v1/admin/audit-events", headers=_headers(api, TEACHER))

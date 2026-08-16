@@ -43,12 +43,26 @@ class Scope:
     roles: frozenset[str]
     #: Administrators read the whole institution and are not narrowed further.
     unrestricted: bool
-    #: (grade_subject_offering_id, section_id | None) pairs this principal may reach.
-    offering_sections: frozenset[OfferingSection]
-    #: Student profile ids this principal may reach. Empty when `unrestricted`.
+    #: Pairs this principal **teaches**. Each one grants every student in it.
+    taught_offering_sections: frozenset[OfferingSection]
+    #: Pairs this principal is **enrolled in**. These grant nothing beyond the principal's
+    #: own rows, which `self_student_id` already covers -- they are carried only so the
+    #: interface can say which subjects a student is taking.
+    enrolled_offering_sections: frozenset[OfferingSection]
+    #: Student profile ids this principal may reach *at all*. Empty when `unrestricted`.
+    #: Coarser than the row-level boundary -- see `allows_student`.
     student_ids: frozenset[UUID]
-    #: The principal's own student profile, when they are a student.
+    #: The principal's own student profile, when they hold the student role.
     self_student_id: UUID | None
+
+    @property
+    def offering_sections(self) -> frozenset[OfferingSection]:
+        """Every pair this principal touches, taught or enrolled.
+
+        Descriptive only. Never filter a read on this: it mixes "I teach this, so I may see
+        everyone in it" with "I study this, so I may see myself in it".
+        """
+        return self.taught_offering_sections | self.enrolled_offering_sections
 
     @property
     def offering_ids(self) -> frozenset[UUID]:
@@ -60,26 +74,46 @@ class Scope:
 
     @property
     def is_empty(self) -> bool:
-        """True when this principal can reach no student data at all."""
-        return not self.unrestricted and not self.student_ids
+        """True when this principal can reach no student data at all.
+
+        Mirrors `insights.service.scope_predicate`: data is reached through one's own
+        student record or through what one teaches, and by no other route.
+        """
+        if self.unrestricted:
+            return False
+        return self.self_student_id is None and not self.taught_offering_sections
 
     def allows_student(self, student_id: UUID | None) -> bool:
+        """Whether this student is in the principal's world at all.
+
+        Deliberately coarser than a read: a teacher of Grade 8 Mathematics `allows_student`
+        their Maths pupils, but must still not see those pupils' Science marks. Use this to
+        decide whether a student is addressable, never to decide which of their rows to
+        return -- that is `scope_predicate`'s job.
+        """
         if student_id is None:
             return False
         if self.unrestricted:
             return True
         return student_id in self.student_ids
 
+    def teaches_offering(self, offering_id: UUID, section_id: UUID | None = None) -> bool:
+        """Whether the principal teaches this pair, and so may read every student in it."""
+        return self.unrestricted or _matches(self.taught_offering_sections, offering_id, section_id)
+
     def allows_offering(self, offering_id: UUID, section_id: UUID | None = None) -> bool:
-        """A NULL-section assignment covers every section of that offering."""
-        if self.unrestricted:
+        """Whether this pair is in the principal's world, taught or studied."""
+        return self.unrestricted or _matches(self.offering_sections, offering_id, section_id)
+
+
+def _matches(pairs: frozenset[OfferingSection], offering: UUID, section: UUID | None) -> bool:
+    """A NULL-section pair covers every section of that offering."""
+    for allowed_offering, allowed_section in pairs:
+        if allowed_offering != offering:
+            continue
+        if allowed_section is None or allowed_section == section:
             return True
-        for allowed_offering, allowed_section in self.offering_sections:
-            if allowed_offering != offering_id:
-                continue
-            if allowed_section is None or allowed_section == section_id:
-                return True
-        return False
+    return False
 
 
 async def _active_period_ids(session: AsyncSession, institution_id: UUID) -> list[UUID]:
@@ -192,36 +226,40 @@ async def scope_for(session: AsyncSession, principal: object) -> Scope:
     institution_id: UUID = principal.institution_id  # type: ignore[attr-defined]
     roles: frozenset[str] = principal.roles  # type: ignore[attr-defined]
     user_id: UUID = principal.user_id  # type: ignore[attr-defined]
-    self_student_id: UUID | None = principal.student_profile_id  # type: ignore[attr-defined]
+    profile_id: UUID | None = principal.student_profile_id  # type: ignore[attr-defined]
+    # A profile attached to the account is not itself a grant; the student role is.
+    self_student_id = profile_id if RoleName.STUDENT.value in roles else None
 
     if RoleName.ADMINISTRATOR.value in roles:
         return Scope(
             institution_id=institution_id,
             roles=roles,
             unrestricted=True,
-            offering_sections=frozenset(),
+            taught_offering_sections=frozenset(),
+            enrolled_offering_sections=frozenset(),
             student_ids=frozenset(),
             self_student_id=self_student_id,
         )
 
     period_ids = await _active_period_ids(session, institution_id)
-    offering_sections: set[OfferingSection] = set()
+    taught: set[OfferingSection] = set()
+    enrolled: set[OfferingSection] = set()
     student_ids: set[UUID] = set()
 
     if RoleName.TEACHER.value in roles:
-        teacher_pairs = await _teacher_offering_sections(session, user_id, period_ids)
-        offering_sections |= teacher_pairs
-        student_ids |= await _students_for_offering_sections(session, teacher_pairs)
+        taught = await _teacher_offering_sections(session, user_id, period_ids)
+        student_ids |= await _students_for_offering_sections(session, taught)
 
-    if RoleName.STUDENT.value in roles and self_student_id is not None:
-        offering_sections |= await _student_offering_sections(session, self_student_id, period_ids)
+    if self_student_id is not None:
+        enrolled = await _student_offering_sections(session, self_student_id, period_ids)
         student_ids.add(self_student_id)
 
     return Scope(
         institution_id=institution_id,
         roles=roles,
         unrestricted=False,
-        offering_sections=frozenset(offering_sections),
+        taught_offering_sections=frozenset(taught),
+        enrolled_offering_sections=frozenset(enrolled),
         student_ids=frozenset(student_ids),
         self_student_id=self_student_id,
     )

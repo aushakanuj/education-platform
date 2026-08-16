@@ -19,12 +19,13 @@ def _describe(scope: Scope) -> str:
     """A plain-English summary of the caller's boundary, for the interface to show."""
     if scope.unrestricted:
         return "Whole institution"
-    if not scope.student_ids:
+    if scope.is_empty or not scope.student_ids:
         return "No students in scope"
     if scope.self_student_id is not None and scope.student_ids == {scope.self_student_id}:
         return "Your own record only"
     students = len(scope.student_ids)
-    assignments = len(scope.offering_sections)
+    # Assignments, not everything they touch: what they teach is what bounds the read.
+    assignments = len(scope.taught_offering_sections)
     return (
         f"{students} student{'s' if students != 1 else ''} across "
         f"{assignments} assignment{'s' if assignments != 1 else ''}"

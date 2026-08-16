@@ -254,6 +254,20 @@ A NULL section covers every section of that offering. So a teacher of **Grade 8 
 the same children, a different subject. Any implementation that narrows by grade alone, or by
 subject alone, is wrong and will pass a naive test while failing rule T-03 below.
 
+**The corollary, which is easy to miss.** Resolving *which students* a teacher reaches is only half
+the boundary. `student_360` has one row per student **per subject**, so a read narrowed to a
+teacher's student list still returns those students' other subjects. Meera reaches her Grade 8
+Mathematics pupils — and a student-id filter hands her their Science, English, Arabic and Social
+Studies marks along with them. **The filter has to match the grain of the data it filters:** pairs,
+not students. Rule T-14.
+
+**And the corollary to that.** Pairs may only widen a read when they come from a *teaching
+assignment*. A student's enrolment produces the same shaped pairs, and filtering on those would
+hand every student their whole class. `Scope` therefore keeps the two apart —
+`taught_offering_sections` grants everyone in the pair, `enrolled_offering_sections` grants nobody
+and exists only so the interface can list a student's subjects. A principal reaches a row by
+exactly two routes: it is their own record, or they teach it. Rule T-15.
+
 ### 11a.3 Empty, never refused
 
 When a principal asks about data outside their scope, the correct response is **zero rows**, not
@@ -294,18 +308,20 @@ Change this table first when a rule changes; the tests follow it.
 | T-11 | Empty scope predicate | Compiles to `1 = 0` |
 | T-12 | Tenant isolation | Every clause pins `institution_id`, administrators included |
 | T-13 | Row limiting | No single read can exceed the ceiling |
+| T-14 | Teacher, subjects of their own pupils | Only the subjects they teach — §11a.2 corollary |
+| T-15 | Student, subjects they are enrolled in | Still only their own rows, never a classmate's |
 
 Still to be written, once the features they describe exist:
 
 | ID | Rule | Blocked on |
 | --- | --- | --- |
-| T-14 | Deactivated account loses access immediately | account lifecycle wiring |
-| T-15 | Student moved between sections mid-term | section-change workflow |
-| T-16 | Closed period is read-only for teachers | period status enforcement |
-| T-17 | Text-to-SQL cannot escape the scope predicate | task 2.3 |
-| T-18 | Document search cannot return an unreleased document | task 2.4 |
-| T-19 | A student cannot reach an unapproved quiz | task 3.7 |
-| T-20 | Every AI answer path writes an audit event | tasks 2.3 and 2.6 |
+| T-16 | Deactivated account loses access immediately | account lifecycle wiring |
+| T-17 | Student moved between sections mid-term | section-change workflow |
+| T-18 | Closed period is read-only for teachers | period status enforcement |
+| T-19 | Text-to-SQL cannot escape the scope predicate | task 2.3 |
+| T-20 | Document search cannot return an unreleased document | task 2.4 |
+| T-21 | A student cannot reach an unapproved quiz | task 3.7 |
+| T-22 | Every AI answer path writes an audit event | tasks 2.3 and 2.6 |
 
 ### 11a.6 Dependency on the master register
 

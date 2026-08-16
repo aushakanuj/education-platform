@@ -254,3 +254,58 @@ async def test_rule_13_reads_are_row_limited(async_session: AsyncSession) -> Non
     scope = await scope_for(async_session, admin)
     rows = await query_student_360(async_session, scope, limit=3)
     assert len(rows) <= 3
+
+
+MEERA_TEACHES = {("Grade 8", "Mathematics"), ("Grade 9", "Science")}
+
+
+@pytest.mark.asyncio
+async def test_rule_14_teacher_reads_only_the_subjects_they_teach(
+    async_session: AsyncSession,
+) -> None:
+    """Found by Aushak in review.
+
+    Narrowing to the teacher's *students* is not narrowing to the teacher's *data*. Each of
+    Meera's Grade 8 Mathematics pupils also has Science, English, Arabic and Social Studies
+    rows in the register, and a student-id filter returned every one of them.
+    """
+    teacher = await _principal_for(async_session, "meera.krishnan@alnoor.school")
+    scope = await scope_for(async_session, teacher)
+    rows = await query_student_360(async_session, scope, limit=500)
+
+    assert rows, "she must still see the assignments she does have"
+    assert {(row.grade, row.subject) for row in rows} == MEERA_TEACHES
+
+    # The assertion above only has teeth if those pupils really do study other subjects.
+    admin = await _principal_for(async_session, "fatima.almansouri@alnoor.school")
+    everything = await query_student_360(
+        async_session, await scope_for(async_session, admin), limit=500
+    )
+    her_pupils = {row.student_id for row in rows}
+    withheld = [
+        row
+        for row in everything
+        if row.student_id in her_pupils and (row.grade, row.subject) not in MEERA_TEACHES
+    ]
+    assert withheld, "her pupils must study subjects she does not teach, or this proves nothing"
+
+
+@pytest.mark.asyncio
+async def test_rule_15_student_is_not_widened_by_the_subjects_they_are_enrolled_in(
+    async_session: AsyncSession,
+) -> None:
+    """Guards the wrong fix as firmly as rule 14 guards the bug.
+
+    Filtering on offering/section pairs alone would hand a student every classmate sitting
+    in the same subject, because a student's enrolment produces the very same pairs. Only
+    pairs the principal *teaches* may widen a read past their own record.
+    """
+    student = await _aisha(async_session)
+    scope = await scope_for(async_session, student)
+
+    assert scope.enrolled_offering_sections, "the fixture student must be enrolled in subjects"
+    assert scope.taught_offering_sections == frozenset(), "a student teaches nothing"
+
+    rows = await query_student_360(async_session, scope, limit=500)
+    assert {row.student_id for row in rows} == {student.student_profile_id}
+    assert len(rows) == len(scope.enrolled_offering_sections), "one row per subject, all her own"
