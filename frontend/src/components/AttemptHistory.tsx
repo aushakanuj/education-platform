@@ -1,11 +1,13 @@
 import { Link } from "react-router-dom";
 
 import type { AttemptHistoryItem } from "../api/types";
+import { trackedAttempts } from "../lib/quizAction";
 
 export function formatAttempt(attempt: AttemptHistoryItem): string {
   const score =
     attempt.score_percent == null ? null : `${Math.round(Number(attempt.score_percent))}%`;
-  if (attempt.status === "in_progress") return "In progress";
+  if (attempt.status === "in_progress") return "Not finished";
+  if (attempt.status === "abandoned") return "Abandoned";
   if (attempt.passed === true) return `Passed${score ? ` · ${score}` : ""}`;
   if (attempt.passed === false) return `Not passed${score ? ` · ${score}` : ""}`;
   return attempt.status.replaceAll("_", " ");
@@ -21,13 +23,14 @@ export function formatAttemptWhen(attempt: AttemptHistoryItem): string | null {
 }
 
 export function AttemptHistoryList({ attempts }: { attempts: AttemptHistoryItem[] }) {
-  if (attempts.length === 0) {
+  const visible = trackedAttempts(attempts);
+  if (visible.length === 0) {
     return <p className="history-empty">No attempts recorded yet.</p>;
   }
 
   return (
     <ul className="history">
-      {attempts.map((attempt) => (
+      {visible.map((attempt) => (
         <li key={attempt.id} className="history-item">
           <span className="history-item__num">#{attempt.attempt_number}</span>
           <div>
@@ -64,7 +67,7 @@ export function AttemptHistoryTrigger({
   to?: string;
   actionLabel?: string;
 }) {
-  const latest = attempts[0];
+  const latest = trackedAttempts(attempts)[0];
   const action = actionLabel ?? (active ? "Viewing" : to ? "Open quiz" : "Show history");
   const body = (
     <>
@@ -111,7 +114,7 @@ export function AttemptHistory({
   title: string;
   attempts: AttemptHistoryItem[];
 }) {
-  const latest = attempts[0];
+  const latest = trackedAttempts(attempts)[0];
   return (
     <details className="history-toggle">
       <summary className="history-toggle__summary">

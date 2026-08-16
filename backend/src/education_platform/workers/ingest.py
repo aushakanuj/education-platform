@@ -9,10 +9,10 @@ from typing import Any
 from uuid import UUID
 
 from pydantic import ValidationError
-from sqlalchemy import create_engine, delete, select
+from sqlalchemy import delete, select
 from sqlalchemy.orm import Session
 
-from education_platform.core.config import get_settings
+from education_platform.db.session import sync_session
 from education_platform.modules.academics.models import (
     AcademicPeriod,
     GradeSubjectOffering,
@@ -62,11 +62,7 @@ def parse_pdf_with_docling(path: Path) -> list[TextChunk]:
 
 
 def _sync_session() -> Session:
-    from education_platform.db.url import to_sync_url
-
-    settings = get_settings()
-    engine = create_engine(to_sync_url(settings.database_url))
-    return Session(engine)
+    return sync_session()
 
 
 def _fail_job(session: Session, job: IngestJob, reason: str) -> None:

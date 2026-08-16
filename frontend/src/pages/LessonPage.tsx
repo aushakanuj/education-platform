@@ -1,10 +1,9 @@
 import { Link } from "react-router-dom";
 
-import { AppShell } from "../components/AppShell";
 import { AttemptHistoryTrigger, formatAttempt, formatAttemptWhen } from "../components/AttemptHistory";
 import { Crumbs } from "../components/Crumbs";
 import { MarkdownContent } from "../components/MarkdownContent";
-import { PushButton } from "../components/PushButton";
+import { quizActionLabel, trackedAttempts } from "../lib/quizAction";
 import { findSummarySlide, useSubtopicLesson } from "../lib/useSubtopicLesson";
 
 export function LessonPage() {
@@ -23,13 +22,9 @@ export function LessonPage() {
   const quizUnlocked = Boolean(lesson?.quiz_unlocked && lesson.quiz_id);
   const lessonComplete = Boolean(lesson?.progress?.status === "completed");
   const quizId = lesson?.quiz_id ?? quizSummary?.id ?? null;
-  const attempts = quizSummary?.recent_attempts ?? [];
+  const attempts = trackedAttempts(quizSummary?.recent_attempts ?? []);
   const latestAttempt = attempts[0] ?? null;
-  const quizCta = quizSummary?.in_progress_attempt_id
-    ? "Resume quiz"
-    : attempts.length > 0
-      ? "Retake quiz"
-      : "Start quiz";
+  const quizCta = quizActionLabel(quizSummary);
   const slidesPath = lessonComplete
     ? `${lessonPath}/slides?from=start`
     : `${lessonPath}/slides`;
@@ -38,7 +33,7 @@ export function LessonPage() {
   const latestWhen = latestAttempt ? formatAttemptWhen(latestAttempt) : null;
 
   return (
-    <AppShell subjectTitle={subjectName}>
+    <>
       {!lesson && !error && (
         <div className="center-state" role="status">
           Loading lesson…
@@ -50,9 +45,6 @@ export function LessonPage() {
           <p className="form__error" role="alert">
             {error}
           </p>
-          <Link to={subjectPath}>
-            <PushButton variant="matte">Back to units</PushButton>
-          </Link>
         </div>
       )}
 
@@ -65,11 +57,6 @@ export function LessonPage() {
               { label: subtopicTitle },
             ]}
           />
-          <div className="back-row">
-            <Link to={subjectPath} className="btn btn--matte btn--sm">
-              ← Back to units
-            </Link>
-          </div>
           <h1 className="sr-only">{subtopicTitle}</h1>
 
           <div className="lesson-layout">
@@ -84,7 +71,7 @@ export function LessonPage() {
                   </div>
                 )}
                 <div className="lesson-overview__footer">
-                  <Link to={slidesPath} className="btn">
+                  <Link to={slidesPath} className="btn btn--sm">
                     {slidesLabel}
                   </Link>
                 </div>
@@ -163,6 +150,6 @@ export function LessonPage() {
           </div>
         </div>
       )}
-    </AppShell>
+    </>
   );
 }
