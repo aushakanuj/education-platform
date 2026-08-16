@@ -11,8 +11,10 @@ export type LearningPath = {
   /** @deprecated Use subjectPath */
   topicPath: string;
   lessonPath: string | null;
-  /** Unit lesson page with Quiz tab selected */
+  /** Unit lesson overview (quiz pane is on this page) */
   quizTabPath: string | null;
+  slidesPath: string | null;
+  quizHistoryPath: string | null;
   overallUnlocked: boolean;
   topicComplete: boolean;
 };
@@ -35,7 +37,9 @@ function pathForTopic(
     subjectPath,
     topicPath: subjectPath,
     lessonPath,
-    quizTabPath: lessonPath ? `${lessonPath}?tab=quiz` : null,
+    quizTabPath: lessonPath,
+    slidesPath: lessonPath ? `${lessonPath}/slides` : null,
+    quizHistoryPath: lessonPath ? `${lessonPath}/history` : null,
     overallUnlocked: Boolean(topic.overall_quiz?.unlocked),
     topicComplete: topic.complete,
   };

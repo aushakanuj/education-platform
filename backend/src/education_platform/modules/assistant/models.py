@@ -27,7 +27,7 @@ class ChatConversation(UUIDTimestampMixin, Base):
     owner_user_id: Mapped[UUID] = mapped_column(ForeignKey("users.id"), index=True)
     title: Mapped[str] = mapped_column(String(200), default="New chat")
     context_used_tokens: Mapped[int] = mapped_column(Integer, default=0)
-    context_limit_tokens: Mapped[int] = mapped_column(Integer, default=8192)
+    context_limit_tokens: Mapped[int] = mapped_column(Integer, default=20_000)
     context_used_percent: Mapped[int] = mapped_column(Integer, default=0)
 
 

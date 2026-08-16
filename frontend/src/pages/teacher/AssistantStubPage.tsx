@@ -13,7 +13,7 @@ export function AssistantStubPage() {
         ]}
       />
       <div className="back-row">
-        <Link to="/teacher" className="btn btn--outline btn--sm">
+        <Link to="/teacher" className="btn btn--matte btn--sm">
           ← Back to my classes
         </Link>
       </div>

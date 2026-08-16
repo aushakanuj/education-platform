@@ -87,7 +87,7 @@ export function ResultPage() {
             {error}
           </p>
           <Link to="/">
-            <PushButton variant="soft">Back to subjects</PushButton>
+            <PushButton variant="matte">Back to subjects</PushButton>
           </Link>
         </div>
       )}
@@ -107,7 +107,7 @@ export function ResultPage() {
                 ]}
               />
               <div className="back-row">
-                <Link to={backPath} className="btn btn--outline btn--sm">
+                <Link to={backPath} className="btn btn--matte btn--sm">
                   {backLabel}
                 </Link>
               </div>
@@ -123,8 +123,8 @@ export function ResultPage() {
               <h1>{held ? "Result pending release" : "Your score"}</h1>
             </div>
             <div className="page-head__actions">
-              {result.scope === "subtopic_mastery" && path?.lessonPath && (
-                <Link to={path.lessonPath} className="btn btn--soft btn--sm">
+              {result.scope === "subtopic_mastery" && path?.slidesPath && (
+                <Link to={`${path.slidesPath}?from=start`} className="btn btn--soft btn--sm">
                   Review lesson
                 </Link>
               )}

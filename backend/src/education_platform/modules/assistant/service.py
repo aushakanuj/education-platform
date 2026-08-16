@@ -30,10 +30,13 @@ from education_platform.modules.assistant.tokens import context_percent, estimat
 
 
 def _context_out(conv: ChatConversation) -> ContextUsageOut:
+    settings = get_settings()
+    limit = settings.chat_context_limit_tokens
+    used = conv.context_used_tokens
     return ContextUsageOut(
-        used_tokens=conv.context_used_tokens,
-        limit_tokens=conv.context_limit_tokens,
-        used_percent=conv.context_used_percent,
+        used_tokens=used,
+        limit_tokens=limit,
+        used_percent=context_percent(used, limit),
     )
 
 

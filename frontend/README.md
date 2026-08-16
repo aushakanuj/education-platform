@@ -1,7 +1,7 @@
 # Frontend
 
 Vite + React + TypeScript **multi-role web client** for the Agentic Education Platform: student
-(live API), administrator (live API + mock policy chat), and teacher (mock fixtures).
+(live API), administrator (live API including policy chats), and teacher (mock fixtures).
 
 See the [documentation hub](../docs/README.md) for product vision and implementation status.
 
@@ -12,7 +12,7 @@ See the [documentation hub](../docs/README.md) for product vision and implementa
 | `/`, `/subjects/...`, `/quizzes/...` | Student | Live API + enrollment gate |
 | `/admin/materials/...` | Admin | Live `GET /me/learning-directory` + curriculum PDF ingest |
 | `/admin/documents` | Admin | Live knowledge-document upload/list (ingest status) |
-| `/admin/policy` | Admin | Mock (`src/mocks/policyChat.ts`) |
+| `/admin/policy` | Admin | Live chats API (`src/api/chats.ts`) |
 | `/teacher/...` | Teacher | Mock (`src/mocks/teacherAssignments.ts`) |
 
 Post-login routing uses `MeResponse.roles` (priority admin → teacher → student): administrators →
@@ -55,8 +55,8 @@ Open `http://localhost:5173`.
 1. **Sign in** as `admin@demo.school` / `demo1234` (real JWT)
 2. Browse `/admin/materials` — grades, subjects, topics from `GET /me/learning-directory`
 3. Use **Upload** on Materials (or a unit’s lesson row) to POST a curriculum PDF and poll ingest status
-4. `/admin/documents` — upload/list policy PDFs and watch processing/ready/failed
-5. `/admin/policy` — policy assistant UI (mock fixture; indexed docs will power it later)
+4. `/admin/documents` — upload/list knowledge PDFs and watch processing/ready/failed
+5. `/admin/policy` — live policy assistant (multi-chat via `/chats*`; retrieval over indexed docs; set `OPENROUTER_API_KEY` for real LLM stages)
 
 Administrators do not require student enrollments to read the learning directory.
 
@@ -77,7 +77,8 @@ In `npm run dev` only, the login page offers:
 
 Sign out clears mock role and tokens. Real email/password sign-in also clears any mock role.
 Production builds do not show dev role buttons. A leftover admin fixture session cannot load
-materials (clear error; use real admin sign-in).
+materials (clear error; use real admin sign-in). Teacher fixtures remain the only mock data path;
+policy chat is live.
 
 ## Tests
 

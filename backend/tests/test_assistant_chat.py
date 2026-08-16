@@ -14,7 +14,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from education_platform.api.deps import Principal
-from education_platform.core.config import get_settings
+from education_platform.core.config import Settings, get_settings
 from education_platform.modules.assistant.contracts import (
     AssistantGraphState,
     RetrieveChunksArgs,
@@ -22,7 +22,11 @@ from education_platform.modules.assistant.contracts import (
     RetrievedChunk,
     parse_graph_state,
 )
-from education_platform.modules.assistant.graph import _heuristic_injection, run_assistant_turn
+from education_platform.modules.assistant.graph import (
+    _heuristic_injection,
+    run_assistant_turn,
+    summarize_node,
+)
 from education_platform.modules.assistant.tokens import context_percent, estimate_tokens
 from education_platform.modules.assistant.tools.registry import (
     ToolValidationError,
@@ -99,7 +103,7 @@ def test_chat_crud_and_message_without_openrouter(client: TestClient) -> None:
     assert created.status_code == 201, created.text
     conv_id = created.json()["id"]
     assert created.json()["title"] == "Attendance"
-    assert created.json()["context"]["limit_tokens"] > 0
+    assert created.json()["context"]["limit_tokens"] == 20_000
 
     listed = client.get("/api/v1/chats", headers=headers)
     assert listed.status_code == 200
@@ -182,6 +186,80 @@ async def test_run_assistant_turn_stub_summarize() -> None:
         )
     assert result["assistant_content"]
     assert result.get("injection_blocked") is False
+
+
+@pytest.mark.asyncio
+async def test_summarize_instructs_markdown_output() -> None:
+    captured: dict[str, Any] = {}
+
+    async def fake_chat(messages: list[dict[str, str]], **kwargs: Any) -> str:
+        _ = kwargs
+        captured["messages"] = messages
+        return "## Late homework\n\nWork is **due** the next school day [1]."
+
+    settings = Settings(openrouter_api_key="test-key")
+    state = {
+        "user_message": "What is the late homework policy?",
+        "history": [],
+        "injection_blocked": False,
+        "question_valid": True,
+        "early_reply": None,
+        "retrieved_chunks": [
+            {
+                "id": "chunk-1",
+                "label": "Handbook",
+                "excerpt": "Late homework is due the next school day.",
+                "doc_kind": "policy",
+                "doc_id": "doc-1",
+                "distance": 0.1,
+            }
+        ],
+        "assistant_content": "",
+        "citations": [],
+        "prompt_tokens": 0,
+    }
+
+    with patch(
+        "education_platform.modules.assistant.graph.chat_completion",
+        new=fake_chat,
+    ):
+        result = await summarize_node(state, settings=settings)
+
+    system = captured["messages"][0]["content"]
+    user = captured["messages"][-1]["content"]
+    assert "Markdown" in system
+    assert "Markdown" in user
+    assert result["assistant_content"].startswith("## Late homework")
+
+
+@pytest.mark.asyncio
+async def test_stub_summarize_returns_markdown_list() -> None:
+    settings = Settings(openrouter_api_key="")
+    state = {
+        "user_message": "What is the late homework policy?",
+        "history": [],
+        "injection_blocked": False,
+        "question_valid": True,
+        "early_reply": None,
+        "retrieved_chunks": [
+            {
+                "id": "chunk-1",
+                "label": "Handbook",
+                "excerpt": "Late homework is due the next school day.",
+                "doc_kind": "policy",
+                "doc_id": "doc-1",
+                "distance": 0.1,
+            }
+        ],
+        "assistant_content": "",
+        "citations": [],
+        "prompt_tokens": 0,
+    }
+
+    result = await summarize_node(state, settings=settings)
+
+    assert result["assistant_content"].startswith("## Indexed evidence")
+    assert "- **Handbook:**" in result["assistant_content"]
 
 
 @pytest.mark.asyncio

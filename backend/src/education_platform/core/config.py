@@ -45,7 +45,7 @@ class Settings(BaseSettings):
     openrouter_api_key: str | None = None
     openrouter_base_url: str = "https://openrouter.ai/api/v1"
     openrouter_model: str = "openai/gpt-4o-mini"
-    chat_context_limit_tokens: int = 8192
+    chat_context_limit_tokens: int = 20_000
     chat_retrieval_limit: int = 6
 
     # Attendance below this percentage of the term makes a student exam-ineligible.

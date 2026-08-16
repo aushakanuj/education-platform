@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import { render, screen } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { describe, expect, it, vi, beforeEach } from "vitest";
 
@@ -108,7 +108,7 @@ describe("HomePage", () => {
     );
 
     expect(await screen.findByRole("heading", { name: "Your subjects" })).toBeInTheDocument();
-    expect(screen.getByText("Student dashboard · demo data")).toBeInTheDocument();
+    expect(screen.queryByText("Student dashboard · demo data")).not.toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "Mathematics" })).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "Science" })).toBeInTheDocument();
     expect(screen.queryByText(/1\.0 Enroll/)).not.toBeInTheDocument();
@@ -134,16 +134,10 @@ describe("HomePage", () => {
     expect(screen.getByRole("heading", { name: "Mathematics quiz" })).toBeInTheDocument();
     expect(screen.getByText("After all units")).toBeInTheDocument();
     expect(screen.queryByText("Approved Materials")).not.toBeInTheDocument();
+    expect(screen.getByText(/Subject completion/)).toBeInTheDocument();
 
-    const summary = screen.getByText("Properties of Rectangles and Squares").closest("summary");
-    fireEvent.click(summary!);
-    expect(screen.getByRole("link", { name: "Review lesson" })).toHaveAttribute(
-      "href",
-      "/subjects/math-1/subtopics/st-1/lesson",
-    );
-    expect(screen.getByRole("link", { name: /Quiz history/i })).toHaveAttribute(
-      "href",
-      "/subjects/math-1/subtopics/st-1/lesson?tab=quiz",
-    );
+    expect(
+      screen.getByRole("link", { name: /Properties of Rectangles and Squares/ }),
+    ).toHaveAttribute("href", "/subjects/math-1/subtopics/st-1/lesson");
   });
 });

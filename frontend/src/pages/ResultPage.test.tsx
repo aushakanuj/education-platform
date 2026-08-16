@@ -146,14 +146,17 @@ describe("ResultPage", () => {
       screen.getByText(/All subtopic quizzes passed. The overall topic quiz is now unlocked./),
     ).toBeInTheDocument();
     expect(screen.getByRole("dialog", { name: "Overall quiz unlocked" })).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "Review lesson" })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Review lesson" })).toHaveAttribute(
+      "href",
+      "/subjects/subj-1/subtopics/st-1/lesson/slides?from=start",
+    );
     expect(screen.getByRole("link", { name: /Back to quiz/i })).toHaveAttribute(
       "href",
-      "/subjects/subj-1/subtopics/st-1/lesson?tab=quiz",
+      "/subjects/subj-1/subtopics/st-1/lesson",
     );
     expect(screen.getByRole("link", { name: "Properties of Rectangles and Squares" })).toHaveAttribute(
       "href",
-      "/subjects/subj-1/subtopics/st-1/lesson?tab=quiz",
+      "/subjects/subj-1/subtopics/st-1/lesson",
     );
 
     await user.click(screen.getByRole("button", { name: "Stay here" }));
