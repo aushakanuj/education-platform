@@ -1,29 +1,37 @@
 from collections.abc import AsyncGenerator
 
+from sqlalchemy import Engine, create_engine
 from sqlalchemy.ext.asyncio import (
     AsyncEngine,
     AsyncSession,
     async_sessionmaker,
     create_async_engine,
 )
+from sqlalchemy.orm import Session
 
 from education_platform.core.config import get_settings
-from education_platform.db.url import to_async_url
+from education_platform.db.url import to_async_url, to_sync_url
 
 _engine: AsyncEngine | None = None
 _session_factory: async_sessionmaker[AsyncSession] | None = None
 _bound_url: str | None = None
+_sync_engine: Engine | None = None
+_sync_bound_url: str | None = None
 
 
 def reset_engine() -> None:
-    """Dispose cached engine so the next call picks up current settings."""
-    global _engine, _session_factory, _bound_url
+    """Dispose cached engines so the next call picks up current settings."""
+    global _engine, _session_factory, _bound_url, _sync_engine, _sync_bound_url
     if _engine is not None:
         # dispose is async; sync dispose via sync_engine for test teardown convenience
         _engine.sync_engine.dispose()
     _engine = None
     _session_factory = None
     _bound_url = None
+    if _sync_engine is not None:
+        _sync_engine.dispose()
+    _sync_engine = None
+    _sync_bound_url = None
 
 
 def get_engine() -> AsyncEngine:
@@ -37,6 +45,24 @@ def get_engine() -> AsyncEngine:
         _engine = create_async_engine(database_url, pool_pre_ping=True)
         _session_factory = async_sessionmaker(_engine, expire_on_commit=False, class_=AsyncSession)
     return _engine
+
+
+def get_sync_engine() -> Engine:
+    """Process-wide sync engine for workers (must not create a new engine per poll)."""
+    global _sync_engine, _sync_bound_url
+    settings = get_settings()
+    database_url = to_sync_url(settings.database_url)
+    if _sync_engine is None or _sync_bound_url != database_url:
+        if _sync_engine is not None:
+            _sync_engine.dispose()
+        _sync_bound_url = database_url
+        _sync_engine = create_engine(database_url, pool_pre_ping=True)
+    return _sync_engine
+
+
+def sync_session() -> Session:
+    """Return a sync Session bound to the shared worker engine."""
+    return Session(get_sync_engine(), expire_on_commit=False)
 
 
 def get_session_factory() -> async_sessionmaker[AsyncSession]:

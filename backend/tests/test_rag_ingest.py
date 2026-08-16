@@ -436,6 +436,38 @@ def test_claim_loop_processes_queued_job(
     get_settings.cache_clear()
 
 
+def test_idle_poll_reuses_shared_sync_engine(
+    seeded_db: Session, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The worker loop must not create a new SQLAlchemy engine on every poll.
+
+    Previously ``_sync_session`` called ``create_engine`` per iteration and only
+    closed the Session, leaking connection pools until Postgres refused new
+    clients.
+    """
+    from sqlalchemy import create_engine as real_create_engine
+
+    from education_platform.db.session import get_sync_engine, reset_engine
+
+    _ = seeded_db
+    reset_engine()
+    engine = get_sync_engine()
+    created: list[object] = []
+
+    def _counting_create_engine(*args: object, **kwargs: object) -> object:
+        created.append(object())
+        return real_create_engine(*args, **kwargs)
+
+    monkeypatch.setattr("education_platform.db.session.create_engine", _counting_create_engine)
+    assert poll_once() is None
+    assert poll_once() is None
+    assert poll_once() is None
+    assert get_sync_engine() is engine
+    assert created == []
+    reset_engine()
+    get_settings.cache_clear()
+
+
 def test_worker_happy_path_source_material(
     seeded_db: Session,
     seeded_subtopic_id: UUID,
