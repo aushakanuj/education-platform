@@ -1,7 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 
 import {
-  crumbSlideDirection,
   getCrumbTrail,
   setCrumbTrail,
   subscribeCrumbTrail,
@@ -17,11 +16,5 @@ describe("crumbTrail", () => {
     setCrumbTrail(null);
     expect(getCrumbTrail()).toBeNull();
     unsubscribe();
-  });
-
-  it("slides forward from the right and back toward the right", () => {
-    expect(crumbSlideDirection(1, 2)).toBe(1);
-    expect(crumbSlideDirection(3, 2)).toBe(-1);
-    expect(crumbSlideDirection(2, 2)).toBe(1);
   });
 });

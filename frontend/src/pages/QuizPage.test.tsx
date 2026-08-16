@@ -118,6 +118,9 @@ describe("QuizPage", () => {
     expect(
       screen.getByRole("link", { name: "Properties of Rectangles and Squares" }),
     ).toHaveAttribute("href", "/subjects/subj-1/subtopics/st-1/lesson");
+    expect(screen.getByRole("navigation", { name: "Breadcrumb" })).toHaveTextContent(
+      /Mathematics\s*\/\s*Properties of Rectangles and Squares\s*\/\s*Quiz$/,
+    );
     expect(screen.queryByRole("link", { name: /Back to quiz/i })).not.toBeInTheDocument();
   });
 });

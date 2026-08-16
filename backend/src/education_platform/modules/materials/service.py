@@ -397,6 +397,7 @@ async def _quiz_summary(
                 .where(
                     QuizAttempt.student_id == principal.student_profile_id,
                     QuizAttempt.quiz_version_id.in_(version_ids),
+                    QuizAttempt.status != QuizAttemptStatus.ABANDONED,
                 )
                 .order_by(QuizAttempt.attempt_number.desc())
             )

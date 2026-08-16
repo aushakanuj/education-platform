@@ -41,8 +41,3 @@ export function subscribeCrumbTrail(listener: () => void): () => void {
 export function useCrumbTrail(): Crumb[] | null {
   return useSyncExternalStore(subscribeCrumbTrail, getCrumbTrail, () => null);
 }
-
-/** 1 = deeper (enter from the right), -1 = back (exit to the right). */
-export function crumbSlideDirection(previousCount: number, nextCount: number): 1 | -1 {
-  return nextCount >= previousCount ? 1 : -1;
-}

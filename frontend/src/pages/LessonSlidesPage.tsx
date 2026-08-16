@@ -3,7 +3,6 @@ import { Link, useSearchParams } from "react-router-dom";
 
 import { updateMaterialProgress } from "../api/materials";
 import { ApiError } from "../api/types";
-import { AppShell } from "../components/AppShell";
 import { Crumbs } from "../components/Crumbs";
 import { MarkdownContent } from "../components/MarkdownContent";
 import { PushButton } from "../components/PushButton";
@@ -95,7 +94,7 @@ export function LessonSlidesPage() {
   }
 
   return (
-    <AppShell subjectTitle={subjectName}>
+    <>
       {!lesson && !error && (
         <div className="center-state" role="status">
           Loading lesson…
@@ -168,6 +167,6 @@ export function LessonSlidesPage() {
           </div>
         </div>
       )}
-    </AppShell>
+    </>
   );
 }

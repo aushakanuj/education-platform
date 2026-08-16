@@ -2,7 +2,7 @@ import { useState } from "react";
 import { Link } from "react-router-dom";
 
 import type { AttemptHistoryItem, MaterialProgress, QuizSummary, TopicNode } from "../api/types";
-import { quizActionLabel } from "../lib/quizAction";
+import { quizActionLabel, trackedAttempts } from "../lib/quizAction";
 import { AttemptHistoryList, AttemptHistoryTrigger, formatAttemptWhen } from "./AttemptHistory";
 import { Crumbs } from "./Crumbs";
 
@@ -62,7 +62,7 @@ function SubtopicQuizMeta({ quiz }: { quiz: QuizSummary | null }) {
     return <p className="subtopic-card__quiz-meta">Complete lesson to unlock</p>;
   }
 
-  const latest = quiz.recent_attempts[0];
+  const latest = trackedAttempts(quiz.recent_attempts)[0];
   if (!latest) {
     return <p className="subtopic-card__quiz-meta">Ready to take</p>;
   }

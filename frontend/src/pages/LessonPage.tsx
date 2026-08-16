@@ -1,10 +1,9 @@
 import { Link } from "react-router-dom";
 
-import { AppShell } from "../components/AppShell";
 import { AttemptHistoryTrigger, formatAttempt, formatAttemptWhen } from "../components/AttemptHistory";
 import { Crumbs } from "../components/Crumbs";
 import { MarkdownContent } from "../components/MarkdownContent";
-import { quizActionLabel } from "../lib/quizAction";
+import { quizActionLabel, trackedAttempts } from "../lib/quizAction";
 import { findSummarySlide, useSubtopicLesson } from "../lib/useSubtopicLesson";
 
 export function LessonPage() {
@@ -23,7 +22,7 @@ export function LessonPage() {
   const quizUnlocked = Boolean(lesson?.quiz_unlocked && lesson.quiz_id);
   const lessonComplete = Boolean(lesson?.progress?.status === "completed");
   const quizId = lesson?.quiz_id ?? quizSummary?.id ?? null;
-  const attempts = quizSummary?.recent_attempts ?? [];
+  const attempts = trackedAttempts(quizSummary?.recent_attempts ?? []);
   const latestAttempt = attempts[0] ?? null;
   const quizCta = quizActionLabel(quizSummary);
   const slidesPath = lessonComplete
@@ -34,7 +33,7 @@ export function LessonPage() {
   const latestWhen = latestAttempt ? formatAttemptWhen(latestAttempt) : null;
 
   return (
-    <AppShell subjectTitle={subjectName}>
+    <>
       {!lesson && !error && (
         <div className="center-state" role="status">
           Loading lesson…
@@ -151,6 +150,6 @@ export function LessonPage() {
           </div>
         </div>
       )}
-    </AppShell>
+    </>
   );
 }

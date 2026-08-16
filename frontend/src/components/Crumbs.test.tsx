@@ -58,4 +58,24 @@ describe("Crumbs", () => {
     expect(navs[0]).toHaveTextContent("Subjects");
     expect(navs[1]).toHaveTextContent(/Units\s*\/\s*History/);
   });
+
+  it("keeps the slash on later crumbs so parent items do not resize", () => {
+    render(
+      <MemoryRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
+        <Crumbs
+          parts={[
+            { label: "Subjects", to: "/" },
+            { label: "Mathematics", to: "/subjects/math" },
+            { label: "Unit" },
+          ]}
+        />
+      </MemoryRouter>,
+    );
+
+    const items = document.querySelectorAll(".crumbs__item");
+    expect(items[0]).toHaveTextContent("Subjects");
+    expect(items[0].querySelector(".crumbs__sep")).toBeNull();
+    expect(items[1]).toHaveTextContent(/\/\s*Mathematics/);
+    expect(items[2]).toHaveTextContent(/\/\s*Unit/);
+  });
 });
