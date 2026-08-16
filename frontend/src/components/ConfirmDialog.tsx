@@ -44,7 +44,7 @@ export function ConfirmDialog({ open, title, body, actions, onDismiss }: Confirm
               <button
                 key={action.label}
                 type="button"
-                className={`btn ${variantClass}`.trim()}
+                className={`btn btn--sm ${variantClass}`.trim()}
                 onClick={() => {
                   action.onClick?.();
                   if (!action.keepOpen) onDismiss?.();

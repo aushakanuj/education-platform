@@ -5,7 +5,8 @@ import type { AttemptHistoryItem } from "../api/types";
 export function formatAttempt(attempt: AttemptHistoryItem): string {
   const score =
     attempt.score_percent == null ? null : `${Math.round(Number(attempt.score_percent))}%`;
-  if (attempt.status === "in_progress") return "In progress";
+  if (attempt.status === "in_progress") return "Not finished";
+  if (attempt.status === "abandoned") return "Abandoned";
   if (attempt.passed === true) return `Passed${score ? ` · ${score}` : ""}`;
   if (attempt.passed === false) return `Not passed${score ? ` · ${score}` : ""}`;
   return attempt.status.replaceAll("_", " ");

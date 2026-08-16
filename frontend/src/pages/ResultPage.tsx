@@ -8,7 +8,6 @@ import { ApiError } from "../api/types";
 import { AppShell } from "../components/AppShell";
 import { ConfirmDialog } from "../components/ConfirmDialog";
 import { Crumbs } from "../components/Crumbs";
-import { PushButton } from "../components/PushButton";
 import { resolvePathFromAttempt, type LearningPath } from "../lib/learningPath";
 
 export function ResultPage() {
@@ -58,14 +57,6 @@ export function ResultPage() {
       : Math.round(Number(result.pass_threshold_percent));
   const held = result != null && !result.review_available;
   const subjectPath = path?.subjectPath ?? "/";
-  const backPath =
-    result?.scope === "subtopic_mastery" && path?.quizTabPath
-      ? path.quizTabPath
-      : subjectPath;
-  const backLabel =
-    result?.scope === "subtopic_mastery" && path?.quizTabPath
-      ? "← Back to quiz"
-      : "← Back to subject";
   const rawScore =
     result?.score_raw == null
       ? null
@@ -86,32 +77,22 @@ export function ResultPage() {
           <p className="form__error" role="alert">
             {error}
           </p>
-          <Link to="/">
-            <PushButton variant="matte">Back to subjects</PushButton>
-          </Link>
         </div>
       )}
 
       {result && (
         <div>
           {path && (
-            <>
-              <Crumbs
-                parts={[
-                  { label: "Subjects", to: "/" },
-                  { label: path.subjectName, to: path.subjectPath },
-                  ...(path.subtopicTitle && path.quizTabPath
-                    ? [{ label: path.subtopicTitle, to: path.quizTabPath }]
-                    : []),
-                  { label: "Result" },
-                ]}
-              />
-              <div className="back-row">
-                <Link to={backPath} className="btn btn--matte btn--sm">
-                  {backLabel}
-                </Link>
-              </div>
-            </>
+            <Crumbs
+              parts={[
+                { label: "Subjects", to: "/" },
+                { label: path.subjectName, to: path.subjectPath },
+                ...(path.subtopicTitle && path.quizTabPath
+                  ? [{ label: path.subtopicTitle, to: path.quizTabPath }]
+                  : []),
+                { label: "Result" },
+              ]}
+            />
           )}
 
           <header className="page-head page-head--with-actions">
@@ -124,11 +105,11 @@ export function ResultPage() {
             </div>
             <div className="page-head__actions">
               {result.scope === "subtopic_mastery" && path?.slidesPath && (
-                <Link to={`${path.slidesPath}?from=start`} className="btn btn--soft btn--sm">
+                <Link to={`${path.slidesPath}?from=start`} className="btn btn--sm">
                   Review lesson
                 </Link>
               )}
-              <Link to={`/quizzes/${result.quiz_id}`} className="btn btn--outline btn--sm">
+              <Link to={`/quizzes/${result.quiz_id}`} className="btn btn--sm">
                 Retake quiz
               </Link>
             </div>

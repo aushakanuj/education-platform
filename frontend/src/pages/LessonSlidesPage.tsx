@@ -7,6 +7,7 @@ import { AppShell } from "../components/AppShell";
 import { Crumbs } from "../components/Crumbs";
 import { MarkdownContent } from "../components/MarkdownContent";
 import { PushButton } from "../components/PushButton";
+import { quizActionLabel } from "../lib/quizAction";
 import { resumeSlideIndex, useSubtopicLesson } from "../lib/useSubtopicLesson";
 
 export function LessonSlidesPage() {
@@ -21,6 +22,7 @@ export function LessonSlidesPage() {
     subjectPath,
     lessonPath,
     subtopicId,
+    quizSummary,
   } = useSubtopicLesson();
   const [searchParams] = useSearchParams();
   const [slideIndex, setSlideIndex] = useState(0);
@@ -41,6 +43,8 @@ export function LessonSlidesPage() {
   const slide = slides[slideIndex];
   const atEnd = slides.length > 0 && slideIndex === slides.length - 1;
   const lessonComplete = Boolean(lesson?.progress?.status === "completed");
+  const quizId = lesson?.quiz_id ?? quizSummary?.id ?? null;
+  const quizUnlocked = Boolean(lesson?.quiz_unlocked && quizId);
 
   async function markCompleted(unit: number) {
     try {
@@ -103,9 +107,6 @@ export function LessonSlidesPage() {
           <p className="form__error" role="alert">
             {error}
           </p>
-          <Link to={lessonPath}>
-            <PushButton variant="matte">Back to lesson</PushButton>
-          </Link>
         </div>
       )}
 
@@ -119,11 +120,6 @@ export function LessonSlidesPage() {
               { label: "Slides" },
             ]}
           />
-          <div className="back-row">
-            <Link to={lessonPath} className="btn btn--matte btn--sm">
-              ← Back to lesson overview
-            </Link>
-          </div>
 
           <div className="lesson-slides">
             <article className="panel lesson-overview">
@@ -147,9 +143,21 @@ export function LessonSlidesPage() {
                   >
                     Previous
                   </PushButton>
-                  <PushButton size="sm" disabled={atEnd} onClick={() => void goNext()}>
-                    Next slide
-                  </PushButton>
+                  {atEnd && quizId ? (
+                    quizUnlocked ? (
+                      <Link to={`/quizzes/${quizId}`} className="btn btn--sm">
+                        {quizActionLabel(quizSummary)}
+                      </Link>
+                    ) : (
+                      <PushButton size="sm" disabled>
+                        Start quiz
+                      </PushButton>
+                    )
+                  ) : (
+                    <PushButton size="sm" disabled={atEnd} onClick={() => void goNext()}>
+                      Next slide
+                    </PushButton>
+                  )}
                 </div>
                 <p className="slide-nav__status">
                   Slide {slideIndex + 1} of {slides.length}

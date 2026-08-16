@@ -91,11 +91,6 @@ function SubjectMaterialView({
               { label: subjectName },
             ]}
           />
-          <div className="subject-view__toolbar">
-            <Link to="/" className="btn btn--matte btn--sm subject-view__back">
-              ← Back to subjects
-            </Link>
-          </div>
           <div className="subject-view__chrome-slot" {...{ [BACKDROP_CHROME_ANCHOR]: "" }}>
             <h1 id="school-material-heading" className="sr-only">
               School material

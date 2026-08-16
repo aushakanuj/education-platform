@@ -27,14 +27,6 @@ export function AdminMaterialsTopicsPage() {
           { label: subject?.name ?? "Subject" },
         ]}
       />
-      <div className="back-row">
-        <Link
-          to={grade ? `/admin/materials/grades/${grade.key}` : "/admin/materials"}
-          className="btn btn--matte btn--sm"
-        >
-          ← Back to subjects
-        </Link>
-      </div>
       <header className="page-head">
         <p className="kicker">
           {grade?.name ?? "…"} · {subject?.name ?? "…"}

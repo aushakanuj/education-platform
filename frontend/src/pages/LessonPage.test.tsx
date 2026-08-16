@@ -151,10 +151,11 @@ describe("LessonPage", () => {
     renderLesson();
 
     expect(await screen.findByRole("heading", { name: "Lesson Summary" })).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: /Back to units/i })).toHaveAttribute(
+    expect(screen.getByRole("link", { name: "Mathematics" })).toHaveAttribute(
       "href",
       "/subjects/subj-1",
     );
+    expect(screen.queryByRole("link", { name: /Back to units/i })).not.toBeInTheDocument();
     expect(screen.getByText(/Rectangle Definition/)).toBeInTheDocument();
     expect(screen.queryByRole("heading", { name: "Last slide" })).not.toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Continue" })).toHaveAttribute(
@@ -181,11 +182,25 @@ describe("LessonPage", () => {
     expect(screen.queryByText("Loading lesson…")).not.toBeInTheDocument();
     expect(await screen.findByRole("button", { name: "Next slide" })).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "Rectangles" })).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: /Back to lesson overview/i })).toHaveAttribute(
-      "href",
-      "/subjects/subj-1/subtopics/st-1/lesson",
-    );
+    expect(
+      screen.getByRole("link", { name: "Properties of Rectangles and Squares" }),
+    ).toHaveAttribute("href", "/subjects/subj-1/subtopics/st-1/lesson");
+    expect(screen.queryByRole("link", { name: /Back to lesson overview/i })).not.toBeInTheDocument();
     expect(screen.queryByRole("heading", { name: "Last attempt" })).not.toBeInTheDocument();
+  });
+
+  it("offers start quiz on the last slide", async () => {
+    const user = userEvent.setup();
+    renderLesson();
+
+    await screen.findByRole("heading", { name: "Lesson Summary" });
+    await user.click(screen.getByRole("link", { name: "Continue" }));
+    await screen.findByRole("button", { name: "Next slide" });
+    await user.click(screen.getByRole("button", { name: "Next slide" }));
+
+    expect(await screen.findByRole("heading", { name: "Lesson Summary" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Next slide" })).not.toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Retake quiz" })).toHaveAttribute("href", "/quizzes/quiz-1");
   });
 
   it("opens the quiz history page with the performance chart", async () => {

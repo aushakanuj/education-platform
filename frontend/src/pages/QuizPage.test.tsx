@@ -115,9 +115,9 @@ describe("QuizPage", () => {
     expect(startAttempt).toHaveBeenCalledWith("quiz-1");
     expect(screen.queryByText("Ready to begin?")).not.toBeInTheDocument();
     expect(screen.getByText("A rectangle with equal sides")).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: /Back to quiz/i })).toHaveAttribute(
-      "href",
-      "/subjects/subj-1/subtopics/st-1/lesson",
-    );
+    expect(
+      screen.getByRole("link", { name: "Properties of Rectangles and Squares" }),
+    ).toHaveAttribute("href", "/subjects/subj-1/subtopics/st-1/lesson");
+    expect(screen.queryByRole("link", { name: /Back to quiz/i })).not.toBeInTheDocument();
   });
 });
