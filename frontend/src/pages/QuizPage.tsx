@@ -5,7 +5,6 @@ import { buildSubmitPayload, startAttempt, submitAttempt } from "../api/attempts
 import { fetchLearningDirectory } from "../api/materials";
 import type { StartAttemptResponse } from "../api/types";
 import { ApiError } from "../api/types";
-import { AppShell } from "../components/AppShell";
 import { ConfirmDialog } from "../components/ConfirmDialog";
 import { Crumbs } from "../components/Crumbs";
 import { MarkdownContent } from "../components/MarkdownContent";
@@ -95,7 +94,7 @@ export function QuizPage() {
   const quizTabPath = path?.quizTabPath;
 
   return (
-    <AppShell subjectTitle={path?.subjectName}>
+    <>
       {starting && (
         <div className="center-state" role="status">
           Starting quiz…
@@ -127,7 +126,7 @@ export function QuizPage() {
                 ...(path.subtopicTitle && quizTabPath
                   ? [{ label: path.subtopicTitle, to: quizTabPath }]
                   : []),
-                { label: attempt.title },
+                { label: "Quiz" },
               ]}
             />
           )}
@@ -238,6 +237,6 @@ export function QuizPage() {
             : []),
         ]}
       />
-    </AppShell>
+    </>
   );
 }

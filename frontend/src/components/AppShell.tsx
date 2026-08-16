@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { Outlet, useNavigate } from "react-router-dom";
 
 import { resetDemoProgress } from "../api/demo";
 import { ApiError } from "../api/types";
@@ -15,12 +15,8 @@ function initialsFromName(name: string | undefined): string {
   return letters.toUpperCase();
 }
 
-export function AppShell({
-  children,
-}: {
-  children: React.ReactNode;
-  subjectTitle?: string;
-}) {
+export function AppShell({ children }: { children?: React.ReactNode }) {
+  const page = children ?? <Outlet />;
   const { user, enrolled, signOut } = useAuth();
   const navigate = useNavigate();
   const menuRef = useRef<HTMLDivElement>(null);
@@ -108,7 +104,7 @@ export function AppShell({
       <div className="app app--flush">
         <div className="app__content">
           <main className="main">
-            <RouteMotion>{children}</RouteMotion>
+            <RouteMotion>{page}</RouteMotion>
           </main>
         </div>
       </div>

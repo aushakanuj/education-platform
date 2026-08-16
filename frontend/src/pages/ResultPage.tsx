@@ -5,7 +5,6 @@ import { getAttempt } from "../api/attempts";
 import { fetchLearningDirectory } from "../api/materials";
 import type { AttemptResult } from "../api/types";
 import { ApiError } from "../api/types";
-import { AppShell } from "../components/AppShell";
 import { ConfirmDialog } from "../components/ConfirmDialog";
 import { Crumbs } from "../components/Crumbs";
 import { resolvePathFromAttempt, type LearningPath } from "../lib/learningPath";
@@ -65,7 +64,7 @@ export function ResultPage() {
         : String(result.score_raw);
 
   return (
-    <AppShell subjectTitle={path?.subjectName}>
+    <>
       {!result && !error && (
         <div className="center-state" role="status">
           Loading result…
@@ -186,6 +185,6 @@ export function ResultPage() {
           },
         ]}
       />
-    </AppShell>
+    </>
   );
 }

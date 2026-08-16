@@ -2,43 +2,51 @@ import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import { createContext, useContext, useLayoutEffect, useRef, type ReactNode } from "react";
 import { Link } from "react-router-dom";
 
-import { crumbSlideDirection, setCrumbTrail, useCrumbTrail, type Crumb } from "../lib/crumbTrail";
+import { setCrumbTrail, useCrumbTrail, type Crumb } from "../lib/crumbTrail";
 
 export type { Crumb };
 
 const HostedContext = createContext(false);
 
 const SLIDE = {
-  enter: (direction: 1 | -1) => ({ x: direction > 0 ? 28 : -28, opacity: 0 }),
+  enter: { x: 28, opacity: 0 },
   center: { x: 0, opacity: 1 },
-  exit: (direction: 1 | -1) => ({ x: direction > 0 ? -28 : 28, opacity: 0 }),
+  exit: { x: 28, opacity: 0 },
 };
 
 const SLIDE_TRANSITION = { duration: 0.2, ease: "easeOut" as const };
 
 function CrumbLabel({ part, isLast }: { part: Crumb; isLast: boolean }) {
   if (part.to && !isLast) {
-    return <Link to={part.to}>{part.label}</Link>;
+    return (
+      <Link to={part.to} title={part.label}>
+        {part.label}
+      </Link>
+    );
   }
   if (part.onClick && !isLast) {
     return (
-      <button type="button" onClick={part.onClick}>
+      <button type="button" onClick={part.onClick} title={part.label}>
         {part.label}
       </button>
     );
   }
-  return <span aria-current={isLast ? "page" : undefined}>{part.label}</span>;
+  return (
+    <span aria-current={isLast ? "page" : undefined} title={part.label}>
+      {part.label}
+    </span>
+  );
 }
 
-function CrumbsList({ parts }: { parts: Crumb[] }) {
+function CrumbItems({ parts }: { parts: Crumb[] }) {
   return (
     <>
       {parts.map((part, index) => {
         const isLast = index === parts.length - 1;
         return (
           <span key={part.label} className="crumbs__item">
+            {index > 0 && <span className="crumbs__sep">/</span>}
             <CrumbLabel part={part} isLast={isLast} />
-            {!isLast && <span className="crumbs__sep">/</span>}
           </span>
         );
       })}
@@ -47,32 +55,26 @@ function CrumbsList({ parts }: { parts: Crumb[] }) {
 }
 
 function AnimatedCrumbsList({ parts }: { parts: Crumb[] }) {
-  const prevCount = useRef(parts.length);
   const booted = useRef(false);
   const skipEnter = !booted.current;
   if (parts.length > 0) booted.current = true;
 
-  const direction = crumbSlideDirection(prevCount.current, parts.length);
-  prevCount.current = parts.length;
-
   return (
-    <AnimatePresence mode="popLayout" initial={false} custom={direction}>
+    <AnimatePresence mode="popLayout" initial={false}>
       {parts.map((part, index) => {
         const isLast = index === parts.length - 1;
         return (
           <motion.span
             key={part.label}
             className="crumbs__item"
-            layout="position"
-            custom={direction}
             variants={SLIDE}
             initial={skipEnter ? false : "enter"}
             animate="center"
             exit="exit"
             transition={SLIDE_TRANSITION}
           >
+            {index > 0 && <span className="crumbs__sep">/</span>}
             <CrumbLabel part={part} isLast={isLast} />
-            {!isLast && <span className="crumbs__sep">/</span>}
           </motion.span>
         );
       })}
@@ -92,7 +94,7 @@ export function CrumbsNav({
 
   return (
     <nav className="crumbs" aria-label="Breadcrumb">
-      {slide ? <AnimatedCrumbsList parts={parts} /> : <CrumbsList parts={parts} />}
+      {slide ? <AnimatedCrumbsList parts={parts} /> : <CrumbItems parts={parts} />}
     </nav>
   );
 }

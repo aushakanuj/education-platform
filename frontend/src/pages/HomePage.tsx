@@ -4,11 +4,16 @@ import { Link, useParams } from "react-router-dom";
 import { fetchLearningDirectory } from "../api/materials";
 import type { LearningDirectory, SubjectNode, TopicNode } from "../api/types";
 import { ApiError } from "../api/types";
-import { AppShell } from "../components/AppShell";
 import { Crumbs } from "../components/Crumbs";
 import { SchoolMaterialPanel } from "../components/SchoolMaterialPanel";
 import { BACKDROP_CHROME_ANCHOR, setBackdropChrome } from "../lib/backdropChrome";
 import { schoolTopic, subjectProgress } from "../lib/subjectMaterial";
+
+let directoryCache: LearningDirectory | null = null;
+
+export function clearLearningDirectoryCache(): void {
+  directoryCache = null;
+}
 
 const PLACEHOLDER_SUBJECTS = [
   {
@@ -82,38 +87,36 @@ function SubjectMaterialView({
     }`;
 
   return (
-    <AppShell subjectTitle={subjectName}>
-      <div className="subject-view">
-        <header className="subject-view__head">
-          <Crumbs
-            parts={[
-              { label: "Subjects", to: "/" },
-              { label: subjectName },
-            ]}
-          />
-          <div className="subject-view__chrome-slot" {...{ [BACKDROP_CHROME_ANCHOR]: "" }}>
-            <h1 id="school-material-heading" className="sr-only">
-              School material
-            </h1>
-            {progressSr && <p className="sr-only">{progressSr}</p>}
-          </div>
-        </header>
+    <div className="subject-view">
+      <header className="subject-view__head">
+        <Crumbs
+          parts={[
+            { label: "Subjects", to: "/" },
+            { label: subjectName },
+          ]}
+        />
+        <div className="subject-view__chrome-slot" {...{ [BACKDROP_CHROME_ANCHOR]: "" }}>
+          <h1 id="school-material-heading" className="sr-only">
+            School material
+          </h1>
+          {progressSr && <p className="sr-only">{progressSr}</p>}
+        </div>
+      </header>
 
-        <section className="material-pane material-pane--school" aria-labelledby="school-material-heading">
-          {!curriculum ? (
-            <div className="alert alert--info">No school material published yet.</div>
-          ) : (
-            <SchoolMaterialPanel subjectId={subjectId} subjectName={subjectName} topic={curriculum} />
-          )}
-        </section>
-      </div>
-    </AppShell>
+      <section className="material-pane material-pane--school" aria-labelledby="school-material-heading">
+        {!curriculum ? (
+          <div className="alert alert--info">No school material published yet.</div>
+        ) : (
+          <SchoolMaterialPanel subjectId={subjectId} subjectName={subjectName} topic={curriculum} />
+        )}
+      </section>
+    </div>
   );
 }
 
 export function HomePage() {
   const { subjectId } = useParams();
-  const [directory, setDirectory] = useState<LearningDirectory | null>(null);
+  const [directory, setDirectory] = useState<LearningDirectory | null>(directoryCache);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -121,7 +124,10 @@ export function HomePage() {
     void (async () => {
       try {
         const data = await fetchLearningDirectory();
-        if (!cancelled) setDirectory(data);
+        if (!cancelled) {
+          directoryCache = data;
+          setDirectory(data);
+        }
       } catch (err) {
         if (!cancelled) {
           setError(err instanceof ApiError ? err.message : "Could not load subjects.");
@@ -153,7 +159,7 @@ export function HomePage() {
   }
 
   return (
-    <AppShell>
+    <>
       <Crumbs parts={[{ label: "Subjects" }]} />
       <header className="page-head">
         <h1 className="sr-only">Your subjects</h1>
@@ -229,6 +235,6 @@ export function HomePage() {
           ))}
         </div>
       )}
-    </AppShell>
+    </>
   );
 }

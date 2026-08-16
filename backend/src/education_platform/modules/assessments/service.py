@@ -7,7 +7,7 @@ from decimal import Decimal
 from uuid import UUID
 
 from fastapi import HTTPException, status
-from sqlalchemy import func, select
+from sqlalchemy import delete, func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -231,7 +231,10 @@ async def _open_new_attempt(
         .with_for_update()
     )
     if in_progress is not None:
-        in_progress.status = QuizAttemptStatus.ABANDONED
+        await session.execute(
+            delete(AttemptAnswer).where(AttemptAnswer.attempt_id == in_progress.id)
+        )
+        await session.delete(in_progress)
         await session.flush()
 
     current_max = await session.scalar(
@@ -515,6 +518,7 @@ async def list_attempts_for_quiz(
             .where(
                 QuizAttempt.student_id == principal.student_profile_id,
                 QuizAttempt.quiz_version_id.in_(version_ids),
+                QuizAttempt.status != QuizAttemptStatus.ABANDONED,
             )
             .order_by(QuizAttempt.attempt_number.desc())
         )

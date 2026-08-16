@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { quizActionLabel } from "./quizAction";
+import { quizActionLabel, trackedAttempts } from "./quizAction";
 
 describe("quizActionLabel", () => {
   it("starts a fresh quiz when nothing has been submitted", () => {
@@ -23,5 +23,20 @@ describe("quizActionLabel", () => {
         recent_attempts: [{ status: "scored" }],
       } as never),
     ).toBe("Retake quiz");
+  });
+});
+
+describe("trackedAttempts", () => {
+  it("drops abandoned attempts so they are not kept in history", () => {
+    expect(
+      trackedAttempts([
+        { id: "a", status: "abandoned" },
+        { id: "b", status: "scored" },
+        { id: "c", status: "in_progress" },
+      ] as never),
+    ).toEqual([
+      { id: "b", status: "scored" },
+      { id: "c", status: "in_progress" },
+    ]);
   });
 });
