@@ -1,67 +1,95 @@
 import { Navigate, useParams } from "react-router-dom";
 
 import { Crumbs } from "../../components/Crumbs";
-import {
-  getTeacherSection,
-  rosterStatusLabel,
-  type RosterStatus,
-} from "../../mocks/teacherAssignments";
+import { averageMastery, findClass, useTeacherClasses } from "../../lib/useTeacherClasses";
 
-function statusBadgeClass(status: RosterStatus): string {
-  switch (status) {
-    case "active":
-      return "badge badge--ok";
-    case "inactive":
-      return "badge badge--warn";
-    case "transferred":
-      return "badge badge--locked";
-  }
-}
+/** Below this, a teacher is not eligible to sit the exam. Mirrors the early-warning rule. */
+const ATTENDANCE_THRESHOLD = 75;
+const MASTERY_CONCERN = 60;
 
 export function RosterPage() {
   const { sectionId = "" } = useParams();
-  const section = getTeacherSection(sectionId);
+  const { loading, error, classes } = useTeacherClasses();
 
-  if (!section) {
+  if (loading) {
+    return <div className="banner banner--info">Loading roster…</div>;
+  }
+  if (error) {
+    return (
+      <div className="banner banner--warning" role="alert">
+        {error}
+      </div>
+    );
+  }
+
+  const entry = findClass(classes, sectionId);
+  if (!entry) {
     return <Navigate to="/teacher" replace />;
   }
+
+  const label = `${entry.gradeName} · ${entry.sectionName}`;
 
   return (
     <>
       <Crumbs
         parts={[
           { label: "My classes", to: "/teacher" },
-          { label: section.label, to: `/teacher/classes/${section.id}` },
+          { label, to: `/teacher/classes/${entry.id}` },
           { label: "Students" },
         ]}
       />
       <header className="page-head">
-        <p className="kicker">{section.label} · roster</p>
+        <p className="kicker">{label} · roster</p>
         <h1>Students</h1>
-        <p>Fixture roster for students in this section.</p>
+        <p>
+          Mastery is averaged across {entry.subjects.join(" and ")} — the subject
+          {entry.subjects.length === 1 ? "" : "s"} you teach this section.
+        </p>
       </header>
 
-      <div className="teacher-roster" role="table" aria-label={`Roster for ${section.label}`}>
+      <div className="teacher-roster" role="table" aria-label={`Roster for ${label}`}>
         <div className="teacher-roster__head" role="row">
           <span role="columnheader">Roll</span>
           <span role="columnheader">Name</span>
-          <span role="columnheader">Status</span>
+          <span role="columnheader">Mastery</span>
+          <span role="columnheader">Attendance</span>
         </div>
-        {section.roster.map((student) => (
-          <div key={student.id} className="teacher-roster__row" role="row">
-            <span className="teacher-roster__roll" role="cell">
-              {student.rollNo}
-            </span>
-            <span className="teacher-roster__name" role="cell">
-              {student.fullName}
-            </span>
-            <span role="cell">
-              <span className={statusBadgeClass(student.status)}>
-                {rosterStatusLabel(student.status)}
+        {entry.students.map((student) => {
+          const mastery = averageMastery(student);
+          const attendance = student.attendancePercent;
+          return (
+            <div key={student.id} className="teacher-roster__row" role="row">
+              <span className="teacher-roster__roll" role="cell">
+                {student.identifier}
               </span>
-            </span>
-          </div>
-        ))}
+              <span className="teacher-roster__name" role="cell">
+                {student.fullName}
+              </span>
+              <span role="cell">
+                {mastery === null ? (
+                  <span className="badge">No quizzes yet</span>
+                ) : (
+                  <span className={mastery < MASTERY_CONCERN ? "badge badge--warn" : "badge badge--ok"}>
+                    {mastery.toFixed(0)}%
+                  </span>
+                )}
+              </span>
+              <span role="cell">
+                {attendance === null ? (
+                  <span className="badge">Not recorded</span>
+                ) : (
+                  <span
+                    className={
+                      attendance < ATTENDANCE_THRESHOLD ? "badge badge--warn" : "badge badge--ok"
+                    }
+                  >
+                    {attendance.toFixed(0)}%
+                  </span>
+                )}
+              </span>
+            </div>
+          );
+        })}
       </div>
     </>
   );

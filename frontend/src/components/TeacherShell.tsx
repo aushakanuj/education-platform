@@ -43,7 +43,7 @@ export function TeacherShell() {
   return (
     <div className="app-frame">
       <div className="demo-banner" role="status">
-        Demo mockup only · Calm Humanist · Teacher workspace · fixture data
+        Teacher workspace · live data, narrowed to your teaching assignments
       </div>
       <div className={`app ${railCollapsed ? "is-rail-collapsed" : ""}`}>
         <aside
