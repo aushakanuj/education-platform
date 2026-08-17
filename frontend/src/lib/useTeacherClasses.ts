@@ -11,7 +11,13 @@ import { fetchStudentInsights, type StudentInsightRow } from "../api/insights";
  * a second permission rule living in the browser, where it can be edited.
  */
 export type TeacherClass = {
-  /** URL-safe key. Sections are named like "8A", so the name serves. */
+  /**
+   * URL slug, e.g. "grade-8-8a".
+   *
+   * Must survive a round trip through the address bar untouched: react-router decodes
+   * path params, so anything percent-encoded here comes back decoded and stops matching.
+   * A slug with no characters worth encoding avoids the problem rather than managing it.
+   */
   id: string;
   sectionName: string;
   gradeName: string;
@@ -31,6 +37,14 @@ export type TeacherClassStudent = {
 
 const UNPLACED = "Unassigned";
 
+/** "Grade 8" + "8A" -> "grade-8-8a". Stable, readable, and safe in a URL as-is. */
+export function classSlug(gradeName: string, sectionName: string): string {
+  return `${gradeName}-${sectionName}`
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/(^-|-$)/g, "");
+}
+
 export function groupIntoClasses(rows: StudentInsightRow[]): TeacherClass[] {
   const classes = new Map<string, TeacherClass>();
 
@@ -40,7 +54,7 @@ export function groupIntoClasses(rows: StudentInsightRow[]): TeacherClass[] {
     let entry = classes.get(key);
     if (!entry) {
       entry = {
-        id: encodeURIComponent(key),
+        id: classSlug(row.grade, sectionName),
         sectionName,
         gradeName: row.grade,
         academicPeriod: row.academic_period,
