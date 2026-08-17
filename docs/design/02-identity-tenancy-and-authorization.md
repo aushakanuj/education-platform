@@ -310,6 +310,7 @@ Change this table first when a rule changes; the tests follow it.
 | T-13 | Row limiting | No single read can exceed the ceiling |
 | T-14 | Teacher, subjects of their own pupils | Only the subjects they teach — §11a.2 corollary |
 | T-15 | Student, subjects they are enrolled in | Still only their own rows, never a classmate's |
+| T-19 | Text-to-SQL cannot escape the scope predicate | §11b, `tests/test_nl_query.py` |
 
 Still to be written, once the features they describe exist:
 
@@ -318,10 +319,9 @@ Still to be written, once the features they describe exist:
 | T-16 | Deactivated account loses access immediately | account lifecycle wiring |
 | T-17 | Student moved between sections mid-term | section-change workflow |
 | T-18 | Closed period is read-only for teachers | period status enforcement |
-| T-19 | Text-to-SQL cannot escape the scope predicate | task 2.3 |
 | T-20 | Document search cannot return an unreleased document | task 2.4 |
 | T-21 | A student cannot reach an unapproved quiz | task 3.7 |
-| T-22 | Every AI answer path writes an audit event | tasks 2.3 and 2.6 |
+| T-22 | Every AI answer path writes an audit event | task 2.6 |
 
 ### 11a.6 Dependency on the master register
 
@@ -329,6 +329,69 @@ Analytics reads go through the `student_360` view rather than ad-hoc joins, so t
 has one place to attach. The view therefore **must** carry `institution_id`, `student_id`,
 `section_id`, `subject` and `grade`; without them the boundary cannot be applied to analytics at
 all. This is asserted by a test rather than left to convention.
+
+## 11b. Implementation spec: the generated-SQL guardrail
+
+Covers task 2.3. Implemented in `modules/nl_query/guardrail.py`, tested in
+`backend/tests/test_nl_query.py`.
+
+### 11b.1 The model writes the question; the platform writes the permission
+
+A generated query is **untrusted input that happens to look like code**. The boundary is
+therefore never expressed in anything the model controls — not in the prompt, not in the
+SQL it returns. The prompt does tell the model not to filter by institution or teacher, but
+that instruction exists to improve the SQL, **not** to enforce anything. Prompt text is a
+request; the guardrail is the control.
+
+### 11b.2 Five layers, deliberately overlapping
+
+| # | Layer | Enforced by |
+| --- | --- | --- |
+| 1 | One statement, SELECT only, reading nothing but `student_360` | sqlglot parse of the AST |
+| 2 | `student_360` rebound to the caller's rows via a prepended CTE | query rewrite |
+| 3 | Row cap | `LIMIT`, min of the model's and ours |
+| 4 | `SET TRANSACTION READ ONLY` + `statement_timeout` | **PostgreSQL** |
+| 5 | Every question audited, including refused ones | `scoped()` dependency |
+
+Layer 4 is the one that matters most, because it is the only one not written by us. A
+defect anywhere in layers 1–3 still cannot produce a write.
+
+### 11b.3 Why a CTE, and why it is prepended
+
+The scoped rows are bound to the name `student_360` in a CTE placed **first** in the query.
+The model's `FROM student_360` then reads the scoped rows without knowing it.
+
+Two consequences that are easy to get wrong:
+
+- **Schema-qualified names must be rejected.** `public.student_360` resolves past the CTE
+  to the unscoped view. This is the single escape that would work, so it is a hard refusal
+  rather than a rewrite.
+- **Prepending is not cosmetic.** PostgreSQL resolves a CTE against those declared *before*
+  it. Appending ours would let a model-defined CTE read the unscoped view. Note also that
+  sqlglot's `.with_(append=False)` *discards* existing CTEs rather than prepending, which
+  produces a query referencing names that no longer exist.
+
+### 11b.4 Empty, not refused — the rule holds here too
+
+A teacher asking about a grade they do not teach gets an empty result set and HTTP 200. The
+guardrail does not need a special case for this: the scoped CTE simply contains no matching
+rows, so the model's own query returns nothing. An aggregate legitimately returns `0`.
+
+A refusal is reserved for a malformed or forbidden *query* — a write attempt, another
+table — never for data being out of scope. Those two failures must stay distinguishable in
+the response and in the audit trail.
+
+### 11b.5 Known limits, recorded deliberately
+
+- The table allowlist is enforced by our parser. A sqlglot parsing discrepancy is the most
+  likely route to reading another table. Layer 4 does not defend against this, only against
+  writes. **Hardening if this goes beyond a POC:** run generated SQL as a dedicated
+  PostgreSQL role granted `SELECT` on `student_360` and nothing else, which moves the
+  allowlist into the database.
+- Column-level restrictions are not implemented; every column of `student_360` is readable
+  within the row boundary.
+- The model is not shown the caller's identity, so its SQL cannot be tailored to leak — but
+  neither can it explain *why* a result is empty. That explanation is the interface's job.
 
 ## 12. Deferred scope
 
