@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 from dataclasses import asdict
+from datetime import date, datetime
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel
 
 from education_platform.api.deps import ScopedRequest, scoped
@@ -101,3 +102,70 @@ async def list_student_summaries(
         # asdict, not __dict__: Student360Row uses slots and so has no __dict__.
         items=[StudentSummaryOut(**asdict(row)) for row in rows],
     )
+
+
+class SubjectStandingOut(BaseModel):
+    subject: str
+    quizzes_taken: int
+    quizzes_passed: int
+    mastery_percent: float
+    lessons_started: int
+    lessons_completed: int
+    last_attempt_at: datetime | None
+
+
+class AttemptOut(BaseModel):
+    attempt_id: UUID
+    subject: str
+    quiz_title: str
+    attempt_number: int
+    score_percent: float | None
+    passed: bool | None
+    submitted_at: datetime | None
+
+
+class AbsenceOut(BaseModel):
+    on_date: date
+    status: str
+
+
+class StudentDetailOut(BaseModel):
+    student_id: UUID
+    full_name: str
+    student_identifier: str
+    grade: str
+    section: str | None
+    academic_period: str
+    subjects: list[SubjectStandingOut]
+    attempts: list[AttemptOut]
+    days_present: int
+    days_counted: int
+    attendance_percent: float | None
+    absences: list[AbsenceOut]
+
+
+@router.get("/insights/students/{student_id}", response_model=StudentDetailOut)
+async def get_student_detail(
+    student_id: UUID,
+    request: ScopedRequest = Depends(scoped("insights.student_detail")),
+) -> StudentDetailOut:
+    """One student, with the subjects and attempt history the caller is permitted to see.
+
+    A student outside the boundary gives 404, the same answer as a student who does not
+    exist. That is the single-record form of the rule the list endpoint follows by
+    returning zero rows: distinguishing "not yours" from "no such person" would confirm
+    the person exists, which is itself the disclosure being prevented.
+    """
+    detail = await service.student_detail(request.session, request.scope, student_id)
+
+    await request.record_rows(
+        0 if detail is None else len(detail.subjects),
+        detail=f"student={student_id}" + ("" if detail else " (not in scope)"),
+    )
+    await request.session.commit()
+
+    if detail is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No such student")
+
+    # asdict recurses, so the nested rows arrive as plain dicts Pydantic can validate.
+    return StudentDetailOut(**asdict(detail))

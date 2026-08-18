@@ -114,6 +114,12 @@ describe("RosterPage", () => {
     expect(screen.getByText(/No student matches/)).toBeInTheDocument();
   });
 
+  it("makes every name a way into that student's record", async () => {
+    renderRoster();
+    const link = await screen.findByRole("link", { name: "Aisha Rahman" });
+    expect(link).toHaveAttribute("href", "/teacher/classes/grade-8-8a/students/a");
+  });
+
   it("summarises who needs a look, using the early-warning thresholds", async () => {
     renderRoster();
     // Aisha alone is below both 75% attendance and 60% mastery.

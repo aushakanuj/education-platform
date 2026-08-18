@@ -27,6 +27,7 @@ import { QuestionBankPage } from "./pages/teacher/QuestionBankPage";
 import { ClassesPage } from "./pages/teacher/ClassesPage";
 import { RosterPage } from "./pages/teacher/RosterPage";
 import { SectionPage } from "./pages/teacher/SectionPage";
+import { StudentPage } from "./pages/teacher/StudentPage";
 import { SubjectMaterialsPage } from "./pages/teacher/SubjectMaterialsPage";
 
 export function App() {
@@ -82,6 +83,7 @@ export function App() {
         <Route path="questions" element={<QuestionBankPage />} />
         <Route path="classes/:sectionId" element={<SectionPage />} />
         <Route path="classes/:sectionId/students" element={<RosterPage />} />
+        <Route path="classes/:sectionId/students/:studentId" element={<StudentPage />} />
         <Route
           path="classes/:sectionId/subjects/:subjectId"
           element={<SubjectMaterialsPage />}

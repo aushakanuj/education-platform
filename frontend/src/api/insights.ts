@@ -59,6 +59,58 @@ export async function fetchStudentInsights(params?: {
   return apiRequest<StudentInsightPage>(`/insights/students?${query.toString()}`);
 }
 
+/** One subject of one student, as far as the signed-in person is permitted to see it. */
+export type SubjectStanding = {
+  subject: string;
+  quizzes_taken: number;
+  quizzes_passed: number;
+  mastery_percent: number;
+  lessons_started: number;
+  lessons_completed: number;
+  last_attempt_at: string | null;
+};
+
+export type StudentAttempt = {
+  attempt_id: string;
+  subject: string;
+  quiz_title: string;
+  attempt_number: number;
+  score_percent: number | null;
+  passed: boolean | null;
+  submitted_at: string | null;
+};
+
+/** A day the student was not simply present. Whole-day records, not per subject. */
+export type StudentAbsence = {
+  on_date: string;
+  status: string;
+};
+
+export type StudentDetail = {
+  student_id: string;
+  full_name: string;
+  student_identifier: string;
+  grade: string;
+  section: string | null;
+  academic_period: string;
+  subjects: SubjectStanding[];
+  attempts: StudentAttempt[];
+  days_present: number;
+  days_counted: number;
+  attendance_percent: number | null;
+  absences: StudentAbsence[];
+};
+
+/**
+ * One student's record.
+ *
+ * A student the caller may not see gives 404 — the same answer as a student who does not
+ * exist, deliberately, so the interface cannot tell the two apart either.
+ */
+export async function fetchStudentDetail(studentId: string): Promise<StudentDetail> {
+  return apiRequest<StudentDetail>(`/insights/students/${studentId}`);
+}
+
 /** Ask a question in English. The boundary is applied to the generated query server-side. */
 export async function askStudents(question: string, limit = 100): Promise<AskAnswer> {
   return apiRequest<AskAnswer>("/ask/students", {

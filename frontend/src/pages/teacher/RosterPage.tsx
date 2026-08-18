@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { Navigate, useParams } from "react-router-dom";
+import { Link, Navigate, useParams } from "react-router-dom";
 
 import { Crumbs } from "../../components/Crumbs";
 import {
@@ -169,7 +169,7 @@ export function RosterPage() {
             <span role="columnheader">Attendance</span>
           </div>
           {students.map((student) => (
-            <RosterRow key={student.id} student={student} />
+            <RosterRow key={student.id} student={student} sectionId={entry.id} />
           ))}
         </div>
       )}
@@ -177,7 +177,7 @@ export function RosterPage() {
   );
 }
 
-function RosterRow({ student }: { student: TeacherClassStudent }) {
+function RosterRow({ student, sectionId }: { student: TeacherClassStudent; sectionId: string }) {
   const mastery = averageMastery(student);
   const attendance = student.attendancePercent;
 
@@ -187,7 +187,11 @@ function RosterRow({ student }: { student: TeacherClassStudent }) {
         {student.identifier}
       </span>
       <span className="teacher-roster__name" role="cell">
-        {student.fullName}
+        {/* The name is the way in. A roster you cannot click is a dead end, and the
+            student page is the screen a teacher opens every day. */}
+        <Link to={`/teacher/classes/${sectionId}/students/${student.id}`}>
+          {student.fullName}
+        </Link>
         {student.bySubject.length > 1 && (
           <span className="roster-subjects">
             {student.bySubject
