@@ -23,6 +23,7 @@ import { AdminMaterialsTopicDetailPage } from "./pages/admin/AdminMaterialsTopic
 import { AdminMaterialsTopicsPage } from "./pages/admin/AdminMaterialsTopicsPage";
 import { PolicyChatPage } from "./pages/admin/PolicyChatPage";
 import { AskPage } from "./pages/teacher/AskPage";
+import { QuestionBankPage } from "./pages/teacher/QuestionBankPage";
 import { ClassesPage } from "./pages/teacher/ClassesPage";
 import { RosterPage } from "./pages/teacher/RosterPage";
 import { SectionPage } from "./pages/teacher/SectionPage";
@@ -78,6 +79,7 @@ export function App() {
       >
         <Route index element={<ClassesPage />} />
         <Route path="assistant" element={<AskPage />} />
+        <Route path="questions" element={<QuestionBankPage />} />
         <Route path="classes/:sectionId" element={<SectionPage />} />
         <Route path="classes/:sectionId/students" element={<RosterPage />} />
         <Route
