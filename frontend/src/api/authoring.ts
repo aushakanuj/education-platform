@@ -6,6 +6,8 @@ export type AuthorableSubtopic = {
   subject: string;
   topic: string;
   draft_count: number;
+  /** Approved questions already in the bank for this subtopic. */
+  published_count: number;
 };
 
 export type DraftOption = { label: string; text: string };
@@ -38,6 +40,11 @@ export async function fetchAuthorableSubtopics(): Promise<AuthorableSubtopic[]> 
 
 export async function fetchDrafts(subtopicId: string): Promise<DraftQuestion[]> {
   return apiRequest<DraftQuestion[]>(`/authoring/subtopics/${subtopicId}/drafts`);
+}
+
+/** The approved bank for a subtopic — what this teacher has already said yes to. */
+export async function fetchApproved(subtopicId: string): Promise<DraftQuestion[]> {
+  return apiRequest<DraftQuestion[]>(`/authoring/subtopics/${subtopicId}/questions`);
 }
 
 export async function generateQuestions(

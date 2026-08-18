@@ -8,7 +8,10 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field
 
 from education_platform.api.deps import ScopedRequest, scoped
-from education_platform.modules.assessments.models import QuestionDifficulty
+from education_platform.modules.assessments.models import (
+    QuestionDifficulty,
+    QuestionVersionStatus,
+)
 from education_platform.modules.authoring import service
 from education_platform.modules.authoring.service import AuthoringError
 
@@ -31,6 +34,9 @@ class SubtopicOut(BaseModel):
     subject: str
     topic: str
     draft_count: int
+    #: Approved questions already in the bank, so a teacher can see where the ones they
+    #: approved went. Without it, approving a draft just makes the count go down.
+    published_count: int
 
 
 class GenerateIn(BaseModel):
@@ -71,13 +77,22 @@ async def list_subtopics(
     await request.record_rows(len(rows))
     await request.session.commit()
     return [
-        SubtopicOut(id=s.id, name=s.name, subject=subject, topic=topic, draft_count=drafts)
-        for s, subject, topic, drafts in rows
+        SubtopicOut(
+            id=s.id,
+            name=s.name,
+            subject=subject,
+            topic=topic,
+            draft_count=drafts,
+            published_count=published,
+        )
+        for s, subject, topic, drafts, published in rows
     ]
 
 
-async def _drafts_payload(request: ScopedRequest, subtopic_id: UUID) -> list[DraftOut]:
-    drafts = await service.list_drafts(request.session, request.scope, subtopic_id)
+async def _questions_payload(
+    request: ScopedRequest, subtopic_id: UUID, status_filter: QuestionVersionStatus
+) -> list[DraftOut]:
+    rows = await service.list_questions(request.session, request.scope, subtopic_id, status_filter)
     return [
         DraftOut(
             id=version.id,
@@ -87,7 +102,7 @@ async def _drafts_payload(request: ScopedRequest, subtopic_id: UUID) -> list[Dra
             explanation=version.explanation,
             difficulty=version.difficulty.value if version.difficulty else None,
         )
-        for version, options, key in drafts
+        for version, options, key in rows
     ]
 
 
@@ -97,7 +112,26 @@ async def list_drafts(
     request: ScopedRequest = Depends(scoped("authoring.drafts")),
 ) -> list[DraftOut]:
     try:
-        payload = await _drafts_payload(request, subtopic_id)
+        payload = await _questions_payload(request, subtopic_id, QuestionVersionStatus.DRAFT)
+    except AuthoringError as exc:
+        raise _refuse(exc) from exc
+    await request.record_rows(len(payload))
+    await request.session.commit()
+    return payload
+
+
+@router.get("/authoring/subtopics/{subtopic_id}/questions", response_model=list[DraftOut])
+async def list_approved(
+    subtopic_id: UUID,
+    request: ScopedRequest = Depends(scoped("authoring.questions")),
+) -> list[DraftOut]:
+    """The approved bank for a subtopic: what a teacher has already said yes to.
+
+    Same authorisation as the drafts list, and for a stronger reason -- these carry answer
+    keys, so this stays a teaching path and never becomes a student-reachable one.
+    """
+    try:
+        payload = await _questions_payload(request, subtopic_id, QuestionVersionStatus.PUBLISHED)
     except AuthoringError as exc:
         raise _refuse(exc) from exc
     await request.record_rows(len(payload))
@@ -120,7 +154,7 @@ async def generate(
             count=payload.count,
             difficulty=payload.difficulty,
         )
-        drafts = await _drafts_payload(request, subtopic_id)
+        drafts = await _questions_payload(request, subtopic_id, QuestionVersionStatus.DRAFT)
     except AuthoringError as exc:
         raise _refuse(exc) from exc
 

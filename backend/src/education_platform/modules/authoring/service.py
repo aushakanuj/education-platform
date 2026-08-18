@@ -24,6 +24,7 @@ from __future__ import annotations
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from decimal import Decimal
+from typing import Any
 from uuid import UUID
 
 from sqlalchemy import func, select
@@ -307,13 +308,20 @@ async def _persist(
     return version.id
 
 
-async def list_drafts(
-    session: AsyncSession, scope: Scope, subtopic_id: UUID
+async def list_questions(
+    session: AsyncSession,
+    scope: Scope,
+    subtopic_id: UUID,
+    status: QuestionVersionStatus = QuestionVersionStatus.DRAFT,
 ) -> list[tuple[QuestionVersion, list[QuestionOption], str | None]]:
-    """Draft questions for a subtopic, with their options and the correct answer.
+    """Questions for a subtopic in one lifecycle state, with options and correct answer.
 
     The answer is included because this is the *authoring* path -- a teacher reviewing a
-    draft must see which option is marked correct in order to judge it.
+    draft must see which option is marked correct in order to judge it, and one reading
+    back the approved bank needs the same to check what they approved.
+
+    Reachable only by someone who teaches the subject, whichever status is asked for:
+    published questions are still answer keys, and an answer key is not a student's to read.
     """
     await _authorised_subtopic(session, scope, subtopic_id)
 
@@ -323,7 +331,7 @@ async def list_drafts(
             .join(Question, Question.id == QuestionVersion.question_id)
             .where(
                 Question.subtopic_id == subtopic_id,
-                QuestionVersion.lifecycle_status == QuestionVersionStatus.DRAFT,
+                QuestionVersion.lifecycle_status == status,
             )
             .order_by(QuestionVersion.created_at)
         )
@@ -379,10 +387,25 @@ async def discard_draft(session: AsyncSession, scope: Scope, version_id: UUID) -
     await session.flush()
 
 
+def _status_count(status: QuestionVersionStatus, label: str) -> Any:
+    """Per-subtopic count of question versions in one lifecycle state."""
+    return (
+        select(Question.subtopic_id, func.count().label(label))
+        .join(QuestionVersion, QuestionVersion.question_id == Question.id)
+        .where(QuestionVersion.lifecycle_status == status)
+        .group_by(Question.subtopic_id)
+        .subquery()
+    )
+
+
 async def authorable_subtopics(
     session: AsyncSession, scope: Scope
-) -> list[tuple[Subtopic, str, str, int]]:
-    """Subtopics the caller may author for, with their subject, topic and draft count."""
+) -> list[tuple[Subtopic, str, str, int, int]]:
+    """Subtopics the caller may author for, with subject, topic, and both bank counts.
+
+    Both counts, because a teacher who has just approved a question needs to see where it
+    went. A draft count alone drops to zero on approval and looks like the work vanished.
+    """
     if scope.unrestricted:
         offering_filter = None
     else:
@@ -391,24 +414,29 @@ async def authorable_subtopics(
             return []
         offering_filter = offerings
 
-    draft_count = (
-        select(Question.subtopic_id, func.count().label("drafts"))
-        .join(QuestionVersion, QuestionVersion.question_id == Question.id)
-        .where(QuestionVersion.lifecycle_status == QuestionVersionStatus.DRAFT)
-        .group_by(Question.subtopic_id)
-        .subquery()
-    )
+    draft_count = _status_count(QuestionVersionStatus.DRAFT, "drafts")
+    published_count = _status_count(QuestionVersionStatus.PUBLISHED, "published")
 
     statement = (
-        select(Subtopic, Subject.name, Topic.name, func.coalesce(draft_count.c.drafts, 0))
+        select(
+            Subtopic,
+            Subject.name,
+            Topic.name,
+            func.coalesce(draft_count.c.drafts, 0),
+            func.coalesce(published_count.c.published, 0),
+        )
         .join(Topic, Topic.id == Subtopic.topic_id)
         .join(GradeSubjectOffering, GradeSubjectOffering.id == Topic.grade_subject_offering_id)
         .join(Subject, Subject.id == GradeSubjectOffering.subject_id)
         .outerjoin(draft_count, draft_count.c.subtopic_id == Subtopic.id)
+        .outerjoin(published_count, published_count.c.subtopic_id == Subtopic.id)
         .order_by(Subject.name, Topic.sequence, Subtopic.sequence)
     )
     if offering_filter is not None:
         statement = statement.where(Topic.grade_subject_offering_id.in_(offering_filter))
 
     rows = await session.execute(statement)
-    return [(subtopic, subject, topic, int(drafts)) for subtopic, subject, topic, drafts in rows]
+    return [
+        (subtopic, subject, topic, int(drafts), int(published))
+        for subtopic, subject, topic, drafts, published in rows
+    ]

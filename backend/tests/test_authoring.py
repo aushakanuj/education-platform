@@ -292,6 +292,99 @@ def test_the_review_view_shows_the_correct_answer(api: TestClient, model_writes)
     assert [o["label"] for o in draft["options"]] == ["A", "B", "C", "D"]
 
 
+def test_an_approved_question_is_readable_back_from_the_bank(api: TestClient, model_writes) -> None:  # type: ignore[no-untyped-def]
+    """Approving must not feel like losing: what went in has to be findable again."""
+    model_writes([good_question()])
+    subtopic = _first_subtopic(api, TEACHER)
+    headers = _headers(api, TEACHER)
+
+    draft = api.post(
+        f"/api/v1/authoring/subtopics/{subtopic['id']}/generate",
+        json={"count": 1},
+        headers=headers,
+    ).json()["drafts"][0]
+
+    before = api.get(
+        f"/api/v1/authoring/subtopics/{subtopic['id']}/questions", headers=headers
+    ).json()
+    api.post(f"/api/v1/authoring/drafts/{draft['id']}/publish", headers=headers)
+    after = api.get(
+        f"/api/v1/authoring/subtopics/{subtopic['id']}/questions", headers=headers
+    ).json()
+
+    assert len(after) == len(before) + 1
+    published = next(q for q in after if q["id"] == draft["id"])
+    assert published["correct_label"] == "A", "the export needs the answer, so it must come back"
+    assert [o["label"] for o in published["options"]] == ["A", "B", "C", "D"]
+
+
+def test_a_discarded_question_is_in_neither_list(api: TestClient, model_writes) -> None:  # type: ignore[no-untyped-def]
+    """Archived means out of the way, not resurfacing in the approved bank."""
+    model_writes([good_question()])
+    subtopic = _first_subtopic(api, TEACHER)
+    headers = _headers(api, TEACHER)
+
+    draft = api.post(
+        f"/api/v1/authoring/subtopics/{subtopic['id']}/generate",
+        json={"count": 1},
+        headers=headers,
+    ).json()["drafts"][0]
+    api.delete(f"/api/v1/authoring/drafts/{draft['id']}", headers=headers)
+
+    drafts = api.get(f"/api/v1/authoring/subtopics/{subtopic['id']}/drafts", headers=headers).json()
+    approved = api.get(
+        f"/api/v1/authoring/subtopics/{subtopic['id']}/questions", headers=headers
+    ).json()
+
+    assert draft["id"] not in {q["id"] for q in drafts}
+    assert draft["id"] not in {q["id"] for q in approved}
+
+
+def test_the_approved_bank_is_not_readable_outside_what_you_teach(api: TestClient) -> None:
+    """Published questions still carry answer keys, so this stays a teaching path."""
+    english = next(
+        s
+        for s in api.get("/api/v1/authoring/subtopics", headers=_headers(api, ADMIN)).json()
+        if s["subject"] == "English"
+    )
+    response = api.get(
+        f"/api/v1/authoring/subtopics/{english['id']}/questions", headers=_headers(api, TEACHER)
+    )
+    assert response.status_code == 403
+
+
+def test_the_subtopic_list_counts_both_waiting_and_approved(api: TestClient, model_writes) -> None:  # type: ignore[no-untyped-def]
+    """A draft count alone drops to zero on approval and looks like the work vanished."""
+    model_writes([good_question()])
+    headers = _headers(api, TEACHER)
+    subtopic = _first_subtopic(api, TEACHER)
+
+    def counts() -> tuple[int, int]:
+        row = next(
+            s
+            for s in api.get("/api/v1/authoring/subtopics", headers=headers).json()
+            if s["id"] == subtopic["id"]
+        )
+        return row["draft_count"], row["published_count"]
+
+    api.post(
+        f"/api/v1/authoring/subtopics/{subtopic['id']}/generate",
+        json={"count": 1},
+        headers=headers,
+    )
+    drafts_before, published_before = counts()
+    assert drafts_before >= 1
+
+    draft = api.get(f"/api/v1/authoring/subtopics/{subtopic['id']}/drafts", headers=headers).json()[
+        0
+    ]
+    api.post(f"/api/v1/authoring/drafts/{draft['id']}/publish", headers=headers)
+
+    drafts_after, published_after = counts()
+    assert drafts_after == drafts_before - 1
+    assert published_after == published_before + 1
+
+
 def test_generation_is_audited(api: TestClient, model_writes) -> None:  # type: ignore[no-untyped-def]
     model_writes([good_question()])
     subtopic = _first_subtopic(api, TEACHER)

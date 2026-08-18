@@ -858,6 +858,23 @@ button:hover:not(:disabled),
   width: 100%;
 }
 
+/* An ordinary page is a document: its sections keep their own height and the content
+   column scrolls.
+
+   Without this, each section is a flex item of a viewport-height column with the default
+   `flex-shrink: 1`. Most survive anyway, because a flex item's automatic minimum size
+   (`min-height: auto`) resolves to its min-content height and refuses to go smaller. But
+   that rule only applies while the item's overflow is `visible` — an item that clips its
+   own overflow gets an automatic minimum of zero and can be squashed to nothing.
+
+   `.teacher-roster` sets `overflow: hidden`, for the rounded corners. So it alone was
+   compressible, and it compressed: 24 rows rendered, four visible, and no scrollbar
+   anywhere to suggest there was more. The full-height app views (lesson, subject, topic,
+   policy chat) manage their own scrolling and are excluded, exactly as above. */
+.route-motion__page:not(:has(.lesson-view, .subject-view, .topic-view, .policy-chat)) > * {
+  flex-shrink: 0;
+}
+
 @media (prefers-reduced-motion: reduce) {
   .route-motion__page {
     animation: none;
@@ -3868,4 +3885,40 @@ button.card {
 .student-history td:nth-child(3) {
   white-space: normal;
   min-width: 12rem;
+}
+
+/* --- Question bank: waiting versus approved --- */
+
+.bank-tabs {
+  display: flex;
+  gap: 0.4rem;
+  margin: 1rem 0 0.85rem;
+  border-bottom: 1px solid var(--border);
+}
+
+.bank-tab {
+  padding: 0.5rem 0.9rem;
+  font: inherit;
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: var(--ink-muted);
+  background: none;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  margin-bottom: -1px;
+  cursor: pointer;
+}
+
+.bank-tab:hover {
+  color: var(--ink);
+}
+
+.bank-tab.is-active {
+  color: var(--ink);
+  border-bottom-color: var(--accent);
+}
+
+.bank-tab:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: -2px;
 }
