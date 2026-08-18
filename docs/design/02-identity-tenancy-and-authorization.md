@@ -310,7 +310,6 @@ Change this table first when a rule changes; the tests follow it.
 | T-13 | Row limiting | No single read can exceed the ceiling |
 | T-14 | Teacher, subjects of their own pupils | Only the subjects they teach — §11a.2 corollary |
 | T-15 | Student, subjects they are enrolled in | Still only their own rows, never a classmate's |
-| T-19 | Text-to-SQL cannot escape the scope predicate | §11b, `tests/test_nl_query.py` |
 
 Still to be written, once the features they describe exist:
 
@@ -319,6 +318,7 @@ Still to be written, once the features they describe exist:
 | T-16 | Deactivated account loses access immediately | account lifecycle wiring |
 | T-17 | Student moved between sections mid-term | section-change workflow |
 | T-18 | Closed period is read-only for teachers | period status enforcement |
+| T-19 | Text-to-SQL cannot escape the scope predicate | text-to-SQL delivery; requirements in §11b |
 | T-20 | Document search cannot return an unreleased document | task 2.4 |
 | T-21 | A student cannot reach an unapproved quiz | task 3.7 |
 | T-22 | Every AI answer path writes an audit event | task 2.6 |
@@ -330,68 +330,108 @@ has one place to attach. The view therefore **must** carry `institution_id`, `st
 `section_id`, `subject` and `grade`; without them the boundary cannot be applied to analytics at
 all. This is asserted by a test rather than left to convention.
 
-## 11b. Implementation spec: the generated-SQL guardrail
+## 11b. Requirements: the generated-SQL guardrail
 
-Covers task 2.3. Implemented in `modules/nl_query/guardrail.py`, tested in
-`backend/tests/test_nl_query.py`.
+Covers task 2.3. **This section states what any text-to-SQL implementation must satisfy to
+be acceptable under this policy. It does not describe a particular implementation, and it
+is binding on whichever one ships.** These are review criteria, not a design proposal.
 
-### 11b.1 The model writes the question; the platform writes the permission
+### 11b.1 The permission is applied to the query, never requested from the model
 
-A generated query is **untrusted input that happens to look like code**. The boundary is
-therefore never expressed in anything the model controls — not in the prompt, not in the
-SQL it returns. The prompt does tell the model not to filter by institution or teacher, but
-that instruction exists to improve the SQL, **not** to enforce anything. Prompt text is a
-request; the guardrail is the control.
+A generated query is **untrusted input that happens to look like code**. The boundary must
+therefore not be expressed in anything the model controls — not in the prompt, and not in
+the SQL the model returns.
 
-### 11b.2 Five layers, deliberately overlapping
+Concretely: the scoping clause must be **added to the query after generation**, by platform
+code. It must not be produced by the model in response to an instruction. A prompt is a
+request that can be argued with; a post-generation rewrite cannot be. Any implementation in
+which "only this teacher's students" arrives because the model was *asked* to include it
+fails this requirement, however reliable it appears in testing.
 
-| # | Layer | Enforced by |
+It is fine — helpful, even — for the prompt to tell the model not to filter by institution
+or teacher. That instruction exists to improve the SQL. It enforces nothing.
+
+**R-1.** The row boundary is applied by rewriting the generated query. Prompt instructions
+do not count as enforcement.
+
+### 11b.2 One scope predicate for the whole platform
+
+The permission rules live in `insights.service.scope_predicate`. Text-to-SQL must use that
+function — compiled to SQL, or applied through it — rather than reimplementing the rules.
+
+This is not a preference about code reuse. Two implementations of "who may read this
+student" will drift, and the drift is not detectable by reading either one alone. The
+platform has already shipped this bug once: a teacher's scope filtered which *students*
+were visible but not which *subjects*, so a Grade 8 Mathematics teacher could read her
+pupils' English marks (§11a.2). A second implementation is a second chance to make exactly
+that mistake somewhere nobody is looking.
+
+**R-2.** Row-level scoping calls `scope_predicate`. Changing the permission rules changes
+every read path at once, including this one.
+
+### 11b.3 Defence in depth, with at least one layer outside our own code
+
+A single check that fails open loses the data. The following are the minimum:
+
+| # | Requirement | Enforced by |
 | --- | --- | --- |
-| 1 | One statement, SELECT only, reading nothing but `student_360` | sqlglot parse of the AST |
-| 2 | `student_360` rebound to the caller's rows via a prepended CTE | query rewrite |
-| 3 | Row cap | `LIMIT`, min of the model's and ours |
+| 1 | One statement, SELECT only, reading only permitted tables | a real SQL parser, not a regular expression |
+| 2 | The caller's boundary applied by rewrite (R-1, R-2) | platform code |
+| 3 | Row cap on every result | `LIMIT` |
 | 4 | `SET TRANSACTION READ ONLY` + `statement_timeout` | **PostgreSQL** |
-| 5 | Every question audited, including refused ones | `scoped()` dependency |
+| 5 | Every question audited, including refused ones and ones returning nothing | `scoped()` |
 
-Layer 4 is the one that matters most, because it is the only one not written by us. A
-defect anywhere in layers 1–3 still cannot produce a write.
+**R-3.** Layer 4 is not optional, and matters most precisely because we do not write it. A
+defect anywhere in layers 1–3 must still be unable to produce a write.
 
-### 11b.3 Why a CTE, and why it is prepended
+Layer 1 must use a parser. `DELETE` hidden inside a string literal or a comment is exactly
+what pattern-matching gets wrong.
 
-The scoped rows are bound to the name `student_360` in a CTE placed **first** in the query.
-The model's `FROM student_360` then reads the scoped rows without knowing it.
+### 11b.4 Table scoping must survive schema qualification
 
-Two consequences that are easy to get wrong:
+If the boundary is applied by rebinding a table name — a CTE that shadows the real table,
+say — then **schema-qualified names must be rejected outright**. `public.student_360`
+resolves past a CTE to the unscoped table, and is the one escape that reliably works.
 
-- **Schema-qualified names must be rejected.** `public.student_360` resolves past the CTE
-  to the unscoped view. This is the single escape that would work, so it is a hard refusal
-  rather than a rewrite.
-- **Prepending is not cosmetic.** PostgreSQL resolves a CTE against those declared *before*
-  it. Appending ours would let a model-defined CTE read the unscoped view. Note also that
-  sqlglot's `.with_(append=False)` *discards* existing CTEs rather than prepending, which
-  produces a query referencing names that no longer exist.
+Two related traps, recorded because they are easy to get wrong and produce a query that
+looks correct:
 
-### 11b.4 Empty, not refused — the rule holds here too
+- A shadowing CTE must be **prepended**, not appended. PostgreSQL resolves a CTE against
+  those declared before it, so an appended one can be read around by a model-defined CTE.
+- In sqlglot specifically, `.with_(append=False)` *discards* existing CTEs rather than
+  prepending, producing a query that references names that no longer exist.
 
-A teacher asking about a grade they do not teach gets an empty result set and HTTP 200. The
-guardrail does not need a special case for this: the scoped CTE simply contains no matching
-rows, so the model's own query returns nothing. An aggregate legitimately returns `0`.
+### 11b.5 Empty, not refused — the rule holds here too
 
-A refusal is reserved for a malformed or forbidden *query* — a write attempt, another
-table — never for data being out of scope. Those two failures must stay distinguishable in
-the response and in the audit trail.
+A teacher asking about a grade they do not teach gets an empty result set and HTTP 200,
+consistent with §11a.3. This should need no special case: the boundary simply matches no
+rows. An aggregate over nothing legitimately returns `0`.
 
-### 11b.5 Known limits, recorded deliberately
+A refusal is reserved for a malformed or forbidden *query* — a write attempt, an
+out-of-scope table — never for data being out of scope.
 
-- The table allowlist is enforced by our parser. A sqlglot parsing discrepancy is the most
-  likely route to reading another table. Layer 4 does not defend against this, only against
-  writes. **Hardening if this goes beyond a POC:** run generated SQL as a dedicated
-  PostgreSQL role granted `SELECT` on `student_360` and nothing else, which moves the
-  allowlist into the database.
-- Column-level restrictions are not implemented; every column of `student_360` is readable
-  within the row boundary.
-- The model is not shown the caller's identity, so its SQL cannot be tailored to leak — but
-  neither can it explain *why* a result is empty. That explanation is the interface's job.
+**R-4.** "Not allowed to ask that" and "nothing to show" stay distinguishable in the
+response and in the audit trail, and neither reveals whether the data exists.
+
+### 11b.6 Column-level restrictions
+
+Row scoping alone does not protect a column that nobody should read at any level.
+Password hashes, answer keys and similar must be unreadable **regardless of role,
+administrators included**.
+
+**R-5.** A column blocklist applies independently of the row boundary, and is not
+satisfied by role checks.
+
+### 11b.7 Known limits to record, whatever ships
+
+- If the table allowlist is enforced by our own parser, a parsing discrepancy is the most
+  likely route to reading an unintended table, and layer 4 does not defend against it —
+  that layer stops writes, not reads. **Hardening beyond POC:** run generated SQL as a
+  dedicated PostgreSQL role granted `SELECT` on the permitted objects and nothing else,
+  which moves the allowlist into the database where the parser cannot be the weak point.
+- The model should not be shown the caller's identity, so its SQL cannot be tailored to
+  the boundary. The cost is that it cannot explain *why* a result is empty; that
+  explanation is the interface's job, not the model's.
 
 ## 12. Deferred scope
 

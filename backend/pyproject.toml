@@ -21,7 +21,6 @@ dependencies = [
   "python-multipart>=0.0.20",
   "sentence-transformers>=3.4",
   "sqlalchemy[asyncio]>=2.0",
-  "sqlglot>=30.17.0",
   "tiktoken>=0.13.0",
   "uvicorn[standard]>=0.34",
 ]

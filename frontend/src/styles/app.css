@@ -3657,7 +3657,7 @@ button.card {
   }
 }
 
-/* --- Ask the data: question field, result table, and the query behind it --- */
+/* --- Shared form fields and data tables (roster, student record, question bank) --- */
 
 .field {
   display: grid;
@@ -3686,8 +3686,8 @@ button.card {
   outline-offset: 1px;
 }
 
-/* Results can be any shape the question asks for, so the table scrolls itself
-   rather than letting the page scroll sideways. */
+/* A table can be wider than the column it sits in, so it scrolls itself rather
+   than letting the whole page scroll sideways. */
 .table-scroll {
   overflow-x: auto;
   margin: 0.5rem 0 0.85rem;
@@ -3803,20 +3803,6 @@ button.card {
   font-weight: 700;
   color: var(--ink-muted);
   text-align: center;
-}
-
-.code-block {
-  margin: 0.25rem 0 0.85rem;
-  padding: 0.7rem 0.85rem;
-  overflow-x: auto;
-  background: var(--surface-2);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  font-family: ui-monospace, "Cascadia Mono", Consolas, monospace;
-  font-size: 0.78rem;
-  line-height: 1.5;
-  color: var(--ink);
-  white-space: pre;
 }
 
 /* --- One student: attendance, subjects, and the quiz history --- */

@@ -23,21 +23,6 @@ export type StudentInsightPage = {
   items: StudentInsightRow[];
 };
 
-export type AskAnswer = {
-  question: string;
-  answered: boolean;
-  /** Present when `answered` is false — says what is missing, in plain words. */
-  reason: string | null;
-  /** The query the model wrote. */
-  model_sql: string | null;
-  /** What actually ran, with the permission boundary prepended. */
-  executed_sql: string | null;
-  columns: string[];
-  rows: unknown[][];
-  row_count: number;
-  truncated: boolean;
-};
-
 /**
  * The register, already narrowed to whatever the signed-in person may see.
  *
@@ -109,12 +94,4 @@ export type StudentDetail = {
  */
 export async function fetchStudentDetail(studentId: string): Promise<StudentDetail> {
   return apiRequest<StudentDetail>(`/insights/students/${studentId}`);
-}
-
-/** Ask a question in English. The boundary is applied to the generated query server-side. */
-export async function askStudents(question: string, limit = 100): Promise<AskAnswer> {
-  return apiRequest<AskAnswer>("/ask/students", {
-    method: "POST",
-    body: { question, limit },
-  });
 }

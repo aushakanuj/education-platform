@@ -18,7 +18,6 @@ from education_platform.modules.authoring.router import router as authoring_rout
 from education_platform.modules.insights.router import router as insights_router
 from education_platform.modules.materials.router import router as materials_router
 from education_platform.modules.materials.seed import seed_approved_materials
-from education_platform.modules.nl_query.router import router as nl_query_router
 from education_platform.modules.rag.router import router as rag_router
 
 _ = _models
@@ -56,7 +55,6 @@ app.include_router(assistant_router, prefix=settings.api_v1_prefix)
 app.include_router(assessments_router, prefix=settings.api_v1_prefix)
 app.include_router(audit_router, prefix=settings.api_v1_prefix)
 app.include_router(insights_router, prefix=settings.api_v1_prefix)
-app.include_router(nl_query_router, prefix=settings.api_v1_prefix)
 app.include_router(authoring_router, prefix=settings.api_v1_prefix)
 
 
