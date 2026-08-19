@@ -130,3 +130,122 @@ def test_student_sees_only_their_own_record(api: TestClient) -> None:
     body = api.get("/api/v1/insights/students", headers=headers).json()
     assert body["scope_description"] == "Your own record only"
     assert {item["full_name"] for item in body["items"]} == {body["items"][0]["full_name"]}
+
+
+# ------------------------------------------------------- one student's detail page
+
+
+def _some_student_of(api: TestClient, email: str) -> str:
+    rows = api.get("/api/v1/insights/students?limit=500", headers=_headers(api, email)).json()
+    assert rows["items"], f"{email} should be able to see somebody"
+    return str(rows["items"][0]["student_id"])
+
+
+def test_a_teacher_opening_a_pupil_sees_only_the_subjects_she_teaches(api: TestClient) -> None:
+    """The same rule as the list, on a single record: her pupils, her subjects.
+
+    Their English marks exist and belong to the same child. They are not hers to open.
+    """
+    headers = _headers(api, TEACHER)
+    student_id = _some_student_of(api, TEACHER)
+
+    body = api.get(f"/api/v1/insights/students/{student_id}", headers=headers).json()
+
+    assert {s["subject"] for s in body["subjects"]} <= {"Mathematics", "Science"}
+    assert "English" not in {s["subject"] for s in body["subjects"]}
+
+
+def test_an_administrator_opening_the_same_pupil_sees_every_subject(api: TestClient) -> None:
+    """Proves the narrowing above is the boundary and not simply missing data."""
+    student_id = _some_student_of(api, TEACHER)
+
+    teacher = api.get(
+        f"/api/v1/insights/students/{student_id}", headers=_headers(api, TEACHER)
+    ).json()
+    admin = api.get(f"/api/v1/insights/students/{student_id}", headers=_headers(api, ADMIN)).json()
+
+    assert len(admin["subjects"]) > len(teacher["subjects"])
+    assert "English" in {s["subject"] for s in admin["subjects"]}
+
+
+def test_the_attempt_history_is_narrowed_to_the_same_subjects(api: TestClient) -> None:
+    """The history is the part most likely to leak: it is a different table entirely."""
+    student_id = _some_student_of(api, TEACHER)
+    body = api.get(f"/api/v1/insights/students/{student_id}", headers=_headers(api, TEACHER)).json()
+
+    permitted = {s["subject"] for s in body["subjects"]}
+    assert {a["subject"] for a in body["attempts"]} <= permitted
+
+
+def test_a_teacher_opening_a_pupil_who_is_not_hers_gets_404_not_403(api: TestClient) -> None:
+    """404, the same answer as a student who does not exist.
+
+    A 403 would say "this child exists, but not for you" -- which is itself the disclosure.
+    """
+    mine = {
+        item["student_id"]
+        for item in api.get(
+            "/api/v1/insights/students?limit=500", headers=_headers(api, TEACHER)
+        ).json()["items"]
+    }
+    everyone = {
+        item["student_id"]
+        for item in api.get(
+            "/api/v1/insights/students?limit=500", headers=_headers(api, ADMIN)
+        ).json()["items"]
+    }
+    outsider = next(iter(everyone - mine))
+
+    response = api.get(f"/api/v1/insights/students/{outsider}", headers=_headers(api, TEACHER))
+    assert response.status_code == 404
+
+
+def test_an_invented_student_id_gives_the_same_404(api: TestClient) -> None:
+    """The two failures must be indistinguishable, or the difference is the leak."""
+    response = api.get(
+        "/api/v1/insights/students/00000000-0000-0000-0000-000000000001",
+        headers=_headers(api, TEACHER),
+    )
+    assert response.status_code == 404
+
+
+def test_a_student_can_open_their_own_record_but_not_a_classmate(api: TestClient) -> None:
+    headers = _headers(api, _student_email(api))
+    me = api.get("/api/v1/insights/students", headers=headers).json()["items"][0]["student_id"]
+
+    assert api.get(f"/api/v1/insights/students/{me}", headers=headers).status_code == 200
+
+    classmate = next(
+        item["student_id"]
+        for item in api.get(
+            "/api/v1/insights/students?limit=500", headers=_headers(api, ADMIN)
+        ).json()["items"]
+        if item["student_id"] != me
+    )
+    assert api.get(f"/api/v1/insights/students/{classmate}", headers=headers).status_code == 404
+
+
+def test_the_detail_page_carries_attendance_and_a_reason_to_worry(api: TestClient) -> None:
+    """Whole-day attendance is not a subject's to divide, so it is reported once."""
+    student_id = _some_student_of(api, ADMIN)
+    body = api.get(f"/api/v1/insights/students/{student_id}", headers=_headers(api, ADMIN)).json()
+
+    assert body["days_counted"] > 0
+    assert 0 <= body["attendance_percent"] <= 100
+    assert all(row["status"] != "present" for row in body["absences"])
+
+
+def test_a_refused_detail_read_is_still_audited(api: TestClient) -> None:
+    """Opening a child who is not yours is exactly the access worth having a record of."""
+    api.get(
+        "/api/v1/insights/students/00000000-0000-0000-0000-000000000001",
+        headers=_headers(api, TEACHER),
+    )
+
+    events = api.get(
+        "/api/v1/admin/audit-events?event_type=data.scoped_read", headers=_headers(api, ADMIN)
+    ).json()
+    refused = [e for e in events if e["entity_type"] == "insights.student_detail"]
+    assert refused, "a refused detail read must appear in the audit trail"
+    assert refused[0]["payload"]["rows_returned"] == 0
+    assert "not in scope" in refused[0]["payload"]["detail"]

@@ -69,6 +69,18 @@ class Scope:
         return frozenset(offering for offering, _ in self.offering_sections)
 
     @property
+    def taught_offering_ids(self) -> frozenset[UUID]:
+        """Offerings the principal teaches, ignoring which sections.
+
+        For decisions about a *subject* rather than a *class* -- authoring a question for
+        a subtopic, say, which belongs to the offering and not to any one section. Do not
+        use `teaches_offering(offering)` for this: with no section argument it asks "do you
+        teach every section of this?", which is false for an ordinary section-scoped
+        assignment and would refuse a teacher access to her own subject.
+        """
+        return frozenset(offering for offering, _ in self.taught_offering_sections)
+
+    @property
     def section_ids(self) -> frozenset[UUID]:
         return frozenset(section for _, section in self.offering_sections if section is not None)
 
