@@ -6,11 +6,19 @@ import type {
   SubmitAttemptRequest,
 } from "./types";
 
+const startAttemptInflight = new Map<string, Promise<StartAttemptResponse>>();
+
 export async function startAttempt(quizId: string): Promise<StartAttemptResponse> {
-  return apiRequest<StartAttemptResponse>(
+  const existing = startAttemptInflight.get(quizId);
+  if (existing) return existing;
+  const pending = apiRequest<StartAttemptResponse>(
     `/quizzes/${encodeURIComponent(quizId)}/attempts`,
     { method: "POST" },
-  );
+  ).finally(() => {
+    startAttemptInflight.delete(quizId);
+  });
+  startAttemptInflight.set(quizId, pending);
+  return pending;
 }
 
 export async function listQuizAttempts(quizId: string): Promise<AttemptHistoryItem[]> {

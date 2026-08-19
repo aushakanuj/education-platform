@@ -9,7 +9,12 @@ type Point = {
 
 function scoredAttempts(attempts: AttemptHistoryItem[]): Point[] {
   return [...attempts]
-    .filter((attempt) => attempt.score_percent != null && attempt.status !== "in_progress")
+    .filter(
+      (attempt) =>
+        attempt.score_percent != null &&
+        attempt.status !== "in_progress" &&
+        attempt.status !== "abandoned",
+    )
     .sort((a, b) => a.attempt_number - b.attempt_number)
     .map((attempt) => ({
       id: attempt.id,

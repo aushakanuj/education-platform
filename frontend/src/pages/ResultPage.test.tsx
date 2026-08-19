@@ -150,14 +150,11 @@ describe("ResultPage", () => {
       "href",
       "/subjects/subj-1/subtopics/st-1/lesson/slides?from=start",
     );
-    expect(screen.getByRole("link", { name: /Back to quiz/i })).toHaveAttribute(
-      "href",
-      "/subjects/subj-1/subtopics/st-1/lesson",
-    );
     expect(screen.getByRole("link", { name: "Properties of Rectangles and Squares" })).toHaveAttribute(
       "href",
       "/subjects/subj-1/subtopics/st-1/lesson",
     );
+    expect(screen.queryByRole("link", { name: /Back to quiz/i })).not.toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: "Stay here" }));
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();

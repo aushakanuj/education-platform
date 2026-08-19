@@ -6,11 +6,10 @@ import logging
 import time
 from uuid import UUID
 
-from sqlalchemy import create_engine, select
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from education_platform.core.config import get_settings
-from education_platform.db.url import to_sync_url
+from education_platform.db.session import sync_session
 from education_platform.modules.rag.models import IngestJob, IngestJobStatus
 from education_platform.workers.ingest import ParsePdfFn, process_ingest_job_sync
 
@@ -20,9 +19,7 @@ DEFAULT_POLL_INTERVAL_SECONDS = 1.5
 
 
 def _sync_session() -> Session:
-    settings = get_settings()
-    engine = create_engine(to_sync_url(settings.database_url))
-    return Session(engine)
+    return sync_session()
 
 
 def claim_next_job(session: Session) -> UUID | None:

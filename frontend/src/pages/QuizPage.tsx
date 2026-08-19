@@ -5,7 +5,6 @@ import { buildSubmitPayload, startAttempt, submitAttempt } from "../api/attempts
 import { fetchLearningDirectory } from "../api/materials";
 import type { StartAttemptResponse } from "../api/types";
 import { ApiError } from "../api/types";
-import { AppShell } from "../components/AppShell";
 import { ConfirmDialog } from "../components/ConfirmDialog";
 import { Crumbs } from "../components/Crumbs";
 import { MarkdownContent } from "../components/MarkdownContent";
@@ -91,15 +90,11 @@ export function QuizPage() {
     }
   }
 
-  const subjectPath = path?.subjectPath ?? "/";
   const lessonPath = path?.lessonPath;
   const quizTabPath = path?.quizTabPath;
-  const isUnitQuiz = Boolean(quizTabPath && path?.subtopicId);
-  const backPath = isUnitQuiz ? quizTabPath! : subjectPath;
-  const backLabel = isUnitQuiz ? "← Back to quiz" : "← Back to subject";
 
   return (
-    <AppShell subjectTitle={path?.subjectName}>
+    <>
       {starting && (
         <div className="center-state" role="status">
           Starting quiz…
@@ -111,39 +106,29 @@ export function QuizPage() {
           <p className="form__error" role="alert">
             {error}
           </p>
-          <div className="actions" style={{ justifyContent: "center" }}>
-            {lessonPath && (
-              <Link to={lessonPath} className="btn btn--soft">
+          {lessonPath && (
+            <div className="actions" style={{ justifyContent: "center" }}>
+              <Link to={lessonPath} className="btn btn--soft btn--sm">
                 Open lesson
               </Link>
-            )}
-            <Link to={backPath} className="btn">
-              {isUnitQuiz ? "Back to quiz" : "Back to subject"}
-            </Link>
-          </div>
+            </div>
+          )}
         </div>
       )}
 
       {!starting && attempt && question && (
         <div className="stack-gap">
           {path && (
-            <>
-              <Crumbs
-                parts={[
-                  { label: "Subjects", to: "/" },
-                  { label: path.subjectName, to: path.subjectPath },
-                  ...(path.subtopicTitle && quizTabPath
-                    ? [{ label: path.subtopicTitle, to: quizTabPath }]
-                    : []),
-                  { label: attempt.title },
-                ]}
-              />
-              <div className="back-row">
-                <Link to={backPath} className="btn btn--matte btn--sm">
-                  {backLabel}
-                </Link>
-              </div>
-            </>
+            <Crumbs
+              parts={[
+                { label: "Subjects", to: "/" },
+                { label: path.subjectName, to: path.subjectPath },
+                ...(path.subtopicTitle && quizTabPath
+                  ? [{ label: path.subtopicTitle, to: quizTabPath }]
+                  : []),
+                { label: "Quiz" },
+              ]}
+            />
           )}
 
           <header className="page-head">
@@ -201,6 +186,7 @@ export function QuizPage() {
           <div className="actions" style={{ marginTop: 0 }}>
             <PushButton
               variant="outline"
+              size="sm"
               disabled={index === 0 || busy}
               onClick={() => setIndex((i) => Math.max(0, i - 1))}
             >
@@ -208,13 +194,19 @@ export function QuizPage() {
             </PushButton>
             {index < attempt.questions.length - 1 ? (
               <PushButton
+                size="sm"
                 disabled={!answers[question.number] || busy}
                 onClick={() => setIndex((i) => i + 1)}
               >
                 Next question
               </PushButton>
             ) : (
-              <PushButton loading={busy} disabled={!allAnswered} onClick={() => void onSubmit()}>
+              <PushButton
+                size="sm"
+                loading={busy}
+                disabled={!allAnswered}
+                onClick={() => void onSubmit()}
+              >
                 Submit quiz
               </PushButton>
             )}
@@ -245,6 +237,6 @@ export function QuizPage() {
             : []),
         ]}
       />
-    </AppShell>
+    </>
   );
 }

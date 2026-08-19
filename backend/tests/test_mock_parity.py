@@ -83,7 +83,7 @@ def test_learning_directory_hierarchy(
         assert subtopic["progress_percent"] == 0
 
 
-def test_lesson_completion_unlocks_subtopic_quiz_and_resume(
+def test_lesson_completion_unlocks_subtopic_quiz_and_restart(
     client: TestClient,
     enrolled_student_headers: dict[str, str],
     seeded_db: Session,
@@ -119,12 +119,18 @@ def test_lesson_completion_unlocks_subtopic_quiz_and_resume(
     assert first.json()["questions"]
     second = client.post(f"/api/v1/quizzes/{quiz_id}/attempts", headers=enrolled_student_headers)
     assert second.status_code == 200
-    assert second.json()["id"] == attempt_id
+    assert second.json()["id"] != attempt_id
+    assert second.json()["attempt_number"] == first.json()["attempt_number"]
 
     history = client.get(f"/api/v1/quizzes/{quiz_id}/attempts", headers=enrolled_student_headers)
     assert history.status_code == 200
-    assert len(history.json()) == 1
-    assert history.json()[0]["status"] == "in_progress"
+    statuses = {row["id"]: row["status"] for row in history.json()}
+    assert attempt_id not in statuses
+    assert statuses[second.json()["id"]] == "in_progress"
+    assert "abandoned" not in statuses.values()
+
+    discarded = client.get(f"/api/v1/attempts/{attempt_id}", headers=enrolled_student_headers)
+    assert discarded.status_code == 404
 
 
 def test_topic_quiz_unlocks_after_subtopic_passes(

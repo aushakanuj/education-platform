@@ -221,6 +221,218 @@ Record these events with actor, institution, period/scope, timestamp, request co
 6. Every content and future AI request applies the same institution, period, role, and enrollment
    restrictions as the API.
 
+## 11a. Implementation spec: the scope resolver
+
+Sections 1–11 describe *what* the boundary is. This section fixes *how* it is enforced, so that
+the rule is written once and every feature inherits it.
+
+### 11a.1 One resolver, no hand-written checks
+
+`modules/authorization/scope.py` exposes a single function:
+
+```text
+scope_for(session, principal) -> Scope
+```
+
+`Scope` is the complete answer to "what may this principal read?" and is resolved **once per
+request**, before a handler touches data. Features must not write their own role checks. Where a
+`403` is currently raised inside a service function, it is replaced by a `Scope` consultation.
+
+The rule to hold the codebase to: **grep for `HTTP_403_FORBIDDEN` should only find
+`api/deps.py`.** Anything else is a permission rule that cannot be tested centrally.
+
+### 11a.2 A teacher's reach is a set of pairs, not a grade or a subject
+
+The single most consequential decision here. A teaching assignment is:
+
+```text
+(grade_subject_offering_id, section_id | NULL)
+```
+
+A NULL section covers every section of that offering. So a teacher of **Grade 8 Mathematics** and
+**Grade 9 Science** may read Grade 9 Science students but **not** Grade 9 Mathematics students —
+the same children, a different subject. Any implementation that narrows by grade alone, or by
+subject alone, is wrong and will pass a naive test while failing rule T-03 below.
+
+**The corollary, which is easy to miss.** Resolving *which students* a teacher reaches is only half
+the boundary. `student_360` has one row per student **per subject**, so a read narrowed to a
+teacher's student list still returns those students' other subjects. Meera reaches her Grade 8
+Mathematics pupils — and a student-id filter hands her their Science, English, Arabic and Social
+Studies marks along with them. **The filter has to match the grain of the data it filters:** pairs,
+not students. Rule T-14.
+
+**And the corollary to that.** Pairs may only widen a read when they come from a *teaching
+assignment*. A student's enrolment produces the same shaped pairs, and filtering on those would
+hand every student their whole class. `Scope` therefore keeps the two apart —
+`taught_offering_sections` grants everyone in the pair, `enrolled_offering_sections` grants nobody
+and exists only so the interface can list a student's subjects. A principal reaches a row by
+exactly two routes: it is their own record, or they teach it. Rule T-15.
+
+### 11a.3 Empty, never refused
+
+When a principal asks about data outside their scope, the correct response is **zero rows**, not
+`403` and not a message from the assistant declining. A refusal confirms that the requested data
+exists, which is itself a disclosure. Concretely, `build_scope_clause` compiles an empty scope to
+the predicate `1 = 0`.
+
+`403` remains correct for *capability* failures — a student calling an administrator-only endpoint.
+The distinction: **capability is refused, content is empty.**
+
+### 11a.4 Auditable actions
+
+Every event in section 10 is written through `modules/audit/service.py` and nothing else writes to
+`audit_events`. In addition to that list, each **scoped read** records the resource, the row count
+returned, and whether the caller was unrestricted.
+
+A scoped read that returned `rows_returned = 0` is the most important entry in the trail: it is the
+evidence that the boundary held, and it is what turns "we have role-based access" into something
+demonstrable to a regulator or a parent.
+
+### 11a.5 Test matrix
+
+These are the tests behind the claim, implemented in `backend/tests/test_authorization_scope.py`.
+Change this table first when a rule changes; the tests follow it.
+
+| ID | Rule | Expected |
+| --- | --- | --- |
+| T-01 | Administrator scope | Unrestricted within their own institution, never beyond it |
+| T-02 | Teacher scope shape | Resolves to (offering, section) pairs, not a grade |
+| T-03 | Teacher, same grade, other subject | Refused — the case §11a.2 exists for |
+| T-04 | Student scope | Exactly one student profile: their own |
+| T-05 | Student reads a classmate | `allows_student` is false |
+| T-06 | Teacher student set | Strictly between zero and the whole school |
+| T-07 | Out-of-scope query | Zero rows, no error raised |
+| T-08 | Student reads the register | Only their own rows come back |
+| T-09 | Administrator vs teacher | Administrator strictly sees more |
+| T-10 | Role but no assignments | Closed, not open — reaches nothing |
+| T-11 | Empty scope predicate | Compiles to `1 = 0` |
+| T-12 | Tenant isolation | Every clause pins `institution_id`, administrators included |
+| T-13 | Row limiting | No single read can exceed the ceiling |
+| T-14 | Teacher, subjects of their own pupils | Only the subjects they teach — §11a.2 corollary |
+| T-15 | Student, subjects they are enrolled in | Still only their own rows, never a classmate's |
+
+Still to be written, once the features they describe exist:
+
+| ID | Rule | Blocked on |
+| --- | --- | --- |
+| T-16 | Deactivated account loses access immediately | account lifecycle wiring |
+| T-17 | Student moved between sections mid-term | section-change workflow |
+| T-18 | Closed period is read-only for teachers | period status enforcement |
+| T-19 | Text-to-SQL cannot escape the scope predicate | text-to-SQL delivery; requirements in §11b |
+| T-20 | Document search cannot return an unreleased document | task 2.4 |
+| T-21 | A student cannot reach an unapproved quiz | task 3.7 |
+| T-22 | Every AI answer path writes an audit event | task 2.6 |
+
+### 11a.6 Dependency on the master register
+
+Analytics reads go through the `student_360` view rather than ad-hoc joins, so the scope predicate
+has one place to attach. The view therefore **must** carry `institution_id`, `student_id`,
+`section_id`, `subject` and `grade`; without them the boundary cannot be applied to analytics at
+all. This is asserted by a test rather than left to convention.
+
+## 11b. Requirements: the generated-SQL guardrail
+
+Covers task 2.3. **This section states what any text-to-SQL implementation must satisfy to
+be acceptable under this policy. It does not describe a particular implementation, and it
+is binding on whichever one ships.** These are review criteria, not a design proposal.
+
+### 11b.1 The permission is applied to the query, never requested from the model
+
+A generated query is **untrusted input that happens to look like code**. The boundary must
+therefore not be expressed in anything the model controls — not in the prompt, and not in
+the SQL the model returns.
+
+Concretely: the scoping clause must be **added to the query after generation**, by platform
+code. It must not be produced by the model in response to an instruction. A prompt is a
+request that can be argued with; a post-generation rewrite cannot be. Any implementation in
+which "only this teacher's students" arrives because the model was *asked* to include it
+fails this requirement, however reliable it appears in testing.
+
+It is fine — helpful, even — for the prompt to tell the model not to filter by institution
+or teacher. That instruction exists to improve the SQL. It enforces nothing.
+
+**R-1.** The row boundary is applied by rewriting the generated query. Prompt instructions
+do not count as enforcement.
+
+### 11b.2 One scope predicate for the whole platform
+
+The permission rules live in `insights.service.scope_predicate`. Text-to-SQL must use that
+function — compiled to SQL, or applied through it — rather than reimplementing the rules.
+
+This is not a preference about code reuse. Two implementations of "who may read this
+student" will drift, and the drift is not detectable by reading either one alone. The
+platform has already shipped this bug once: a teacher's scope filtered which *students*
+were visible but not which *subjects*, so a Grade 8 Mathematics teacher could read her
+pupils' English marks (§11a.2). A second implementation is a second chance to make exactly
+that mistake somewhere nobody is looking.
+
+**R-2.** Row-level scoping calls `scope_predicate`. Changing the permission rules changes
+every read path at once, including this one.
+
+### 11b.3 Defence in depth, with at least one layer outside our own code
+
+A single check that fails open loses the data. The following are the minimum:
+
+| # | Requirement | Enforced by |
+| --- | --- | --- |
+| 1 | One statement, SELECT only, reading only permitted tables | a real SQL parser, not a regular expression |
+| 2 | The caller's boundary applied by rewrite (R-1, R-2) | platform code |
+| 3 | Row cap on every result | `LIMIT` |
+| 4 | `SET TRANSACTION READ ONLY` + `statement_timeout` | **PostgreSQL** |
+| 5 | Every question audited, including refused ones and ones returning nothing | `scoped()` |
+
+**R-3.** Layer 4 is not optional, and matters most precisely because we do not write it. A
+defect anywhere in layers 1–3 must still be unable to produce a write.
+
+Layer 1 must use a parser. `DELETE` hidden inside a string literal or a comment is exactly
+what pattern-matching gets wrong.
+
+### 11b.4 Table scoping must survive schema qualification
+
+If the boundary is applied by rebinding a table name — a CTE that shadows the real table,
+say — then **schema-qualified names must be rejected outright**. `public.student_360`
+resolves past a CTE to the unscoped table, and is the one escape that reliably works.
+
+Two related traps, recorded because they are easy to get wrong and produce a query that
+looks correct:
+
+- A shadowing CTE must be **prepended**, not appended. PostgreSQL resolves a CTE against
+  those declared before it, so an appended one can be read around by a model-defined CTE.
+- In sqlglot specifically, `.with_(append=False)` *discards* existing CTEs rather than
+  prepending, producing a query that references names that no longer exist.
+
+### 11b.5 Empty, not refused — the rule holds here too
+
+A teacher asking about a grade they do not teach gets an empty result set and HTTP 200,
+consistent with §11a.3. This should need no special case: the boundary simply matches no
+rows. An aggregate over nothing legitimately returns `0`.
+
+A refusal is reserved for a malformed or forbidden *query* — a write attempt, an
+out-of-scope table — never for data being out of scope.
+
+**R-4.** "Not allowed to ask that" and "nothing to show" stay distinguishable in the
+response and in the audit trail, and neither reveals whether the data exists.
+
+### 11b.6 Column-level restrictions
+
+Row scoping alone does not protect a column that nobody should read at any level.
+Password hashes, answer keys and similar must be unreadable **regardless of role,
+administrators included**.
+
+**R-5.** A column blocklist applies independently of the row boundary, and is not
+satisfied by role checks.
+
+### 11b.7 Known limits to record, whatever ships
+
+- If the table allowlist is enforced by our own parser, a parsing discrepancy is the most
+  likely route to reading an unintended table, and layer 4 does not defend against it —
+  that layer stops writes, not reads. **Hardening beyond POC:** run generated SQL as a
+  dedicated PostgreSQL role granted `SELECT` on the permitted objects and nothing else,
+  which moves the allowlist into the database where the parser cannot be the weak point.
+- The model should not be shown the caller's identity, so its SQL cannot be tailored to
+  the boundary. The cost is that it cannot explain *why* a result is empty; that
+  explanation is the interface's job, not the model's.
+
 ## 12. Deferred scope
 
 - Self-signup and unsupervised invitation workflows
@@ -230,8 +442,15 @@ Record these events with actor, institution, period/scope, timestamp, request co
 - Parent, supervisor, and TPO roles as active POC gates
 - Multifactor authentication
 
+Parent access is designed for but not built: a parent is "a student's scope, granted to a second
+person," so it adds no new shape to the resolver. It is excluded from the POC because consent and
+data-protection handling would consume time the schedule does not have before the sponsor
+presentation, not because the model cannot express it.
+
 ## 13. Open decisions
 
 - What password policy and password-reset method should the institution require?
 - Should administrators be able to view all historical student marks, or only administrative audit
   records in the POC?
+- Retention: how long are audit events kept, and who may delete them? Nobody can today, which is
+  the safe default but not a decision anyone has taken deliberately.

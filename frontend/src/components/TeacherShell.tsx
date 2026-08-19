@@ -39,11 +39,12 @@ export function TeacherShell() {
   const onClasses =
     location.pathname === "/teacher" || location.pathname.startsWith("/teacher/classes");
   const onAssistant = location.pathname.startsWith("/teacher/assistant");
+  const onQuestions = location.pathname.startsWith("/teacher/questions");
 
   return (
     <div className="app-frame">
       <div className="demo-banner" role="status">
-        Demo mockup only · Calm Humanist · Teacher workspace · fixture data
+        Teacher workspace · live data, narrowed to your teaching assignments
       </div>
       <div className={`app ${railCollapsed ? "is-rail-collapsed" : ""}`}>
         <aside
@@ -90,6 +91,16 @@ export function TeacherShell() {
               </span>
               <span className="rail__link-label">Assistant</span>
             </Link>
+            <Link
+              to="/teacher/questions"
+              className={`rail__link ${onQuestions ? "is-active" : ""}`}
+              title="Question bank"
+            >
+              <span className="rail__link-short" aria-hidden="true">
+                Q
+              </span>
+              <span className="rail__link-label">Question bank</span>
+            </Link>
           </nav>
           <div className="rail__user">
             <div className="rail__name">{user?.full_name ?? "Teacher"}</div>
@@ -123,6 +134,12 @@ export function TeacherShell() {
                 className={`rail__link ${onAssistant ? "is-active" : ""}`}
               >
                 Assistant
+              </Link>
+              <Link
+                to="/teacher/questions"
+                className={`rail__link ${onQuestions ? "is-active" : ""}`}
+              >
+                Question bank
               </Link>
             </nav>
           </div>

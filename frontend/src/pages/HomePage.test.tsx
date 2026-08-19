@@ -2,7 +2,7 @@ import { render, screen } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { describe, expect, it, vi, beforeEach } from "vitest";
 
-import { HomePage } from "./HomePage";
+import { HomePage, clearLearningDirectoryCache } from "./HomePage";
 
 vi.mock("../components/AppShell", () => ({
   AppShell: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
@@ -97,6 +97,7 @@ const mockDirectory = {
 
 describe("HomePage", () => {
   beforeEach(() => {
+    clearLearningDirectoryCache();
     vi.mocked(fetchLearningDirectory).mockResolvedValue(mockDirectory as never);
   });
 
@@ -128,6 +129,10 @@ describe("HomePage", () => {
     );
 
     expect(await screen.findByRole("heading", { name: "School material" })).toBeInTheDocument();
+    expect(screen.getByRole("navigation", { name: "Breadcrumb" })).toHaveTextContent(
+      /Subjects\s*\/\s*Mathematics/,
+    );
+    expect(screen.queryByRole("link", { name: /Back to subjects/i })).not.toBeInTheDocument();
     expect(screen.queryByRole("heading", { name: "Personal material" })).not.toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "Units" })).toBeInTheDocument();
     expect(screen.getByText("Properties of Rectangles and Squares")).toBeInTheDocument();

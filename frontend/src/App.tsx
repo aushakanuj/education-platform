@@ -5,6 +5,7 @@ import { RequireEnrollment } from "./auth/RequireEnrollment";
 import { RequireRole } from "./auth/RequireRole";
 import { ROLE_ADMIN, ROLE_TEACHER } from "./auth/roles";
 import { AdminShell } from "./components/AdminShell";
+import { AppShell } from "./components/AppShell";
 import { TeacherShell } from "./components/TeacherShell";
 import { EnrollPage } from "./pages/EnrollPage";
 import { HomePage } from "./pages/HomePage";
@@ -22,9 +23,11 @@ import { AdminMaterialsTopicDetailPage } from "./pages/admin/AdminMaterialsTopic
 import { AdminMaterialsTopicsPage } from "./pages/admin/AdminMaterialsTopicsPage";
 import { PolicyChatPage } from "./pages/admin/PolicyChatPage";
 import { AssistantStubPage } from "./pages/teacher/AssistantStubPage";
+import { QuestionBankPage } from "./pages/teacher/QuestionBankPage";
 import { ClassesPage } from "./pages/teacher/ClassesPage";
 import { RosterPage } from "./pages/teacher/RosterPage";
 import { SectionPage } from "./pages/teacher/SectionPage";
+import { StudentPage } from "./pages/teacher/StudentPage";
 import { SubjectMaterialsPage } from "./pages/teacher/SubjectMaterialsPage";
 
 export function App() {
@@ -77,8 +80,10 @@ export function App() {
       >
         <Route index element={<ClassesPage />} />
         <Route path="assistant" element={<AssistantStubPage />} />
+        <Route path="questions" element={<QuestionBankPage />} />
         <Route path="classes/:sectionId" element={<SectionPage />} />
         <Route path="classes/:sectionId/students" element={<RosterPage />} />
+        <Route path="classes/:sectionId/students/:studentId" element={<StudentPage />} />
         <Route
           path="classes/:sectionId/subjects/:subjectId"
           element={<SubjectMaterialsPage />}
@@ -86,95 +91,33 @@ export function App() {
       </Route>
 
       <Route
-        path="/"
         element={
           <RequireAuth>
             <RequireEnrollment>
-              <HomePage />
+              <AppShell />
             </RequireEnrollment>
           </RequireAuth>
         }
-      />
-      <Route
-        path="/subjects/:subjectId"
-        element={
-          <RequireAuth>
-            <RequireEnrollment>
-              <HomePage />
-            </RequireEnrollment>
-          </RequireAuth>
-        }
-      />
-      <Route
-        path="/subjects/:subjectId/topics/:topicId"
-        element={
-          <RequireAuth>
-            <RequireEnrollment>
-              <TopicPageRedirect />
-            </RequireEnrollment>
-          </RequireAuth>
-        }
-      />
-      <Route
-        path="/subjects/:subjectId/subtopics/:subtopicId/lesson/slides"
-        element={
-          <RequireAuth>
-            <RequireEnrollment>
-              <LessonSlidesPage />
-            </RequireEnrollment>
-          </RequireAuth>
-        }
-      />
-      <Route
-        path="/subjects/:subjectId/subtopics/:subtopicId/lesson/history"
-        element={
-          <RequireAuth>
-            <RequireEnrollment>
-              <QuizHistoryPage />
-            </RequireEnrollment>
-          </RequireAuth>
-        }
-      />
-      <Route
-        path="/subjects/:subjectId/subtopics/:subtopicId/lesson"
-        element={
-          <RequireAuth>
-            <RequireEnrollment>
-              <LessonPage />
-            </RequireEnrollment>
-          </RequireAuth>
-        }
-      />
-      <Route
-        path="/subjects/:subjectId/topics/:topicId/subtopics/:subtopicId/lesson"
-        element={
-          <RequireAuth>
-            <RequireEnrollment>
-              <TopicPageRedirect />
-            </RequireEnrollment>
-          </RequireAuth>
-        }
-      />
-      <Route
-        path="/quizzes/:quizId"
-        element={
-          <RequireAuth>
-            <RequireEnrollment>
-              <QuizPage />
-            </RequireEnrollment>
-          </RequireAuth>
-        }
-      />
-      <Route
-        path="/attempts/:attemptId"
-        element={
-          <RequireAuth>
-            <RequireEnrollment>
-              <ResultPage />
-            </RequireEnrollment>
-          </RequireAuth>
-        }
-      />
+      >
+        <Route index element={<HomePage />} />
+        <Route path="subjects/:subjectId" element={<HomePage />} />
+        <Route path="subjects/:subjectId/topics/:topicId" element={<TopicPageRedirect />} />
+        <Route
+          path="subjects/:subjectId/subtopics/:subtopicId/lesson/slides"
+          element={<LessonSlidesPage />}
+        />
+        <Route
+          path="subjects/:subjectId/subtopics/:subtopicId/lesson/history"
+          element={<QuizHistoryPage />}
+        />
+        <Route path="subjects/:subjectId/subtopics/:subtopicId/lesson" element={<LessonPage />} />
+        <Route
+          path="subjects/:subjectId/topics/:topicId/subtopics/:subtopicId/lesson"
+          element={<TopicPageRedirect />}
+        />
+        <Route path="quizzes/:quizId" element={<QuizPage />} />
+        <Route path="attempts/:attemptId" element={<ResultPage />} />
+      </Route>
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>
   );
