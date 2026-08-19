@@ -1,4 +1,4 @@
-/** Portfolio-style canvas sketch: drag on empty space, snap lines, fade out. */
+/** Portfolio-style canvas sketch: drag on empty space, snap shapes, fade out. */
 
 import {
   clipLineToRect,
@@ -8,6 +8,18 @@ import {
   type FittedSegment,
   type LineAnalysis,
 } from "./lineEquation";
+import {
+  altitudeFoot,
+  describeCircle,
+  describeTriangle,
+  fitCircle,
+  fitTriangle,
+  longestSideIndex,
+  type CircleAnalysis,
+  type FittedCircle,
+  type FittedTriangle,
+  type TriangleAnalysis,
+} from "./shapeFit";
 
 export type SketchPoint = { x: number; y: number; t: number };
 
@@ -31,10 +43,14 @@ const INTERACTIVE_SELECTOR = [
   ".topbar",
 ].join(",");
 
+type FittedShape =
+  | { type: "line"; segment: FittedSegment; analysis: LineAnalysis }
+  | { type: "circle"; circle: FittedCircle; analysis: CircleAnalysis }
+  | { type: "triangle"; triangle: FittedTriangle; analysis: TriangleAnalysis };
+
 type Stroke = {
   points: SketchPoint[];
-  fitted: FittedSegment | null;
-  line: LineAnalysis | null;
+  fitted: FittedShape | null;
 };
 
 export function canStartSketch(target: EventTarget | null): boolean {
@@ -133,22 +149,67 @@ function drawAxes(
   ctx.restore();
 }
 
+function overlaySize(ctx: CanvasRenderingContext2D, rows: string[]): { boxW: number; boxH: number } {
+  const padX = 10;
+  const padY = 8;
+  const lineHeight = 16;
+  const textW = Math.max(...rows.map((row) => ctx.measureText(row).width), 80);
+  return { boxW: textW + padX * 2, boxH: rows.length * lineHeight + padY * 2 };
+}
+
+function drawOverlayBox(
+  ctx: CanvasRenderingContext2D,
+  rows: string[],
+  box: { x: number; y: number },
+  boxW: number,
+  boxH: number,
+  opacity: number,
+): void {
+  const padX = 10;
+  const padY = 8;
+  const lineHeight = 16;
+  ctx.fillStyle = `rgba(244, 246, 243, ${Math.min(0.92, opacity + 0.35)})`;
+  ctx.strokeStyle = `rgba(${ACCENT}, ${opacity * 0.7})`;
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  ctx.fillRect(box.x, box.y, boxW, boxH);
+  ctx.strokeRect(box.x, box.y, boxW, boxH);
+
+  ctx.font = "600 12px 'IBM Plex Mono', ui-monospace, monospace";
+  ctx.textAlign = "left";
+  ctx.textBaseline = "top";
+  ctx.fillStyle = `rgba(${STROKE}, ${Math.min(1, opacity + 0.35)})`;
+  rows.forEach((row, index) => {
+    ctx.fillText(row, box.x + padX, box.y + padY + index * lineHeight);
+  });
+}
+
+function clampBox(
+  box: { x: number; y: number },
+  boxW: number,
+  boxH: number,
+  width: number,
+  height: number,
+): { x: number; y: number } {
+  return {
+    x: Math.min(Math.max(8, box.x), width - boxW - 8),
+    y: Math.min(Math.max(8, box.y), height - boxH - 8),
+  };
+}
+
 function drawFittedLine(
   ctx: CanvasRenderingContext2D,
-  stroke: Stroke,
+  segment: FittedSegment,
+  analysis: LineAnalysis,
   width: number,
   height: number,
   opacity: number,
 ): void {
-  const fitted = stroke.fitted;
-  const line = stroke.line;
-  if (!fitted || !line) return;
-
   const dir = {
-    x: fitted.end.x - fitted.start.x,
-    y: fitted.end.y - fitted.start.y,
+    x: segment.end.x - segment.start.x,
+    y: segment.end.y - segment.start.y,
   };
-  const clipped = clipLineToRect(fitted.start, dir, width, height);
+  const clipped = clipLineToRect(segment.start, dir, width, height);
 
   ctx.save();
   if (clipped) {
@@ -166,26 +227,18 @@ function drawFittedLine(
   ctx.lineWidth = 2.5;
   ctx.lineCap = "round";
   ctx.beginPath();
-  ctx.moveTo(fitted.start.x, fitted.start.y);
-  ctx.lineTo(fitted.end.x, fitted.end.y);
+  ctx.moveTo(segment.start.x, segment.start.y);
+  ctx.lineTo(segment.end.x, segment.end.y);
   ctx.stroke();
 
-  const midX = (fitted.start.x + fitted.end.x) / 2;
-  const midY = (fitted.start.y + fitted.end.y) / 2;
+  const midX = (segment.start.x + segment.end.x) / 2;
+  const midY = (segment.start.y + segment.end.y) / 2;
   const len = Math.hypot(dir.x, dir.y) || 1;
   const nx = -dir.y / len;
   const ny = dir.x / len;
-
+  const rows = analysis.overlay;
   ctx.font = "600 12px 'IBM Plex Mono', ui-monospace, monospace";
-  ctx.textAlign = "left";
-  ctx.textBaseline = "top";
-  const padX = 10;
-  const padY = 8;
-  const lineHeight = 16;
-  const rows = line.overlay;
-  const textW = Math.max(...rows.map((row) => ctx.measureText(row).width), 80);
-  const boxW = textW + padX * 2;
-  const boxH = rows.length * lineHeight + padY * 2;
+  const { boxW, boxH } = overlaySize(ctx, rows);
 
   const tryPlace = (sign: number) => ({
     x: midX + nx * 36 * sign - boxW / 2,
@@ -195,20 +248,118 @@ function drawFittedLine(
   if (box.x < 8 || box.y < 8 || box.x + boxW > width - 8 || box.y + boxH > height - 8) {
     box = tryPlace(-1);
   }
-  box.x = Math.min(Math.max(8, box.x), width - boxW - 8);
-  box.y = Math.min(Math.max(8, box.y), height - boxH - 8);
+  drawOverlayBox(ctx, rows, clampBox(box, boxW, boxH, width, height), boxW, boxH, opacity);
+  ctx.restore();
+}
 
-  ctx.fillStyle = `rgba(244, 246, 243, ${Math.min(0.92, opacity + 0.35)})`;
+function drawFittedCircle(
+  ctx: CanvasRenderingContext2D,
+  circle: FittedCircle,
+  analysis: CircleAnalysis,
+  width: number,
+  height: number,
+  opacity: number,
+): void {
+  const { center, radius } = circle;
+  ctx.save();
+  ctx.strokeStyle = `rgba(${STROKE}, ${opacity})`;
+  ctx.lineWidth = 2.5;
+  ctx.lineCap = "round";
+  ctx.beginPath();
+  ctx.arc(center.x, center.y, radius, 0, Math.PI * 2);
+  ctx.stroke();
+
   ctx.strokeStyle = `rgba(${ACCENT}, ${opacity * 0.7})`;
   ctx.lineWidth = 1;
+  ctx.setLineDash([6, 5]);
   ctx.beginPath();
-  ctx.fillRect(box.x, box.y, boxW, boxH);
-  ctx.strokeRect(box.x, box.y, boxW, boxH);
+  ctx.moveTo(center.x, center.y);
+  ctx.lineTo(center.x + radius, center.y);
+  ctx.stroke();
+  ctx.setLineDash([]);
 
-  ctx.fillStyle = `rgba(${STROKE}, ${Math.min(1, opacity + 0.35)})`;
-  rows.forEach((row, index) => {
-    ctx.fillText(row, box.x + padX, box.y + padY + index * lineHeight);
-  });
+  ctx.fillStyle = `rgba(${ACCENT}, ${Math.min(1, opacity + 0.2)})`;
+  ctx.beginPath();
+  ctx.arc(center.x, center.y, 2.4, 0, Math.PI * 2);
+  ctx.fill();
+
+  const rows = analysis.overlay;
+  ctx.font = "600 12px 'IBM Plex Mono', ui-monospace, monospace";
+  const { boxW, boxH } = overlaySize(ctx, rows);
+  const box = clampBox(
+    { x: center.x + radius * 0.35, y: center.y - radius - boxH - 8 },
+    boxW,
+    boxH,
+    width,
+    height,
+  );
+  drawOverlayBox(ctx, rows, box, boxW, boxH, opacity);
+  ctx.restore();
+}
+
+function drawFittedTriangle(
+  ctx: CanvasRenderingContext2D,
+  triangle: FittedTriangle,
+  analysis: TriangleAnalysis,
+  width: number,
+  height: number,
+  opacity: number,
+): void {
+  const [a, b, c] = triangle.vertices;
+  const apexIndex = longestSideIndex(triangle.vertices);
+  const apex = triangle.vertices[apexIndex]!;
+  const baseA = triangle.vertices[(apexIndex + 1) % 3]!;
+  const baseB = triangle.vertices[(apexIndex + 2) % 3]!;
+  const { foot, onSegment } = altitudeFoot(apex, baseA, baseB);
+
+  ctx.save();
+  ctx.strokeStyle = `rgba(${STROKE}, ${opacity})`;
+  ctx.lineWidth = 2.5;
+  ctx.lineCap = "round";
+  ctx.lineJoin = "round";
+  ctx.beginPath();
+  ctx.moveTo(a.x, a.y);
+  ctx.lineTo(b.x, b.y);
+  ctx.lineTo(c.x, c.y);
+  ctx.closePath();
+  ctx.stroke();
+
+  ctx.strokeStyle = `rgba(${ACCENT}, ${opacity * 0.7})`;
+  ctx.lineWidth = 1;
+  ctx.setLineDash([6, 5]);
+  ctx.beginPath();
+  ctx.moveTo(apex.x, apex.y);
+  ctx.lineTo(foot.x, foot.y);
+  ctx.stroke();
+  ctx.setLineDash([]);
+
+  if (onSegment) {
+    const dx = baseB.x - baseA.x;
+    const dy = baseB.y - baseA.y;
+    const len = Math.hypot(dx, dy) || 1;
+    const ux = dx / len;
+    const uy = dy / len;
+    const hx = apex.x - foot.x;
+    const hy = apex.y - foot.y;
+    const hLen = Math.hypot(hx, hy) || 1;
+    const nx = hx / hLen;
+    const ny = hy / hLen;
+    const mark = 8;
+    ctx.strokeStyle = `rgba(${ACCENT}, ${opacity * 0.8})`;
+    ctx.beginPath();
+    ctx.moveTo(foot.x + ux * mark, foot.y + uy * mark);
+    ctx.lineTo(foot.x + ux * mark + nx * mark, foot.y + uy * mark + ny * mark);
+    ctx.lineTo(foot.x + nx * mark, foot.y + ny * mark);
+    ctx.stroke();
+  }
+
+  const cx = (a.x + b.x + c.x) / 3;
+  const cy = (a.y + b.y + c.y) / 3;
+  const rows = analysis.overlay;
+  ctx.font = "600 12px 'IBM Plex Mono', ui-monospace, monospace";
+  const { boxW, boxH } = overlaySize(ctx, rows);
+  const box = clampBox({ x: cx + 18, y: cy - boxH - 12 }, boxW, boxH, width, height);
+  drawOverlayBox(ctx, rows, box, boxW, boxH, opacity);
   ctx.restore();
 }
 
@@ -256,7 +407,6 @@ export function createUserSketch(): UserSketch {
     current = {
       points: [{ x, y, t: now }],
       fitted: null,
-      line: null,
     };
     strokes.push(current);
   };
@@ -269,22 +419,42 @@ export function createUserSketch(): UserSketch {
   const end = (x: number, y: number, now = Date.now()) => {
     if (!current) return;
     current.points.push({ x, y, t: now });
-    const fitted = fitStraightLine(current.points);
-    if (fitted && width > 0 && height > 0) {
-      const startedAt = current.points[0]!.t;
-      current.fitted = fitted;
-      current.line = describeLine(fitted.start, fitted.end, {
-        width,
-        height,
-        unit: GRID_UNIT,
-      });
+    const startedAt = current.points[0]!.t;
+    const view = { width, height, unit: GRID_UNIT };
+    const lineFit = fitStraightLine(current.points);
+    if (lineFit && width > 0 && height > 0) {
+      current.fitted = {
+        type: "line",
+        segment: lineFit,
+        analysis: describeLine(lineFit.start, lineFit.end, view),
+      };
       current.points = [
-        { x: fitted.start.x, y: fitted.start.y, t: startedAt },
-        { x: fitted.end.x, y: fitted.end.y, t: now },
+        { x: lineFit.start.x, y: lineFit.start.y, t: startedAt },
+        { x: lineFit.end.x, y: lineFit.end.y, t: now },
       ];
+    } else if (width > 0 && height > 0) {
+      const triangleFit = fitTriangle(current.points);
+      const circleFit = triangleFit ? null : fitCircle(current.points);
+      if (triangleFit) {
+        current.fitted = {
+          type: "triangle",
+          triangle: triangleFit,
+          analysis: describeTriangle(triangleFit, view),
+        };
+        const [a, b, c] = triangleFit.vertices;
+        current.points = [{ x: (a.x + b.x + c.x) / 3, y: (a.y + b.y + c.y) / 3, t: startedAt }];
+      } else if (circleFit) {
+        current.fitted = {
+          type: "circle",
+          circle: circleFit,
+          analysis: describeCircle(circleFit, view),
+        };
+        current.points = [{ x: circleFit.center.x, y: circleFit.center.y, t: startedAt }];
+      } else {
+        current.points = smoothPath(current.points);
+      }
     } else {
-      const smoothed = smoothPath(current.points);
-      current.points = smoothed;
+      current.points = smoothPath(current.points);
     }
     current = null;
   };
@@ -297,7 +467,7 @@ export function createUserSketch(): UserSketch {
 
     let axesOpacity = current ? 0.45 : 0;
     for (const drawing of strokes) {
-      if (!drawing.line) continue;
+      if (!drawing.fitted) continue;
       const startedAt = drawing.points[0]?.t ?? now;
       axesOpacity = Math.max(axesOpacity, strokeOpacity(now, startedAt));
     }
@@ -314,8 +484,12 @@ export function createUserSketch(): UserSketch {
         continue;
       }
 
-      if (drawing.fitted && drawing.line) {
-        drawFittedLine(ctx, drawing, width, height, opacity);
+      if (drawing.fitted?.type === "line") {
+        drawFittedLine(ctx, drawing.fitted.segment, drawing.fitted.analysis, width, height, opacity);
+      } else if (drawing.fitted?.type === "circle") {
+        drawFittedCircle(ctx, drawing.fitted.circle, drawing.fitted.analysis, width, height, opacity);
+      } else if (drawing.fitted?.type === "triangle") {
+        drawFittedTriangle(ctx, drawing.fitted.triangle, drawing.fitted.analysis, width, height, opacity);
       } else {
         drawFreehand(ctx, drawing.points, opacity);
       }
