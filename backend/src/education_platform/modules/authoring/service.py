@@ -186,7 +186,12 @@ async def _authorised_subtopic(
     """
     row = (
         await session.execute(
-            select(Subtopic, Subject.name, Topic.grade_subject_offering_id, GradeSubjectOffering.id)
+            select(
+                Subtopic,
+                Subject.name,
+                Topic.grade_subject_offering_id,
+                Subject.institution_id,
+            )
             .join(Topic, Topic.id == Subtopic.topic_id)
             .join(GradeSubjectOffering, GradeSubjectOffering.id == Topic.grade_subject_offering_id)
             .join(Subject, Subject.id == GradeSubjectOffering.subject_id)
@@ -196,7 +201,11 @@ async def _authorised_subtopic(
     if row is None:
         raise AuthoringError("That subtopic does not exist.")
 
-    subtopic, subject_name, offering_id, _ = row
+    subtopic, subject_name, offering_id, subject_institution_id = row
+    # Same answer as a missing subtopic: confirming another school's curriculum exists would
+    # itself be the disclosure. Insights uses the same shape for out-of-scope students.
+    if subject_institution_id != scope.institution_id:
+        raise AuthoringError("That subtopic does not exist.")
     # Per-offering, not per-section: a subtopic belongs to the subject, so teaching any one
     # section of it is enough to author for it.
     if not (scope.unrestricted or offering_id in scope.taught_offering_ids):
@@ -417,6 +426,9 @@ async def authorable_subtopics(
     draft_count = _status_count(QuestionVersionStatus.DRAFT, "drafts")
     published_count = _status_count(QuestionVersionStatus.PUBLISHED, "published")
 
+    # Institution is always pinned. `unrestricted` means the whole school, not every school:
+    # insights.scope_predicate does the same, and skipping this filter let an administrator
+    # list and author another tenant's questions, including answer keys.
     statement = (
         select(
             Subtopic,
@@ -430,6 +442,7 @@ async def authorable_subtopics(
         .join(Subject, Subject.id == GradeSubjectOffering.subject_id)
         .outerjoin(draft_count, draft_count.c.subtopic_id == Subtopic.id)
         .outerjoin(published_count, published_count.c.subtopic_id == Subtopic.id)
+        .where(Subject.institution_id == scope.institution_id)
         .order_by(Subject.name, Topic.sequence, Subtopic.sequence)
     )
     if offering_filter is not None:

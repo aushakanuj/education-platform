@@ -26,6 +26,7 @@ from education_platform.modules.assessments.models import (
     QuestionVersionStatus,
 )
 from education_platform.modules.authoring import service
+from education_platform.modules.materials.seed import POC_INSTITUTION_NAME
 from education_platform.modules.synthetic.generator import SchoolSpec, generate_school
 
 TEST_SPEC = SchoolSpec(sections_per_grade=2, students_per_section=3, term_weeks=2)
@@ -34,6 +35,8 @@ PASSWORD = "demo1234"
 
 ADMIN = "fatima.almansouri@alnoor.school"
 TEACHER = "meera.krishnan@alnoor.school"
+#: Seeded by `seed_demo_admin` into POC Demo School when the HTTP client fixture starts.
+POC_ADMIN = "admin@demo.school"
 #: The test school is small (30 students), so the full demo's roll numbers do not apply.
 STUDENT = "student25@alnoor.school"
 
@@ -120,10 +123,10 @@ def model_writes(monkeypatch: pytest.MonkeyPatch):  # type: ignore[no-untyped-de
     return _install
 
 
-def _headers(api: TestClient, email: str) -> dict[str, str]:
+def _headers(api: TestClient, email: str, institution_name: str = SCHOOL) -> dict[str, str]:
     response = api.post(
         "/api/v1/auth/login",
-        json={"email": email, "password": PASSWORD, "institution_name": SCHOOL},
+        json={"email": email, "password": PASSWORD, "institution_name": institution_name},
     )
     assert response.status_code == 200, response.text
     return {"Authorization": f"Bearer {response.json()['access_token']}"}
@@ -400,3 +403,48 @@ def test_generation_is_audited(api: TestClient, model_writes) -> None:  # type: 
     generated = [e for e in events if e["entity_type"] == "authoring.generate"]
     assert generated, "generating questions must appear in the audit trail"
     assert "generated=1" in generated[0]["payload"]["detail"]
+
+
+def test_an_administrator_does_not_see_another_institution_subtopics(api: TestClient) -> None:
+    """`unrestricted` means the whole school, not every school on the server.
+
+    The HTTP client fixture seeds POC Demo School; this file then generates Al Noor.
+    An Al Noor administrator listing authorable subtopics used to receive both.
+    """
+    al_noor = api.get("/api/v1/authoring/subtopics", headers=_headers(api, ADMIN)).json()
+    poc = api.get(
+        "/api/v1/authoring/subtopics",
+        headers=_headers(api, POC_ADMIN, POC_INSTITUTION_NAME),
+    ).json()
+
+    assert al_noor and poc, "each tenant must have something to author"
+    al_noor_ids = {row["id"] for row in al_noor}
+    poc_ids = {row["id"] for row in poc}
+    assert al_noor_ids.isdisjoint(poc_ids)
+    assert {row["subject"] for row in poc} == {"Mathematics"}
+    assert "English" in {row["subject"] for row in al_noor}
+    assert "English" not in {row["subject"] for row in poc}
+
+
+def test_an_administrator_cannot_author_another_institution_subtopic(
+    api: TestClient, model_writes
+) -> None:  # type: ignore[no-untyped-def]
+    """Answer keys and generate/publish are the write side of the same tenant boundary."""
+    model_writes([good_question()])
+    poc_subtopic = api.get(
+        "/api/v1/authoring/subtopics",
+        headers=_headers(api, POC_ADMIN, POC_INSTITUTION_NAME),
+    ).json()[0]
+    foreign_id = poc_subtopic["id"]
+    headers = _headers(api, ADMIN)
+
+    listed = api.get(f"/api/v1/authoring/subtopics/{foreign_id}/questions", headers=headers)
+    generated = api.post(
+        f"/api/v1/authoring/subtopics/{foreign_id}/generate",
+        json={"count": 1},
+        headers=headers,
+    )
+    assert listed.status_code == 403
+    assert generated.status_code == 403
+    assert listed.json()["detail"] == "That subtopic does not exist."
+    assert generated.json()["detail"] == "That subtopic does not exist."
