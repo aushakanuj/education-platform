@@ -20,6 +20,7 @@ import {
   hasRole as rolesInclude,
   primaryRole as resolvePrimaryRole,
   ROLE_ADMIN,
+  ROLE_STUDENT,
   ROLE_TEACHER,
   type AppRole,
 } from "./roles";
@@ -97,6 +98,11 @@ function fixtureUserForRole(
   };
 }
 
+/** Enrollments are a student concept. Teachers and admins get 403 without a profile. */
+function shouldLoadEnrollments(roles: readonly string[]): boolean {
+  return resolvePrimaryRole(roles) === ROLE_STUDENT;
+}
+
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<MeResponse | null>(null);
   const [enrollments, setEnrollmentsState] = useState<EnrollmentSummary | null>(
@@ -126,6 +132,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     try {
       const me = await authApi.fetchMe();
       setUser(me);
+      if (!shouldLoadEnrollments(me.roles)) {
+        setEnrollmentsState(null);
+        return;
+      }
       try {
         const summary = await fetchEnrollments();
         setEnrollmentsState(summary);
@@ -155,8 +165,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       await authApi.login({ email, password });
       const me = await authApi.fetchMe();
       setUser(me);
-      const summary = await fetchEnrollments();
-      setEnrollmentsState(summary);
+      if (!shouldLoadEnrollments(me.roles)) {
+        setEnrollmentsState(null);
+        return;
+      }
+      try {
+        const summary = await fetchEnrollments();
+        setEnrollmentsState(summary);
+      } catch {
+        setEnrollmentsState(null);
+      }
     } finally {
       setLoading(false);
     }
@@ -177,8 +195,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         await authApi.login({ email: input.email, password: input.password });
         const me = await authApi.fetchMe();
         setUser(me);
-        const summary = await fetchEnrollments();
-        setEnrollmentsState(summary);
+        try {
+          const summary = await fetchEnrollments();
+          setEnrollmentsState(summary);
+        } catch {
+          setEnrollmentsState(null);
+        }
       } finally {
         setLoading(false);
       }
