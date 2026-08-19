@@ -183,6 +183,7 @@ async def start_attempt(
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN, detail="Student enrollment required"
         )
+    enrollment_id = context.subject_enrollment.id
     if quiz.quiz_scope == QuizScope.SUBTOPIC_MASTERY:
         await _ensure_lesson_completed(session, context)
     else:
@@ -200,11 +201,20 @@ async def start_attempt(
                 quiz=quiz,
                 quiz_version=quiz_version,
                 release_id=release.id,
-                enrollment_id=context.subject_enrollment.id,
+                enrollment_id=enrollment_id,
             )
         except IntegrityError as exc:
             last_error = exc
             await session.rollback()
+            # Rollback expires loaded ORM instances. Re-query before retrying so
+            # async lazy-loads (e.g. quiz.subtopic_id, release.id) cannot raise
+            # MissingGreenlet and 500 the start-attempt request.
+            quiz, quiz_version = await _released_quiz_version_by_quiz_id(session, quiz_uuid)
+            release = await open_release_for_quiz_version(session, quiz_version.id)
+            if release is None:
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN, detail="Quiz is not open"
+                ) from exc
     raise HTTPException(
         status_code=status.HTTP_409_CONFLICT,
         detail="Could not start a new quiz attempt. Try again.",

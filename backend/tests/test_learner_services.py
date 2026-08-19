@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
+from unittest.mock import patch
 from uuid import UUID
 
 import pytest
 from fastapi import HTTPException
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Session
 
@@ -16,6 +18,7 @@ from education_platform.modules.academics.service import (
     enroll_student_in_poc_math,
     list_my_enrollments,
 )
+from education_platform.modules.assessments import service as assessments_service
 from education_platform.modules.assessments.models import QuestionAnswerKey, QuizItem
 from education_platform.modules.assessments.schemas import AnswerSubmission, SubmitAttemptRequest
 from education_platform.modules.assessments.service import (
@@ -134,6 +137,40 @@ async def test_materials_and_attempt_flow(
             SubmitAttemptRequest(answers=answers),
         )
     assert exc.value.status_code == 409
+
+
+@pytest.mark.asyncio
+async def test_start_attempt_retries_after_integrity_error(
+    async_db_session: AsyncSession, db_session: Session
+) -> None:
+    """Concurrent unique violations must not 500 after rollback expires ORM rows."""
+    _seed(db_session)
+    principal = await _student_principal(async_db_session)
+    quiz = await get_quiz(async_db_session, principal, "square_numbers_patterns")
+    lesson_for_quiz = await get_lesson(async_db_session, principal, "square_numbers_patterns")
+    await update_material_progress(
+        async_db_session,
+        principal,
+        UUID(lesson_for_quiz.id),
+        MaterialProgressUpdate(status="completed"),
+    )
+
+    real_open = assessments_service._open_new_attempt
+    failed_once = False
+
+    async def flaky_open(*args: object, **kwargs: object) -> object:
+        nonlocal failed_once
+        if not failed_once:
+            failed_once = True
+            raise IntegrityError("INSERT", {}, Exception("duplicate key"))
+        return await real_open(*args, **kwargs)
+
+    with patch.object(assessments_service, "_open_new_attempt", flaky_open):
+        started = await start_attempt(async_db_session, principal, quiz.id)
+
+    assert failed_once is True
+    assert started.status == "in_progress"
+    assert started.questions
 
 
 @pytest.mark.asyncio
