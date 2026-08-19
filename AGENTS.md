@@ -16,6 +16,37 @@
   (`uv run python -m education_platform.workers`); keep local `UPLOAD_DIR` for PDF blobs; do not
   introduce MinIO until a feature needs shared object storage.
 
+## Plugin & Skills Setup
+
+This repo includes **pstack** and **cursor-team-kit** plugins, which provide specialized agent skills for common development patterns. All team members automatically gain access to these skills when working in this repo.
+
+### Available pstack Skills
+
+The following skills are available from the pstack plugin:
+
+- **`/how`** — Explains subsystem architecture, runtime flow, ownership, and layering. Use for "how does X work" and code walkthroughs.
+- **`/why`** — Discovers available MCPs and queries design rationale, regressions, postmortems, and data-backed decisions.
+- **`/setup-pstack`** — Configure which models pstack uses per role and override skill defaults.
+- **TypeScript Best Practices** — Best practices for `.ts` and `.tsx` files.
+- **Unslop** — Remove AI-generated code slop and clean up code style.
+
+### Available cursor-team-kit Skills
+
+Key skills include:
+
+- **Check Compiler Errors** — Run compile and type-check commands and report failures.
+- **Fix CI** — Find failing PR checks and apply focused fixes.
+- **Fix Merge Conflicts** — Resolve merge conflicts non-interactively and validate build.
+- **Loop on CI** — Monitor PR checks and fix failures until green.
+- **New Branch and PR** — Create a fresh branch, complete work, and open a pull request.
+- **Review and Ship** — Review branch for bugs, run tests, and open/update PR.
+- **Run Smoke Tests** — Run Playwright smoke tests and verify fixes.
+- **Verify This** — Verify a claim with fresh local evidence.
+- **Weekly Review** — Produce a weekly synthesis of authored commits.
+- **What Did I Get Done** — Summarize commits over a time period.
+
+See `.cursor/skills-cursor/` and `.cursor/plugins/` for full skill documentation.
+
 ## Cursor Cloud specific instructions
 
 ### Services (POC core)

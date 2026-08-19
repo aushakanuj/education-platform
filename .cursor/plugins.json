@@ -1,0 +1,12 @@
+{
+  "plugins": {
+    "pstack": {
+      "enabled": true,
+      "description": "pstack provides specialized agent skills for common development patterns"
+    },
+    "cursor-team-kit": {
+      "enabled": true,
+      "description": "Cursor team kit with skills for code review, CI/CD, PR workflows, and more"
+    }
+  }
+}
