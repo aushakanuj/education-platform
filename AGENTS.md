@@ -28,7 +28,7 @@
 | Ingest worker | Optional | `uv run python -m education_platform.workers` from `backend/` — only for admin PDF ingest. Not required for student quiz or admin materials browse. |
 | Policy assistant | Admin `/admin/policy` | Needs `OPENROUTER_API_KEY` in `backend/.env` for LLM injection/validate/summarize stages. Without the key, heuristic injection + stub summarize still run; retrieval uses pgvector. |
 
-Standard quality commands: root [`README.md`](README.md) and [`backend/README.md`](backend/README.md). Backend gate from `backend/`: ruff format/check, mypy, pytest (80% coverage). Frontend: `npm test` (Vitest). Prefer `npm run dev` over `npm run build` for day-to-day work — `tsc --noEmit` in the production build currently fails on two pre-existing issues unrelated to runtime.
+Standard quality commands: root [`README.md`](README.md) and [`backend/README.md`](backend/README.md). CI runs backend (ruff, mypy, pytest, 80% coverage) and frontend (`npm test` / Vitest) in parallel. Prefer `npm run dev` over `npm run build` for day-to-day work — `tsc --noEmit` in the production build currently fails on two pre-existing issues unrelated to runtime.
 
 ### Demo accounts
 

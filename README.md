@@ -168,6 +168,9 @@ curl http://127.0.0.1:8000/health
 
 ## Quality checks
 
+CI (`.github/workflows/ci.yml`) runs backend and frontend jobs in parallel on pull
+requests.
+
 ```bash
 cd backend
 uv run ruff format --check .
