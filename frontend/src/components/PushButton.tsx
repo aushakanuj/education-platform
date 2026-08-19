@@ -1,7 +1,10 @@
 import type { ButtonHTMLAttributes, ReactNode } from "react";
 import { motion, useReducedMotion } from "motion/react";
 
-type PushButtonProps = ButtonHTMLAttributes<HTMLButtonElement> & {
+type PushButtonProps = Omit<
+  ButtonHTMLAttributes<HTMLButtonElement>,
+  "onDrag" | "onDragStart" | "onDragEnd" | "onAnimationStart" | "onAnimationEnd" | "onAnimationIteration"
+> & {
   variant?: "primary" | "soft" | "outline" | "matte";
   size?: "sm" | "md" | "lg";
   loading?: boolean;

@@ -234,7 +234,7 @@ export function SchoolMaterialPanel({
                     <AttemptHistoryTrigger
                       title="Subject quiz history"
                       attempts={topic.overall_quiz.recent_attempts}
-                      active={historyView?.scope === "overall"}
+                      active={false}
                       onOpen={() => setHistoryView({ scope: "overall" })}
                     />
                   </div>
