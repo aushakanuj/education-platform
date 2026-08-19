@@ -79,9 +79,9 @@ describe("startAttempt", () => {
     let resolveRequest!: (value: { id: string }) => void;
     vi.mocked(apiRequest).mockImplementation(
       () =>
-        new Promise((resolve) => {
+        new Promise<{ id: string }>((resolve) => {
           resolveRequest = resolve;
-        }) as Promise<never>,
+        }),
     );
 
     const first = startAttempt("quiz-1");
