@@ -112,6 +112,14 @@ async def _ensure_lesson_completed(session: AsyncSession, context: AccessContext
 async def _ensure_subtopic_quizzes_passed(
     session: AsyncSession, principal: Principal, context: AccessContext
 ) -> None:
+    """Require a pass on every subtopic quiz the learning directory would also require.
+
+    The directory unlocks the topic quiz when each *available* subtopic quiz has a pass on
+    any of its versions (``_quiz_summary``). This gate used to look only at the latest
+    released version and to 403 when a subtopic had no quiz at all, so a curriculum reseed
+    that minted version 2 — or a subtopic without a quiz — left the UI saying unlocked
+    while start-attempt returned 403.
+    """
     if principal.student_profile_id is None:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN, detail="Student profile required"
@@ -120,28 +128,23 @@ async def _ensure_subtopic_quizzes_passed(
         await session.scalars(select(Subtopic.id).where(Subtopic.topic_id == context.topic.id))
     ).all()
     for subtopic_id in subtopic_ids:
-        row = (
-            await session.execute(
-                select(CommonMasteryQuiz, QuizVersion)
-                .join(QuizVersion, QuizVersion.quiz_id == CommonMasteryQuiz.id)
-                .where(
-                    CommonMasteryQuiz.quiz_scope == QuizScope.SUBTOPIC_MASTERY,
-                    CommonMasteryQuiz.subtopic_id == subtopic_id,
-                    QuizVersion.lifecycle_status == QuizVersionStatus.RELEASED,
-                )
-                .order_by(QuizVersion.version_number.desc())
+        quiz = await session.scalar(
+            select(CommonMasteryQuiz).where(
+                CommonMasteryQuiz.quiz_scope == QuizScope.SUBTOPIC_MASTERY,
+                CommonMasteryQuiz.subtopic_id == subtopic_id,
             )
-        ).first()
-        if row is None:
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="Pass all subtopic quizzes first",
-            )
-        _quiz, version = row
+        )
+        if quiz is None:
+            continue
+        version_ids = list(
+            await session.scalars(select(QuizVersion.id).where(QuizVersion.quiz_id == quiz.id))
+        )
+        if not version_ids:
+            continue
         passed = await session.scalar(
             select(QuizAttempt.id).where(
                 QuizAttempt.student_id == principal.student_profile_id,
-                QuizAttempt.quiz_version_id == version.id,
+                QuizAttempt.quiz_version_id.in_(version_ids),
                 QuizAttempt.passed.is_(True),
             )
         )
