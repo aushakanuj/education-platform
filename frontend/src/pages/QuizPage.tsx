@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 
 import { buildSubmitPayload, startAttempt, submitAttempt } from "../api/attempts";
@@ -22,6 +22,7 @@ export function QuizPage() {
   const [busy, setBusy] = useState(false);
   const [starting, setStarting] = useState(true);
   const [lockDialog, setLockDialog] = useState<{ title: string; body: string } | null>(null);
+  const submittingRef = useRef(false);
 
   const question = attempt?.questions[index];
   const answeredCount = useMemo(() => Object.keys(answers).length, [answers]);
@@ -75,7 +76,8 @@ export function QuizPage() {
   }
 
   async function onSubmit() {
-    if (!attempt || !allAnswered) return;
+    if (!attempt || !allAnswered || submittingRef.current) return;
+    submittingRef.current = true;
     setBusy(true);
     setError(null);
     try {
@@ -85,6 +87,7 @@ export function QuizPage() {
         state: { result, path },
       });
     } catch (err) {
+      submittingRef.current = false;
       setError(err instanceof ApiError ? err.message : "Could not submit quiz.");
       setBusy(false);
     }

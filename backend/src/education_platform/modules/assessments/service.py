@@ -313,9 +313,13 @@ async def _start_response(
 
 
 async def _owned_attempt(
-    session: AsyncSession, principal: Principal, attempt_id: UUID
+    session: AsyncSession,
+    principal: Principal,
+    attempt_id: UUID,
+    *,
+    for_update: bool = False,
 ) -> QuizAttempt:
-    attempt = await session.get(QuizAttempt, attempt_id)
+    attempt = await session.get(QuizAttempt, attempt_id, with_for_update=for_update)
     if attempt is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Attempt not found")
     if principal.student_profile_id is None or attempt.student_id != principal.student_profile_id:
@@ -340,7 +344,9 @@ async def submit_attempt(
     attempt_id: UUID,
     payload: SubmitAttemptRequest,
 ) -> AttemptResult:
-    attempt = await _owned_attempt(session, principal, attempt_id)
+    # Lock the row for the rest of this transaction so a double-submit cannot both
+    # pass the status check and then collide on uq_attempt_answers_attempt_question.
+    attempt = await _owned_attempt(session, principal, attempt_id, for_update=True)
     if attempt.status not in {QuizAttemptStatus.IN_PROGRESS, QuizAttemptStatus.NOT_STARTED}:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT, detail="Attempt is not open for submission"
@@ -448,7 +454,13 @@ async def submit_attempt(
     attempt.score_percent = percent
     attempt.pass_threshold_percent = pass_threshold
     attempt.passed = percent >= pass_threshold
-    await session.commit()
+    try:
+        await session.commit()
+    except IntegrityError as exc:
+        await session.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT, detail="Attempt is not open for submission"
+        ) from exc
 
     return await get_attempt(session, principal, attempt.id)
 
