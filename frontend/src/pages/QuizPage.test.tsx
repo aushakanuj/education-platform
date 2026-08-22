@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -6,12 +6,18 @@ import type { StartAttemptResponse } from "../api/types";
 import { QuizPage } from "./QuizPage";
 
 const startAttempt = vi.fn();
+const submitAttempt = vi.fn();
 const fetchLearningDirectory = vi.fn();
 
 vi.mock("../api/attempts", () => ({
   startAttempt: (...args: unknown[]) => startAttempt(...args),
-  submitAttempt: vi.fn(),
-  buildSubmitPayload: vi.fn(),
+  submitAttempt: (...args: unknown[]) => submitAttempt(...args),
+  buildSubmitPayload: (answers: Record<number, string>) => ({
+    answers: Object.entries(answers).map(([question_number, selected_option_label]) => ({
+      question_number: Number(question_number),
+      selected_option_label,
+    })),
+  }),
 }));
 
 vi.mock("../api/materials", () => ({
@@ -59,8 +65,10 @@ const attempt: StartAttemptResponse = {
 describe("QuizPage", () => {
   beforeEach(() => {
     startAttempt.mockReset();
+    submitAttempt.mockReset();
     fetchLearningDirectory.mockReset();
     startAttempt.mockResolvedValue(attempt);
+    submitAttempt.mockReturnValue(new Promise(() => undefined));
     fetchLearningDirectory.mockResolvedValue({
       subjects: [
         {
@@ -122,5 +130,25 @@ describe("QuizPage", () => {
       /Mathematics\s*\/\s*Properties of Rectangles and Squares\s*\/\s*Quiz$/,
     );
     expect(screen.queryByRole("link", { name: /Back to quiz/i })).not.toBeInTheDocument();
+  });
+
+  it("does not submit the same attempt twice on a double click", async () => {
+    render(
+      <MemoryRouter
+        initialEntries={["/quizzes/quiz-1"]}
+        future={{ v7_startTransition: true, v7_relativeSplatPath: true }}
+      >
+        <Routes>
+          <Route path="/quizzes/:quizId" element={<QuizPage />} />
+        </Routes>
+      </MemoryRouter>,
+    );
+
+    expect(await screen.findByText("What is a square?")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("radio", { name: /A rectangle with equal sides/i }));
+    const submit = screen.getByRole("button", { name: "Submit quiz" });
+    fireEvent.click(submit);
+    fireEvent.click(submit);
+    expect(submitAttempt).toHaveBeenCalledTimes(1);
   });
 });
