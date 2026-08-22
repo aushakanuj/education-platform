@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from datetime import UTC, datetime
+from decimal import Decimal
 from uuid import UUID
 
 from fastapi.testclient import TestClient
@@ -13,7 +15,10 @@ from education_platform.modules.assessments.models import (
     CommonMasteryQuiz,
     QuestionAnswerKey,
     QuizItem,
+    QuizResultReleaseMode,
     QuizScope,
+    QuizVersion,
+    QuizVersionStatus,
 )
 from education_platform.modules.materials.seed import seed_approved_materials
 
@@ -170,6 +175,63 @@ def test_topic_quiz_unlocks_after_subtopic_passes(
     assert start_overall.status_code == 200
     assert start_overall.json()["scope"] == "topic_mastery"
     assert len(start_overall.json()["questions"]) >= 1
+
+
+def test_topic_quiz_stays_startable_after_subtopic_quiz_is_reversioned(
+    client: TestClient,
+    enrolled_student_headers: dict[str, str],
+    seeded_db: Session,
+) -> None:
+    """A newer subtopic quiz version must not lock the topic quiz the directory still unlocks.
+
+    Seed (and any later curriculum edit) mints a new released version without archiving the
+    old one. The directory counts a pass on *any* version; start-attempt used to require a
+    pass on the *latest* version, so students saw an unlocked overall quiz and then 403.
+    """
+    directory = client.get("/api/v1/me/learning-directory", headers=enrolled_student_headers)
+    topic = directory.json()["subjects"][0]["topics"][0]
+    overall_id = topic["overall_quiz"]["id"]
+
+    for subtopic in topic["subtopics"]:
+        _complete_lesson(client, enrolled_student_headers, subtopic["id"])
+        quiz_id = subtopic["quiz"]["id"]
+        start = client.post(f"/api/v1/quizzes/{quiz_id}/attempts", headers=enrolled_student_headers)
+        assert start.status_code == 200
+        submit = client.post(
+            f"/api/v1/attempts/{start.json()['id']}/submit",
+            headers=enrolled_student_headers,
+            json={"answers": _perfect_answers(seeded_db, start.json()["quiz_version_id"])},
+        )
+        assert submit.status_code == 200
+        assert submit.json()["passed"] is True
+
+    first_quiz_id = UUID(str(topic["subtopics"][0]["quiz"]["id"]))
+    current_max = seeded_db.scalar(
+        select(QuizVersion.version_number)
+        .where(QuizVersion.quiz_id == first_quiz_id)
+        .order_by(QuizVersion.version_number.desc())
+    )
+    seeded_db.add(
+        QuizVersion(
+            quiz_id=first_quiz_id,
+            version_number=int(current_max or 0) + 1,
+            lifecycle_status=QuizVersionStatus.RELEASED,
+            result_release_mode=QuizResultReleaseMode.IMMEDIATE,
+            pass_threshold_percent=Decimal("70.00"),
+            released_at=datetime.now(UTC),
+        )
+    )
+    seeded_db.commit()
+
+    refreshed = client.get("/api/v1/me/learning-directory", headers=enrolled_student_headers)
+    overall = refreshed.json()["subjects"][0]["topics"][0]["overall_quiz"]
+    assert overall["unlocked"] is True
+
+    start_overall = client.post(
+        f"/api/v1/quizzes/{overall_id}/attempts", headers=enrolled_student_headers
+    )
+    assert start_overall.status_code == 200, start_overall.text
+    assert start_overall.json()["scope"] == "topic_mastery"
 
 
 def test_immutable_reseed_preserves_attempts(
