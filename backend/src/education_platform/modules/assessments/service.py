@@ -112,6 +112,14 @@ async def _ensure_lesson_completed(session: AsyncSession, context: AccessContext
 async def _ensure_subtopic_quizzes_passed(
     session: AsyncSession, principal: Principal, context: AccessContext
 ) -> None:
+    """Require a pass on every subtopic quiz the learning directory would also require.
+
+    The directory unlocks the topic quiz when each *available* subtopic quiz has a pass on
+    any of its versions (``_quiz_summary``). This gate used to look only at the latest
+    released version and to 403 when a subtopic had no quiz at all, so a curriculum reseed
+    that minted version 2 — or a subtopic without a quiz — left the UI saying unlocked
+    while start-attempt returned 403.
+    """
     if principal.student_profile_id is None:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN, detail="Student profile required"
@@ -120,28 +128,23 @@ async def _ensure_subtopic_quizzes_passed(
         await session.scalars(select(Subtopic.id).where(Subtopic.topic_id == context.topic.id))
     ).all()
     for subtopic_id in subtopic_ids:
-        row = (
-            await session.execute(
-                select(CommonMasteryQuiz, QuizVersion)
-                .join(QuizVersion, QuizVersion.quiz_id == CommonMasteryQuiz.id)
-                .where(
-                    CommonMasteryQuiz.quiz_scope == QuizScope.SUBTOPIC_MASTERY,
-                    CommonMasteryQuiz.subtopic_id == subtopic_id,
-                    QuizVersion.lifecycle_status == QuizVersionStatus.RELEASED,
-                )
-                .order_by(QuizVersion.version_number.desc())
+        quiz = await session.scalar(
+            select(CommonMasteryQuiz).where(
+                CommonMasteryQuiz.quiz_scope == QuizScope.SUBTOPIC_MASTERY,
+                CommonMasteryQuiz.subtopic_id == subtopic_id,
             )
-        ).first()
-        if row is None:
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="Pass all subtopic quizzes first",
-            )
-        _quiz, version = row
+        )
+        if quiz is None:
+            continue
+        version_ids = list(
+            await session.scalars(select(QuizVersion.id).where(QuizVersion.quiz_id == quiz.id))
+        )
+        if not version_ids:
+            continue
         passed = await session.scalar(
             select(QuizAttempt.id).where(
                 QuizAttempt.student_id == principal.student_profile_id,
-                QuizAttempt.quiz_version_id == version.id,
+                QuizAttempt.quiz_version_id.in_(version_ids),
                 QuizAttempt.passed.is_(True),
             )
         )
@@ -313,9 +316,13 @@ async def _start_response(
 
 
 async def _owned_attempt(
-    session: AsyncSession, principal: Principal, attempt_id: UUID
+    session: AsyncSession,
+    principal: Principal,
+    attempt_id: UUID,
+    *,
+    for_update: bool = False,
 ) -> QuizAttempt:
-    attempt = await session.get(QuizAttempt, attempt_id)
+    attempt = await session.get(QuizAttempt, attempt_id, with_for_update=for_update)
     if attempt is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Attempt not found")
     if principal.student_profile_id is None or attempt.student_id != principal.student_profile_id:
@@ -340,7 +347,9 @@ async def submit_attempt(
     attempt_id: UUID,
     payload: SubmitAttemptRequest,
 ) -> AttemptResult:
-    attempt = await _owned_attempt(session, principal, attempt_id)
+    # Lock the row for the rest of this transaction so a double-submit cannot both
+    # pass the status check and then collide on uq_attempt_answers_attempt_question.
+    attempt = await _owned_attempt(session, principal, attempt_id, for_update=True)
     if attempt.status not in {QuizAttemptStatus.IN_PROGRESS, QuizAttemptStatus.NOT_STARTED}:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT, detail="Attempt is not open for submission"
@@ -448,7 +457,13 @@ async def submit_attempt(
     attempt.score_percent = percent
     attempt.pass_threshold_percent = pass_threshold
     attempt.passed = percent >= pass_threshold
-    await session.commit()
+    try:
+        await session.commit()
+    except IntegrityError as exc:
+        await session.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT, detail="Attempt is not open for submission"
+        ) from exc
 
     return await get_attempt(session, principal, attempt.id)
 

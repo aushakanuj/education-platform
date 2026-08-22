@@ -173,6 +173,62 @@ async def test_start_attempt_retries_after_integrity_error(
     assert started.questions
 
 
+async def _correct_answers_for(
+    session: AsyncSession, quiz_version_id: UUID
+) -> SubmitAttemptRequest:
+    items = (
+        await session.scalars(
+            select(QuizItem)
+            .where(QuizItem.quiz_version_id == quiz_version_id)
+            .order_by(QuizItem.sequence)
+        )
+    ).all()
+    answers: list[AnswerSubmission] = []
+    for item in items:
+        key = await session.scalar(
+            select(QuestionAnswerKey).where(
+                QuestionAnswerKey.question_version_id == item.question_version_id
+            )
+        )
+        assert key is not None and key.correct_option_label is not None
+        answers.append(
+            AnswerSubmission(
+                question_number=item.sequence,
+                selected_option_label=key.correct_option_label,
+            )
+        )
+    return SubmitAttemptRequest(answers=answers)
+
+
+@pytest.mark.asyncio
+async def test_submit_attempt_integrity_error_is_conflict_not_500(
+    async_db_session: AsyncSession, db_session: Session
+) -> None:
+    """A colliding second submit must 409 rather than leak IntegrityError as a 500."""
+    _seed(db_session)
+    principal = await _student_principal(async_db_session)
+    quiz = await get_quiz(async_db_session, principal, "square_numbers_patterns")
+    lesson_for_quiz = await get_lesson(async_db_session, principal, "square_numbers_patterns")
+    await update_material_progress(
+        async_db_session,
+        principal,
+        UUID(lesson_for_quiz.id),
+        MaterialProgressUpdate(status="completed"),
+    )
+    started = await start_attempt(async_db_session, principal, quiz.id)
+    payload = await _correct_answers_for(async_db_session, started.quiz_version_id)
+
+    async def colliding_commit() -> None:
+        raise IntegrityError("INSERT", {}, Exception("duplicate key"))
+
+    with (
+        patch.object(async_db_session, "commit", colliding_commit),
+        pytest.raises(HTTPException) as exc,
+    ):
+        await submit_attempt(async_db_session, principal, started.id, payload)
+    assert exc.value.status_code == 409
+
+
 @pytest.mark.asyncio
 async def test_unenrolled_student_blocked(
     async_db_session: AsyncSession, db_session: Session
