@@ -18,7 +18,12 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 from sqlalchemy.orm import Session
 
 from education_platform.db.url import to_async_url, to_sync_url
-from education_platform.modules.academics.models import GradeSubjectOffering, Subject
+from education_platform.modules.academics.models import (
+    Grade,
+    GradeSubjectOffering,
+    PeriodGrade,
+    Subject,
+)
 from education_platform.modules.auth.models import RoleName, StudentProfile, User, UserRole
 from education_platform.modules.authorization.scope import scope_for
 from education_platform.modules.insights.service import query_student_360, scope_predicate
@@ -309,3 +314,61 @@ async def test_rule_15_student_is_not_widened_by_the_subjects_they_are_enrolled_
     rows = await query_student_360(async_session, scope, limit=500)
     assert {row.student_id for row in rows} == {student.student_profile_id}
     assert len(rows) == len(scope.enrolled_offering_sections), "one row per subject, all her own"
+
+
+async def _offering_id(session: AsyncSession, *, grade_name: str, subject_code: str) -> UUID:
+    offering_id = await session.scalar(
+        select(GradeSubjectOffering.id)
+        .join(PeriodGrade, PeriodGrade.id == GradeSubjectOffering.period_grade_id)
+        .join(Grade, Grade.id == PeriodGrade.grade_id)
+        .join(Subject, Subject.id == GradeSubjectOffering.subject_id)
+        .where(Grade.name == grade_name, Subject.code == subject_code)
+    )
+    assert offering_id is not None
+    return offering_id
+
+
+@pytest.mark.asyncio
+async def test_covers_offering_student_enrolled(async_session: AsyncSession) -> None:
+    principal = await _aisha(async_session)
+    scope = await scope_for(async_session, principal)
+    maths = await _offering_id(async_session, grade_name="Grade 8", subject_code="MATH")
+    assert scope.covers_offering(maths, institution_id=scope.institution_id) is True
+
+
+@pytest.mark.asyncio
+async def test_covers_offering_teacher_assigned(async_session: AsyncSession) -> None:
+    principal = await _principal_for(async_session, "meera.krishnan@alnoor.school")
+    scope = await scope_for(async_session, principal)
+    maths = await _offering_id(async_session, grade_name="Grade 8", subject_code="MATH")
+    science = await _offering_id(async_session, grade_name="Grade 9", subject_code="SCI")
+    assert scope.covers_offering(maths, institution_id=scope.institution_id) is True
+    assert scope.covers_offering(science, institution_id=scope.institution_id) is True
+
+
+@pytest.mark.asyncio
+async def test_covers_offering_teacher_other_subject(async_session: AsyncSession) -> None:
+    principal = await _principal_for(async_session, "meera.krishnan@alnoor.school")
+    scope = await scope_for(async_session, principal)
+    english = await _offering_id(async_session, grade_name="Grade 8", subject_code="ENG")
+    assert scope.covers_offering(english, institution_id=scope.institution_id) is False
+
+
+@pytest.mark.asyncio
+async def test_covers_offering_admin_institution_wide(async_session: AsyncSession) -> None:
+    principal = await _principal_for(async_session, "fatima.almansouri@alnoor.school")
+    scope = await scope_for(async_session, principal)
+    english = await _offering_id(async_session, grade_name="Grade 8", subject_code="ENG")
+    assert scope.covers_offering(english, institution_id=scope.institution_id) is True
+
+
+@pytest.mark.asyncio
+async def test_covers_offering_cross_tenant_is_false(async_session: AsyncSession) -> None:
+    principal = await _principal_for(async_session, "meera.krishnan@alnoor.school")
+    scope = await scope_for(async_session, principal)
+    maths = await _offering_id(async_session, grade_name="Grade 8", subject_code="MATH")
+    other_institution = UUID("00000000-0000-0000-0000-000000000099")
+    assert scope.covers_offering(maths, institution_id=other_institution) is False
+    admin = await _principal_for(async_session, "fatima.almansouri@alnoor.school")
+    admin_scope = await scope_for(async_session, admin)
+    assert admin_scope.covers_offering(maths, institution_id=other_institution) is False

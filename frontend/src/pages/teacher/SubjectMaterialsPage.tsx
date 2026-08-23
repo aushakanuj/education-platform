@@ -1,57 +1,129 @@
 import { useState } from "react";
 import { Navigate, useParams } from "react-router-dom";
 
+import { getMaterialQuiz, getSubtopicMaterial } from "../../api/materials";
+import type { LessonMaterial, QuizMaterial, QuizSummary, TopicNode } from "../../api/types";
 import { Crumbs } from "../../components/Crumbs";
-import { getTeacherSubject } from "../../mocks/teacherAssignments";
+import { MarkdownContent } from "../../components/MarkdownContent";
+import { useLearningDirectory } from "../../lib/useLearningDirectory";
+import { findClass, useTeacherClasses } from "../../lib/useTeacherClasses";
 
 type Tab = "lessons" | "quizzes";
 
+type OpenLesson = { kind: "lesson"; subtopicId: string };
+type OpenQuiz = { kind: "quiz"; slug: string };
+type OpenItem = OpenLesson | OpenQuiz;
+
 export function SubjectMaterialsPage() {
   const { sectionId = "", subjectId = "" } = useParams();
-  const match = getTeacherSubject(sectionId, subjectId);
+  const { loading: classesLoading, error: classesError, classes } = useTeacherClasses();
+  const { directory, loading: directoryLoading, error: directoryError } = useLearningDirectory();
   const [tab, setTab] = useState<Tab>("lessons");
   const [openTopicId, setOpenTopicId] = useState<string | null>(null);
+  const [openItem, setOpenItem] = useState<OpenItem | null>(null);
+  const [lesson, setLesson] = useState<LessonMaterial | null>(null);
+  const [quiz, setQuiz] = useState<QuizMaterial | null>(null);
+  const [previewError, setPreviewError] = useState<string | null>(null);
+  const [previewLoading, setPreviewLoading] = useState(false);
 
-  if (!match) {
+  const entry = findClass(classes, sectionId);
+  const subject = directory?.subjects.find(
+    (row) => row.id === subjectId && row.grade_name === entry?.gradeName,
+  );
+
+  const activeTopicId = openTopicId ?? subject?.topics[0]?.id ?? null;
+  const activeTopic = subject?.topics.find((topic) => topic.id === activeTopicId) ?? null;
+
+  if (classesLoading || directoryLoading) {
+    return <div className="banner banner--info">Loading…</div>;
+  }
+  if (classesError) {
+    return (
+      <div className="banner banner--warning" role="alert">
+        {classesError}
+      </div>
+    );
+  }
+  if (!entry) {
     return <Navigate to="/teacher" replace />;
   }
+  if (directoryError) {
+    return (
+      <div className="banner banner--warning" role="alert">
+        {directoryError}
+      </div>
+    );
+  }
+  if (!subject) {
+    return <Navigate to={`/teacher/classes/${entry.id}`} replace />;
+  }
 
-  const { section, subject } = match;
-  const activeTopicId = openTopicId ?? subject.topics[0]?.id ?? null;
-  const activeTopic = subject.topics.find((t) => t.id === activeTopicId) ?? null;
+  const sectionLabel = `${entry.gradeName} · ${entry.sectionName}`;
+
+  async function openLesson(subtopicId: string) {
+    setOpenItem({ kind: "lesson", subtopicId });
+    setPreviewError(null);
+    setQuiz(null);
+    setPreviewLoading(true);
+    try {
+      setLesson(await getSubtopicMaterial(subtopicId));
+    } catch (err: unknown) {
+      setLesson(null);
+      setPreviewError(err instanceof Error ? err.message : "Could not load the lesson.");
+    } finally {
+      setPreviewLoading(false);
+    }
+  }
+
+  async function openQuiz(slug: string) {
+    setOpenItem({ kind: "quiz", slug });
+    setPreviewError(null);
+    setLesson(null);
+    setPreviewLoading(true);
+    try {
+      setQuiz(await getMaterialQuiz(slug));
+    } catch (err: unknown) {
+      setQuiz(null);
+      setPreviewError(err instanceof Error ? err.message : "Could not load the quiz.");
+    } finally {
+      setPreviewLoading(false);
+    }
+  }
 
   return (
     <>
       <Crumbs
         parts={[
           { label: "My classes", to: "/teacher" },
-          { label: section.label, to: `/teacher/classes/${section.id}` },
+          { label: sectionLabel, to: `/teacher/classes/${entry.id}` },
           { label: subject.name },
         ]}
       />
       <header className="page-head">
         <p className="kicker">
-          {section.label} · {subject.code}
+          {sectionLabel} · {subject.code}
         </p>
         <h1>{subject.name}</h1>
-        <p>{subject.blurb} Read-only materials mock — no publish controls yet.</p>
+        <p>
+          Published lessons and released quiz questions for this offering. Read-only — no
+          attempts.
+        </p>
       </header>
 
-      <section
-        className="teacher-progress-strip"
-        aria-labelledby="teacher-progress-heading"
-      >
+      <section className="teacher-progress-strip" aria-labelledby="teacher-progress-heading">
         <div className="teacher-progress-strip__head">
-          <h2 id="teacher-progress-heading">{subject.progress.label}</h2>
-          <span className="teacher-progress-strip__pct">{subject.progress.pct}%</span>
+          <h2 id="teacher-progress-heading">Class progress</h2>
+          <span className="teacher-progress-strip__pct">{subject.progress_percent}%</span>
         </div>
         <div
-          className={`progress ${subject.progress.pct >= 100 ? "progress--complete" : "progress--in-progress"}`}
+          className={`progress ${subject.progress_percent >= 100 ? "progress--complete" : "progress--in-progress"}`}
           aria-hidden="true"
         >
-          <span style={{ width: `${subject.progress.pct}%` }} />
+          <span style={{ width: `${subject.progress_percent}%` }} />
         </div>
-        <p className="teacher-progress-strip__detail">{subject.progress.detail}</p>
+        <p className="teacher-progress-strip__detail">
+          {subject.grade_name} · {subject.academic_period_name}
+        </p>
       </section>
 
       <div className="teacher-materials">
@@ -60,17 +132,25 @@ export function SubjectMaterialsPage() {
           <ul className="teacher-topic-list">
             {subject.topics.map((topic) => {
               const isActive = topic.id === activeTopicId;
+              const lessonCount = topic.subtopics.filter((st) => st.has_lesson).length;
+              const quizCount = quizCountFor(topic);
               return (
                 <li key={topic.id}>
                   <button
                     type="button"
                     className={`teacher-topic-list__btn${isActive ? " is-active" : ""}`}
                     aria-current={isActive ? "true" : undefined}
-                    onClick={() => setOpenTopicId(topic.id)}
+                    onClick={() => {
+                      setOpenTopicId(topic.id);
+                      setOpenItem(null);
+                      setLesson(null);
+                      setQuiz(null);
+                      setPreviewError(null);
+                    }}
                   >
                     <span>{topic.title}</span>
                     <span className="teacher-topic-list__meta">
-                      {topic.lessons.length} lessons · {topic.quizzes.length} quizzes
+                      {lessonCount} lessons · {quizCount} quizzes
                     </span>
                   </button>
                 </li>
@@ -104,39 +184,25 @@ export function SubjectMaterialsPage() {
               </div>
 
               <h3 className="teacher-materials__topic-title">{activeTopic.title}</h3>
-
-              {tab === "lessons" ? (
-                <ul className="teacher-item-list">
-                  {activeTopic.lessons.map((lesson) => (
-                    <li key={lesson.id} className="teacher-item-list__row">
-                      <span>{lesson.title}</span>
-                      <span
-                        className={`badge ${lesson.status === "published" ? "badge--ok" : "badge--warn"}`}
-                      >
-                        {lesson.status === "published" ? "Published" : "Draft"}
-                      </span>
-                    </li>
-                  ))}
-                </ul>
-              ) : (
-                <ul className="teacher-item-list">
-                  {activeTopic.quizzes.map((quiz) => (
-                    <li key={quiz.id} className="teacher-item-list__row">
-                      <span>
-                        {quiz.title}
-                        <span className="teacher-item-list__kind">
-                          {quiz.kind === "topic" ? "Topic mastery" : "Subtopic"}
-                        </span>
-                      </span>
-                      <span
-                        className={`badge ${quiz.status === "published" ? "badge--ok" : "badge--warn"}`}
-                      >
-                        {quiz.status === "published" ? "Published" : "Draft"}
-                      </span>
-                    </li>
-                  ))}
-                </ul>
+              <TabBody
+                tab={tab}
+                topic={activeTopic}
+                openItem={openItem}
+                onOpenLesson={(id) => void openLesson(id)}
+                onOpenQuiz={(slug) => void openQuiz(slug)}
+              />
+              {previewLoading && (
+                <p className="muted" role="status">
+                  Loading…
+                </p>
               )}
+              {previewError && (
+                <div className="banner banner--warning" role="alert">
+                  {previewError}
+                </div>
+              )}
+              {lesson && openItem?.kind === "lesson" && <LessonPreview lesson={lesson} />}
+              {quiz && openItem?.kind === "quiz" && <QuizPreview quiz={quiz} />}
             </>
           ) : (
             <div className="alert alert--info">No units published for this subject yet.</div>
@@ -144,5 +210,144 @@ export function SubjectMaterialsPage() {
         </div>
       </div>
     </>
+  );
+}
+
+function quizCountFor(topic: TopicNode): number {
+  return (
+    topic.subtopics.filter((st) => st.quiz?.available).length +
+    (topic.overall_quiz?.available ? 1 : 0)
+  );
+}
+
+function TabBody({
+  tab,
+  topic,
+  openItem,
+  onOpenLesson,
+  onOpenQuiz,
+}: {
+  tab: Tab;
+  topic: TopicNode;
+  openItem: OpenItem | null;
+  onOpenLesson: (subtopicId: string) => void;
+  onOpenQuiz: (slug: string) => void;
+}) {
+  switch (tab) {
+    case "lessons":
+      return (
+        <ul className="teacher-item-list">
+          {topic.subtopics.map((subtopic) => {
+            const selected = openItem?.kind === "lesson" && openItem.subtopicId === subtopic.id;
+            return (
+              <li key={subtopic.id}>
+                <button
+                  type="button"
+                  className={`teacher-item-list__row${selected ? " is-active" : ""}`}
+                  disabled={!subtopic.has_lesson}
+                  onClick={() => onOpenLesson(subtopic.id)}
+                >
+                  <span>{subtopic.title}</span>
+                  <span className={`badge ${subtopic.has_lesson ? "badge--ok" : "badge--warn"}`}>
+                    {subtopic.has_lesson ? "Published" : "Missing"}
+                  </span>
+                </button>
+              </li>
+            );
+          })}
+        </ul>
+      );
+    case "quizzes":
+      return (
+        <ul className="teacher-item-list">
+          {topic.subtopics.map((subtopic) => {
+            if (!subtopic.quiz?.available || !subtopic.quiz.id) return null;
+            const selected = openItem?.kind === "quiz" && openItem.slug === subtopic.slug;
+            return (
+              <li key={subtopic.quiz.id}>
+                <button
+                  type="button"
+                  className={`teacher-item-list__row${selected ? " is-active" : ""}`}
+                  onClick={() => onOpenQuiz(subtopic.slug)}
+                >
+                  <span>
+                    {subtopic.quiz.title ?? subtopic.title}
+                    <span className="teacher-item-list__kind">Subtopic</span>
+                  </span>
+                  <span className="badge badge--ok">Released</span>
+                </button>
+              </li>
+            );
+          })}
+          {topic.overall_quiz?.available && topic.overall_quiz.id && (
+            <li>
+              <TopicMasteryRow quiz={topic.overall_quiz} />
+            </li>
+          )}
+        </ul>
+      );
+    default: {
+      const _exhaustive: never = tab;
+      return _exhaustive;
+    }
+  }
+}
+
+function TopicMasteryRow({ quiz }: { quiz: QuizSummary }) {
+  return (
+    <div className="teacher-item-list__row">
+      <span>
+        {quiz.title ?? "Topic mastery"}
+        <span className="teacher-item-list__kind">Topic mastery · listed only</span>
+      </span>
+      <span className="badge badge--ok">Released</span>
+    </div>
+  );
+}
+
+function LessonPreview({ lesson }: { lesson: LessonMaterial }) {
+  return (
+    <article className="teacher-preview" aria-label="Lesson preview">
+      <h4>{lesson.title}</h4>
+      <p className="muted">Read-only preview. Student progress is not recorded here.</p>
+      {lesson.slides.map((slide) => (
+        <section key={slide.number} className="teacher-preview__slide">
+          <h5>
+            Slide {slide.number}. {slide.title}
+          </h5>
+          <div className="markdown">
+            <MarkdownContent>{slide.content}</MarkdownContent>
+          </div>
+        </section>
+      ))}
+    </article>
+  );
+}
+
+function QuizPreview({ quiz }: { quiz: QuizMaterial }) {
+  return (
+    <article className="teacher-preview" aria-label="Quiz preview">
+      <h4>{quiz.title}</h4>
+      <p className="muted">
+        Released questions only — no answer keys, and this does not start an attempt.
+      </p>
+      <ol className="teacher-preview__questions">
+        {quiz.questions.map((question) => (
+          <li key={question.number}>
+            <p>
+              <strong>Q{question.number}.</strong> {question.prompt}
+            </p>
+            <ul className="draft-options">
+              {question.options.map((option) => (
+                <li key={option.label} className="draft-option">
+                  <span className="draft-option__label">{option.label}</span>
+                  <span>{option.text}</span>
+                </li>
+              ))}
+            </ul>
+          </li>
+        ))}
+      </ol>
+    </article>
   );
 }

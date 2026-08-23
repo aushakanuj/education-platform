@@ -4,13 +4,94 @@ from fastapi.testclient import TestClient
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from education_platform.modules.academics.models import Subtopic
+from education_platform.modules.academics.models import (
+    AcademicPeriod,
+    Grade,
+    GradeSubjectOffering,
+    PeriodGrade,
+    Subject,
+    Subtopic,
+    TeachingAssignment,
+    TeachingAssignmentStatus,
+)
 from education_platform.modules.assessments.models import (
     CommonMasteryQuiz,
     QuestionAnswerKey,
     QuizItem,
 )
-from education_platform.modules.materials.seed import POC_INSTITUTION_NAME
+from education_platform.modules.auth.models import Institution, RoleName, User, UserRole, UserStatus
+from education_platform.modules.auth.security import hash_password
+from education_platform.modules.materials.seed import (
+    POC_GRADE_NAME,
+    POC_INSTITUTION_NAME,
+    POC_PERIOD_NAME,
+    POC_SUBJECT_CODE,
+)
+
+POC_TEACHER_EMAIL = "math.teacher@demo.school"
+POC_TEACHER_PASSWORD = "demo1234"
+
+
+def _login(client: TestClient, email: str, password: str, institution_name: str) -> dict[str, str]:
+    login = client.post(
+        "/api/v1/auth/login",
+        json={"email": email, "password": password, "institution_name": institution_name},
+    )
+    assert login.status_code == 200, login.text
+    return {"Authorization": f"Bearer {login.json()['access_token']}"}
+
+
+def _assign_poc_teacher(db: Session) -> None:
+    institution = db.scalar(select(Institution).where(Institution.name == POC_INSTITUTION_NAME))
+    assert institution is not None
+    user = User(
+        institution_id=institution.id,
+        email=POC_TEACHER_EMAIL,
+        full_name="POC Math Teacher",
+        password_hash=hash_password(POC_TEACHER_PASSWORD),
+        status=UserStatus.ACTIVE,
+    )
+    db.add(user)
+    db.flush()
+    db.add(UserRole(user_id=user.id, role=RoleName.TEACHER))
+    period = db.scalar(
+        select(AcademicPeriod).where(
+            AcademicPeriod.institution_id == institution.id,
+            AcademicPeriod.name == POC_PERIOD_NAME,
+        )
+    )
+    grade = db.scalar(
+        select(Grade).where(Grade.institution_id == institution.id, Grade.name == POC_GRADE_NAME)
+    )
+    subject = db.scalar(
+        select(Subject).where(
+            Subject.institution_id == institution.id, Subject.code == POC_SUBJECT_CODE
+        )
+    )
+    assert period is not None and grade is not None and subject is not None
+    period_grade = db.scalar(
+        select(PeriodGrade).where(
+            PeriodGrade.academic_period_id == period.id, PeriodGrade.grade_id == grade.id
+        )
+    )
+    assert period_grade is not None
+    offering = db.scalar(
+        select(GradeSubjectOffering).where(
+            GradeSubjectOffering.period_grade_id == period_grade.id,
+            GradeSubjectOffering.subject_id == subject.id,
+        )
+    )
+    assert offering is not None
+    db.add(
+        TeachingAssignment(
+            teacher_user_id=user.id,
+            academic_period_id=period.id,
+            grade_subject_offering_id=offering.id,
+            section_id=None,
+            status=TeachingAssignmentStatus.ACTIVE,
+        )
+    )
+    db.commit()
 
 
 def test_enrollments_after_poc_math(
@@ -135,4 +216,20 @@ def test_unenrolled_cannot_start_attempt(client: TestClient, seeded_db: Session)
     )
     assert quiz is not None
     start = client.post(f"/api/v1/quizzes/{quiz.id}/attempts", headers=headers)
+    assert start.status_code == 404
+
+
+def test_teacher_cannot_start_attempt(client: TestClient, seeded_db: Session) -> None:
+    _assign_poc_teacher(seeded_db)
+    headers = _login(client, POC_TEACHER_EMAIL, POC_TEACHER_PASSWORD, POC_INSTITUTION_NAME)
+    subtopic = seeded_db.scalar(
+        select(Subtopic).where(Subtopic.slug == "rectangles_squares_properties")
+    )
+    assert subtopic is not None
+    quiz = seeded_db.scalar(
+        select(CommonMasteryQuiz).where(CommonMasteryQuiz.subtopic_id == subtopic.id)
+    )
+    assert quiz is not None
+    start = client.post(f"/api/v1/quizzes/{quiz.id}/attempts", headers=headers)
     assert start.status_code == 403
+    assert start.json()["detail"] == "Student enrollment required"
