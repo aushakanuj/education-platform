@@ -10,7 +10,6 @@ from fastapi import HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from education_platform.api.deps import Principal
 from education_platform.modules.academics.models import (
     AcademicPeriod,
     EnrollmentStatus,
@@ -23,7 +22,11 @@ from education_platform.modules.academics.models import (
     Subtopic,
     Topic,
 )
-from education_platform.modules.academics.service import resolve_subtopic_access
+from education_platform.modules.academics.service import (
+    CurriculumNode,
+    load_subtopic_node,
+    subject_enrollment_for,
+)
 from education_platform.modules.assessments.models import (
     CommonMasteryQuiz,
     QuestionOption,
@@ -37,6 +40,7 @@ from education_platform.modules.assessments.models import (
     QuizVersion,
     QuizVersionStatus,
 )
+from education_platform.modules.authorization.scope import Scope
 from education_platform.modules.materials.markdown_parser import parse_slides
 from education_platform.modules.materials.models import (
     MaterialProgressStatus,
@@ -111,8 +115,8 @@ async def _progress_for(
     )
 
 
-async def list_topics(session: AsyncSession, principal: Principal) -> list[TopicSummary]:
-    directory = await build_learning_directory(session, principal)
+async def list_topics(session: AsyncSession, scope: Scope) -> list[TopicSummary]:
+    directory = await build_learning_directory(session, scope)
     topics: list[TopicSummary] = []
     for subject in directory.subjects:
         for topic in subject.topics:
@@ -131,61 +135,42 @@ async def list_topics(session: AsyncSession, principal: Principal) -> list[Topic
     return topics
 
 
-async def build_learning_directory(
-    session: AsyncSession, principal: Principal
-) -> LearningDirectoryOut:
-    if principal.student_profile_id is None and not principal.is_administrator:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN, detail="Student profile required"
-        )
+async def build_learning_directory(session: AsyncSession, scope: Scope) -> LearningDirectoryOut:
+    offering_query = (
+        select(GradeSubjectOffering, Subject, AcademicPeriod, Grade)
+        .join(Subject, Subject.id == GradeSubjectOffering.subject_id)
+        .join(PeriodGrade, PeriodGrade.id == GradeSubjectOffering.period_grade_id)
+        .join(Grade, Grade.id == PeriodGrade.grade_id)
+        .join(AcademicPeriod, AcademicPeriod.id == PeriodGrade.academic_period_id)
+        .where(Subject.institution_id == scope.institution_id)
+        .order_by(Grade.sort_order, Subject.code)
+    )
+    if not scope.unrestricted:
+        if not scope.offering_ids:
+            return LearningDirectoryOut(subjects=[])
+        offering_query = offering_query.where(GradeSubjectOffering.id.in_(scope.offering_ids))
 
-    subject_rows: list[tuple[GradeSubjectOffering, Subject, AcademicPeriod, Grade]]
-    if principal.is_administrator:
-        subject_rows = [
-            (offering, subject, period, grade)
-            for offering, subject, period, grade in (
-                await session.execute(
-                    select(GradeSubjectOffering, Subject, AcademicPeriod, Grade)
-                    .join(Subject, Subject.id == GradeSubjectOffering.subject_id)
-                    .join(PeriodGrade, PeriodGrade.id == GradeSubjectOffering.period_grade_id)
-                    .join(Grade, Grade.id == PeriodGrade.grade_id)
-                    .join(AcademicPeriod, AcademicPeriod.id == PeriodGrade.academic_period_id)
-                    .where(Subject.institution_id == principal.institution_id)
-                    .order_by(Grade.sort_order, Subject.code)
-                )
-            ).all()
-        ]
-        enrollment_by_offering: dict[UUID, StudentSubjectEnrollment | None] = {}
-    else:
-        rows = (
-            await session.execute(
-                select(
-                    StudentSubjectEnrollment,
-                    GradeSubjectOffering,
-                    Subject,
-                    AcademicPeriod,
-                    Grade,
-                )
-                .join(
-                    GradeSubjectOffering,
-                    GradeSubjectOffering.id == StudentSubjectEnrollment.grade_subject_offering_id,
-                )
-                .join(Subject, Subject.id == GradeSubjectOffering.subject_id)
-                .join(PeriodGrade, PeriodGrade.id == GradeSubjectOffering.period_grade_id)
-                .join(Grade, Grade.id == PeriodGrade.grade_id)
-                .join(AcademicPeriod, AcademicPeriod.id == PeriodGrade.academic_period_id)
-                .where(
-                    StudentSubjectEnrollment.student_id == principal.student_profile_id,
+    subject_rows = [
+        (offering, subject, period, grade)
+        for offering, subject, period, grade in (await session.execute(offering_query)).all()
+    ]
+
+    enrollment_by_offering: dict[UUID, StudentSubjectEnrollment] = {}
+    if not scope.unrestricted and scope.self_student_id is not None and subject_rows:
+        enrollments = (
+            await session.scalars(
+                select(StudentSubjectEnrollment).where(
+                    StudentSubjectEnrollment.student_id == scope.self_student_id,
                     StudentSubjectEnrollment.status == EnrollmentStatus.ACTIVE,
+                    StudentSubjectEnrollment.grade_subject_offering_id.in_(
+                        [offering.id for offering, *_ in subject_rows]
+                    ),
                 )
-                .order_by(Grade.sort_order, Subject.code)
             )
         ).all()
-        subject_rows = [
-            (offering, subject, period, grade)
-            for enrollment, offering, subject, period, grade in rows
-        ]
-        enrollment_by_offering = {offering.id: enrollment for enrollment, offering, *_ in rows}
+        enrollment_by_offering = {
+            enrollment.grade_subject_offering_id: enrollment for enrollment in enrollments
+        }
 
     subjects: list[SubjectNodeOut] = []
     for offering, subject, period, grade in subject_rows:
@@ -199,15 +184,15 @@ async def build_learning_directory(
             )
         ).all()
         for topic in db_topics:
-            subtopic_nodes = await _subtopic_nodes(session, principal, topic, subject_enrollment)
+            subtopic_nodes = await _subtopic_nodes(session, scope, topic, subject_enrollment)
             quiz_nodes = [node for node in subtopic_nodes if node.quiz and node.quiz.available]
             overall_unlocked = bool(quiz_nodes) and all(
                 node.quiz is not None and node.quiz.passed for node in quiz_nodes
             )
             overall = await _quiz_summary(
                 session,
-                principal,
-                scope=QuizScope.TOPIC_MASTERY,
+                scope,
+                quiz_scope=QuizScope.TOPIC_MASTERY,
                 target_id=topic.id,
                 unlocked=overall_unlocked,
                 locked_reason="Pass all subtopic quizzes first",
@@ -294,7 +279,7 @@ def _lesson_progress_percent(
 
 async def _subtopic_nodes(
     session: AsyncSession,
-    principal: Principal,
+    scope: Scope,
     topic: Topic,
     subject_enrollment: StudentSubjectEnrollment | None,
 ) -> list[SubtopicNodeOut]:
@@ -318,8 +303,8 @@ async def _subtopic_nodes(
         )
         quiz = await _quiz_summary(
             session,
-            principal,
-            scope=QuizScope.SUBTOPIC_MASTERY,
+            scope,
+            quiz_scope=QuizScope.SUBTOPIC_MASTERY,
             target_id=subtopic.id,
             unlocked=lesson_completed,
             locked_reason="Complete the lesson first",
@@ -350,12 +335,12 @@ async def _subtopic_nodes(
 async def _released_quiz(
     session: AsyncSession,
     *,
-    scope: QuizScope,
+    quiz_scope: QuizScope,
     target_id: UUID,
 ) -> tuple[CommonMasteryQuiz, QuizVersion] | None:
     target_filter = (
         CommonMasteryQuiz.subtopic_id == target_id
-        if scope == QuizScope.SUBTOPIC_MASTERY
+        if quiz_scope == QuizScope.SUBTOPIC_MASTERY
         else CommonMasteryQuiz.topic_id == target_id
     )
     row = (
@@ -363,7 +348,7 @@ async def _released_quiz(
             select(CommonMasteryQuiz, QuizVersion)
             .join(QuizVersion, QuizVersion.quiz_id == CommonMasteryQuiz.id)
             .where(
-                CommonMasteryQuiz.quiz_scope == scope,
+                CommonMasteryQuiz.quiz_scope == quiz_scope,
                 target_filter,
                 QuizVersion.lifecycle_status == QuizVersionStatus.RELEASED,
             )
@@ -375,19 +360,19 @@ async def _released_quiz(
 
 async def _quiz_summary(
     session: AsyncSession,
-    principal: Principal,
+    scope: Scope,
     *,
-    scope: QuizScope,
+    quiz_scope: QuizScope,
     target_id: UUID,
     unlocked: bool,
     locked_reason: str,
 ) -> QuizSummaryOut:
-    released = await _released_quiz(session, scope=scope, target_id=target_id)
+    released = await _released_quiz(session, quiz_scope=quiz_scope, target_id=target_id)
     if released is None:
-        return QuizSummaryOut(id=None, scope=scope.value)
+        return QuizSummaryOut(id=None, scope=quiz_scope.value)
     quiz, version = released
     attempts: list[QuizAttempt] = []
-    if principal.student_profile_id is not None:
+    if scope.self_student_id is not None:
         version_ids = (
             await session.scalars(select(QuizVersion.id).where(QuizVersion.quiz_id == quiz.id))
         ).all()
@@ -395,7 +380,7 @@ async def _quiz_summary(
             await session.scalars(
                 select(QuizAttempt)
                 .where(
-                    QuizAttempt.student_id == principal.student_profile_id,
+                    QuizAttempt.student_id == scope.self_student_id,
                     QuizAttempt.quiz_version_id.in_(version_ids),
                     QuizAttempt.status != QuizAttemptStatus.ABANDONED,
                 )
@@ -426,7 +411,7 @@ async def _quiz_summary(
     return QuizSummaryOut(
         id=quiz.id,
         title=quiz.title,
-        scope=scope.value,
+        scope=quiz_scope.value,
         available=True,
         unlocked=unlocked,
         locked_reason=None if unlocked else locked_reason,
@@ -439,8 +424,30 @@ async def _quiz_summary(
     )
 
 
-async def get_subtopic_by_slug(session: AsyncSession, topic_id: str) -> Subtopic:
-    subtopic = await session.scalar(select(Subtopic).where(Subtopic.slug == topic_id))
+async def get_subtopic_by_slug(session: AsyncSession, topic_id: str, *, scope: Scope) -> Subtopic:
+    stmt = (
+        select(Subtopic)
+        .join(Topic, Topic.id == Subtopic.topic_id)
+        .join(
+            GradeSubjectOffering,
+            GradeSubjectOffering.id == Topic.grade_subject_offering_id,
+        )
+        .join(PeriodGrade, PeriodGrade.id == GradeSubjectOffering.period_grade_id)
+        .join(AcademicPeriod, AcademicPeriod.id == PeriodGrade.academic_period_id)
+        .where(
+            Subtopic.slug == topic_id,
+            AcademicPeriod.institution_id == scope.institution_id,
+        )
+        .order_by(Subtopic.sequence)
+    )
+    if not scope.unrestricted:
+        if not scope.offering_ids:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Topic '{topic_id}' not found",
+            )
+        stmt = stmt.where(GradeSubjectOffering.id.in_(scope.offering_ids))
+    subtopic = await session.scalar(stmt)
     if subtopic is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -449,32 +456,43 @@ async def get_subtopic_by_slug(session: AsyncSession, topic_id: str) -> Subtopic
     return subtopic
 
 
-# Back-compat alias used by assessments service.
-_get_subtopic = get_subtopic_by_slug
+async def _covered_subtopic_node(
+    session: AsyncSession, scope: Scope, subtopic_id: UUID
+) -> CurriculumNode:
+    node = await load_subtopic_node(session, subtopic_id)
+    if node is None or node.subtopic is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Topic not found")
+    if not scope.covers_offering(node.offering.id, institution_id=node.institution.id):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Topic not found")
+    return node
 
 
-async def get_lesson(session: AsyncSession, principal: Principal, topic_id: str) -> LessonMaterial:
-    subtopic = await get_subtopic_by_slug(session, topic_id)
-    return await get_subtopic_lesson(session, principal, subtopic.id)
+async def get_lesson(session: AsyncSession, scope: Scope, topic_id: str) -> LessonMaterial:
+    subtopic = await get_subtopic_by_slug(session, topic_id, scope=scope)
+    return await get_subtopic_lesson(session, scope, subtopic.id)
 
 
 async def get_subtopic_lesson(
-    session: AsyncSession, principal: Principal, subtopic_id: UUID
+    session: AsyncSession, scope: Scope, subtopic_id: UUID
 ) -> LessonMaterial:
-    context = await resolve_subtopic_access(session, principal, subtopic_id)
-    assert context.subtopic is not None
+    node = await _covered_subtopic_node(session, scope, subtopic_id)
     version = await _published_material_version(session, subtopic_id)
     if version is None or not version.content_markdown:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Lesson not found",
         )
+    enrollment = None
+    if scope.self_student_id is not None:
+        enrollment = await subject_enrollment_for(session, scope.self_student_id, node.offering.id)
     progress = await _progress_for(
         session,
-        context.subject_enrollment.id if context.subject_enrollment else None,
+        enrollment.id if enrollment else None,
         version.id,
     )
-    quiz = await _released_quiz(session, scope=QuizScope.SUBTOPIC_MASTERY, target_id=subtopic_id)
+    quiz = await _released_quiz(
+        session, quiz_scope=QuizScope.SUBTOPIC_MASTERY, target_id=subtopic_id
+    )
     markdown = version.content_markdown
     slides = [
         LessonSlide(number=slide.number, title=slide.title, content=slide.content)
@@ -492,12 +510,12 @@ async def get_subtopic_lesson(
     )
 
 
-async def get_quiz(session: AsyncSession, principal: Principal, topic_id: str) -> QuizMaterial:
+async def get_quiz(session: AsyncSession, scope: Scope, topic_id: str) -> QuizMaterial:
     """Return quiz questions without joining question_answer_keys."""
-    subtopic = await get_subtopic_by_slug(session, topic_id)
-    await resolve_subtopic_access(session, principal, subtopic.id)
+    subtopic = await get_subtopic_by_slug(session, topic_id, scope=scope)
+    await _covered_subtopic_node(session, scope, subtopic.id)
     released = await _released_quiz(
-        session, scope=QuizScope.SUBTOPIC_MASTERY, target_id=subtopic.id
+        session, quiz_scope=QuizScope.SUBTOPIC_MASTERY, target_id=subtopic.id
     )
     if released is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Quiz not found")
@@ -558,16 +576,17 @@ async def questions_for_quiz_version(
 
 async def update_material_progress(
     session: AsyncSession,
-    principal: Principal,
+    scope: Scope,
     subtopic_id: UUID,
     payload: MaterialProgressUpdate,
 ) -> MaterialProgressOut:
-    if principal.student_profile_id is None:
+    node = await _covered_subtopic_node(session, scope, subtopic_id)
+    if scope.self_student_id is None:
         raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN, detail="Student profile required"
+            status_code=status.HTTP_403_FORBIDDEN, detail="Student enrollment required"
         )
-    context = await resolve_subtopic_access(session, principal, subtopic_id)
-    if context.subject_enrollment is None:
+    enrollment = await subject_enrollment_for(session, scope.self_student_id, node.offering.id)
+    if enrollment is None:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN, detail="Student enrollment required"
         )
@@ -575,10 +594,10 @@ async def update_material_progress(
     if version is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Lesson not found")
     now = datetime.now(UTC)
-    progress = await _progress_for(session, context.subject_enrollment.id, version.id)
+    progress = await _progress_for(session, enrollment.id, version.id)
     if progress is None:
         progress = StudentMaterialProgress(
-            student_subject_enrollment_id=context.subject_enrollment.id,
+            student_subject_enrollment_id=enrollment.id,
             source_material_version_id=version.id,
             status=MaterialProgressStatus.OPENED,
             opened_at=now,

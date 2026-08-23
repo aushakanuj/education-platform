@@ -4,6 +4,7 @@ import type {
   LessonMaterial,
   MaterialProgress,
   MaterialProgressUpdate,
+  QuizMaterial,
 } from "./types";
 
 export async function fetchLearningDirectory(): Promise<LearningDirectory> {
@@ -12,6 +13,10 @@ export async function fetchLearningDirectory(): Promise<LearningDirectory> {
 
 export async function getSubtopicMaterial(subtopicId: string): Promise<LessonMaterial> {
   return apiRequest<LessonMaterial>(`/subtopics/${encodeURIComponent(subtopicId)}/material`);
+}
+
+export async function getMaterialQuiz(topicId: string): Promise<QuizMaterial> {
+  return apiRequest<QuizMaterial>(`/materials/${encodeURIComponent(topicId)}/quiz`);
 }
 
 export async function updateMaterialProgress(

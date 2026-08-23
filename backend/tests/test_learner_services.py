@@ -14,7 +14,6 @@ from sqlalchemy.orm import Session
 
 from education_platform.api.deps import Principal
 from education_platform.modules.academics.service import (
-    assert_can_access_subtopic,
     enroll_student_in_poc_math,
     list_my_enrollments,
 )
@@ -28,11 +27,13 @@ from education_platform.modules.assessments.service import (
 )
 from education_platform.modules.auth.schemas import ProvisionStudentRequest
 from education_platform.modules.auth.service import provision_student
+from education_platform.modules.authorization.scope import Scope, scope_for
 from education_platform.modules.materials.schemas import MaterialProgressUpdate
 from education_platform.modules.materials.seed import seed_approved_materials
 from education_platform.modules.materials.service import (
     get_lesson,
     get_quiz,
+    get_subtopic_lesson,
     list_topics,
     update_material_progress,
 )
@@ -42,7 +43,7 @@ def _seed(session: Session) -> None:
     seed_approved_materials(session, replace=True)
 
 
-async def _student_principal(session: AsyncSession) -> Principal:
+async def _student_principal(session: AsyncSession) -> tuple[Principal, Scope]:
     me = await provision_student(
         session,
         ProvisionStudentRequest(
@@ -54,7 +55,7 @@ async def _student_principal(session: AsyncSession) -> Principal:
     )
     assert me.student_profile_id is not None
     await enroll_student_in_poc_math(session, student_profile_id=me.student_profile_id)
-    return Principal(
+    principal = Principal(
         user_id=me.id,
         institution_id=me.institution_id,
         email=me.email,
@@ -62,6 +63,7 @@ async def _student_principal(session: AsyncSession) -> Principal:
         student_profile_id=me.student_profile_id,
         status=me.status,
     )
+    return principal, await scope_for(session, principal)
 
 
 @pytest.mark.asyncio
@@ -69,30 +71,30 @@ async def test_materials_and_attempt_flow(
     async_db_session: AsyncSession, db_session: Session
 ) -> None:
     _seed(db_session)
-    principal = await _student_principal(async_db_session)
+    _principal, scope = await _student_principal(async_db_session)
 
-    topics = await list_topics(async_db_session, principal)
+    topics = await list_topics(async_db_session, scope)
     assert {topic.id for topic in topics} >= {
         "rectangles_squares_properties",
         "square_numbers_patterns",
     }
 
-    lesson = await get_lesson(async_db_session, principal, "rectangles_squares_properties")
+    lesson = await get_lesson(async_db_session, scope, "rectangles_squares_properties")
     assert lesson.slides
-    quiz = await get_quiz(async_db_session, principal, "square_numbers_patterns")
+    quiz = await get_quiz(async_db_session, scope, "square_numbers_patterns")
     assert len(quiz.questions) == 10
-    lesson_for_quiz = await get_lesson(async_db_session, principal, "square_numbers_patterns")
+    lesson_for_quiz = await get_lesson(async_db_session, scope, "square_numbers_patterns")
     await update_material_progress(
         async_db_session,
-        principal,
+        scope,
         UUID(lesson_for_quiz.id),
         MaterialProgressUpdate(status="completed"),
     )
 
-    enrollments = await list_my_enrollments(async_db_session, principal)
+    enrollments = await list_my_enrollments(async_db_session, scope)
     assert enrollments.subject_enrollments
 
-    started = await start_attempt(async_db_session, principal, quiz.id)
+    started = await start_attempt(async_db_session, scope, quiz.id)
     assert started.status == "in_progress"
 
     items = (
@@ -119,20 +121,20 @@ async def test_materials_and_attempt_flow(
 
     result = await submit_attempt(
         async_db_session,
-        principal,
+        scope,
         started.id,
         SubmitAttemptRequest(answers=answers),
     )
     assert result.passed is True
     assert float(result.score_percent or 0) == 100.0
 
-    fetched = await get_attempt(async_db_session, principal, UUID(str(started.id)))
+    fetched = await get_attempt(async_db_session, scope, UUID(str(started.id)))
     assert fetched.score_percent == result.score_percent
 
     with pytest.raises(HTTPException) as exc:
         await submit_attempt(
             async_db_session,
-            principal,
+            scope,
             started.id,
             SubmitAttemptRequest(answers=answers),
         )
@@ -145,12 +147,12 @@ async def test_start_attempt_retries_after_integrity_error(
 ) -> None:
     """Concurrent unique violations must not 500 after rollback expires ORM rows."""
     _seed(db_session)
-    principal = await _student_principal(async_db_session)
-    quiz = await get_quiz(async_db_session, principal, "square_numbers_patterns")
-    lesson_for_quiz = await get_lesson(async_db_session, principal, "square_numbers_patterns")
+    _principal, scope = await _student_principal(async_db_session)
+    quiz = await get_quiz(async_db_session, scope, "square_numbers_patterns")
+    lesson_for_quiz = await get_lesson(async_db_session, scope, "square_numbers_patterns")
     await update_material_progress(
         async_db_session,
-        principal,
+        scope,
         UUID(lesson_for_quiz.id),
         MaterialProgressUpdate(status="completed"),
     )
@@ -166,7 +168,7 @@ async def test_start_attempt_retries_after_integrity_error(
         return await real_open(*args, **kwargs)
 
     with patch.object(assessments_service, "_open_new_attempt", flaky_open):
-        started = await start_attempt(async_db_session, principal, quiz.id)
+        started = await start_attempt(async_db_session, scope, quiz.id)
 
     assert failed_once is True
     assert started.status == "in_progress"
@@ -206,16 +208,16 @@ async def test_submit_attempt_integrity_error_is_conflict_not_500(
 ) -> None:
     """A colliding second submit must 409 rather than leak IntegrityError as a 500."""
     _seed(db_session)
-    principal = await _student_principal(async_db_session)
-    quiz = await get_quiz(async_db_session, principal, "square_numbers_patterns")
-    lesson_for_quiz = await get_lesson(async_db_session, principal, "square_numbers_patterns")
+    _principal, scope = await _student_principal(async_db_session)
+    quiz = await get_quiz(async_db_session, scope, "square_numbers_patterns")
+    lesson_for_quiz = await get_lesson(async_db_session, scope, "square_numbers_patterns")
     await update_material_progress(
         async_db_session,
-        principal,
+        scope,
         UUID(lesson_for_quiz.id),
         MaterialProgressUpdate(status="completed"),
     )
-    started = await start_attempt(async_db_session, principal, quiz.id)
+    started = await start_attempt(async_db_session, scope, quiz.id)
     payload = await _correct_answers_for(async_db_session, started.quiz_version_id)
 
     async def colliding_commit() -> None:
@@ -225,7 +227,7 @@ async def test_submit_attempt_integrity_error_is_conflict_not_500(
         patch.object(async_db_session, "commit", colliding_commit),
         pytest.raises(HTTPException) as exc,
     ):
-        await submit_attempt(async_db_session, principal, started.id, payload)
+        await submit_attempt(async_db_session, scope, started.id, payload)
     assert exc.value.status_code == 409
 
 
@@ -251,23 +253,26 @@ async def test_unenrolled_student_blocked(
         student_profile_id=me.student_profile_id,
         status=me.status,
     )
-    topics = await list_topics(async_db_session, principal)
+    scope = await scope_for(async_db_session, principal)
+    topics = await list_topics(async_db_session, scope)
     assert topics == []
     with pytest.raises(HTTPException) as exc:
-        await get_lesson(async_db_session, principal, "rectangles_squares_properties")
-    assert exc.value.status_code == 403
-    with pytest.raises(HTTPException):
-        await start_attempt(async_db_session, principal, "rectangles_squares_properties")
+        await get_lesson(async_db_session, scope, "rectangles_squares_properties")
+    assert exc.value.status_code == 404
+    with pytest.raises(HTTPException) as start_exc:
+        await start_attempt(async_db_session, scope, "rectangles_squares_properties")
+    assert start_exc.value.status_code == 404
 
 
 @pytest.mark.asyncio
 async def test_missing_topic(async_db_session: AsyncSession, db_session: Session) -> None:
     _seed(db_session)
-    principal = await _student_principal(async_db_session)
+    _principal, scope = await _student_principal(async_db_session)
     with pytest.raises(HTTPException) as exc:
-        await get_lesson(async_db_session, principal, "missing")
+        await get_lesson(async_db_session, scope, "missing")
     assert exc.value.status_code == 404
-    with pytest.raises(HTTPException):
-        await assert_can_access_subtopic(
-            async_db_session, principal, UUID("00000000-0000-0000-0000-000000000001")
+    with pytest.raises(HTTPException) as missing:
+        await get_subtopic_lesson(
+            async_db_session, scope, UUID("00000000-0000-0000-0000-000000000001")
         )
+    assert missing.value.status_code == 404

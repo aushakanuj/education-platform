@@ -1,13 +1,15 @@
 import { Link, Navigate, useParams } from "react-router-dom";
 
 import { Crumbs } from "../../components/Crumbs";
+import { useLearningDirectory } from "../../lib/useLearningDirectory";
 import { findClass, useTeacherClasses } from "../../lib/useTeacherClasses";
 
 export function SectionPage() {
   const { sectionId = "" } = useParams();
   const { loading, error, classes } = useTeacherClasses();
+  const directoryState = useLearningDirectory();
 
-  if (loading) {
+  if (loading || directoryState.loading) {
     return <div className="banner banner--info">Loading…</div>;
   }
   if (error) {
@@ -53,6 +55,11 @@ export function SectionPage() {
               students take are not yours to see.
             </p>
           </div>
+          {directoryState.error && (
+            <div className="banner banner--warning" role="alert">
+              {directoryState.error}
+            </div>
+          )}
           <div className="grid grid--2">
             {entry.subjects.map((subject) => {
               const marks = entry.students
@@ -61,8 +68,11 @@ export function SectionPage() {
               const average = marks.length
                 ? Math.round(marks.reduce((sum, s) => sum + s.masteryPercent, 0) / marks.length)
                 : 0;
-              return (
-                <div key={subject} className="card">
+              const node = directoryState.directory?.subjects.find(
+                (row) => row.name === subject && row.grade_name === entry.gradeName,
+              );
+              const body = (
+                <>
                   <h3>{subject}</h3>
                   <p>
                     {marks.length} of {entry.students.length} students have attempted a quiz.
@@ -76,7 +86,24 @@ export function SectionPage() {
                   </div>
                   <div className="meta-row">
                     <span className="badge badge--info">{entry.gradeName}</span>
+                    {node && <span className="badge">Materials</span>}
                   </div>
+                </>
+              );
+              if (node) {
+                return (
+                  <Link
+                    key={subject}
+                    to={`/teacher/classes/${entry.id}/subjects/${node.id}`}
+                    className="card"
+                  >
+                    {body}
+                  </Link>
+                );
+              }
+              return (
+                <div key={subject} className="card">
+                  {body}
                 </div>
               );
             })}

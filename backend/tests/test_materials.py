@@ -1,6 +1,59 @@
 from uuid import UUID
 
 from fastapi.testclient import TestClient
+from sqlalchemy import create_engine, select
+from sqlalchemy.orm import Session
+
+from education_platform.db.url import to_sync_url
+from education_platform.modules.academics.models import (
+    AcademicPeriod,
+    Grade,
+    GradeSubjectOffering,
+    PeriodGrade,
+    Subject,
+    Subtopic,
+    TeachingAssignment,
+    TeachingAssignmentStatus,
+    Topic,
+)
+from education_platform.modules.auth.models import Institution, RoleName, User, UserRole, UserStatus
+from education_platform.modules.auth.security import hash_password
+from education_platform.modules.materials.seed import (
+    POC_GRADE_NAME,
+    POC_INSTITUTION_NAME,
+    POC_PERIOD_NAME,
+    POC_SUBJECT_CODE,
+)
+from education_platform.modules.synthetic.generator import SchoolSpec, generate_school
+
+POC_TEACHER_EMAIL = "math.teacher@demo.school"
+POC_TEACHER_PASSWORD = "demo1234"
+ALNOOR_SPEC = SchoolSpec(sections_per_grade=2, students_per_section=3, term_weeks=2)
+ALNOOR_TEACHER = "meera.krishnan@alnoor.school"
+
+
+def _alnoor_subtopic(session: Session, *, subject_code: str, grade_name: str) -> Subtopic:
+    subtopic = session.scalar(
+        select(Subtopic)
+        .join(Topic, Topic.id == Subtopic.topic_id)
+        .join(
+            GradeSubjectOffering,
+            GradeSubjectOffering.id == Topic.grade_subject_offering_id,
+        )
+        .join(Subject, Subject.id == GradeSubjectOffering.subject_id)
+        .join(PeriodGrade, PeriodGrade.id == GradeSubjectOffering.period_grade_id)
+        .join(Grade, Grade.id == PeriodGrade.grade_id)
+        .join(AcademicPeriod, AcademicPeriod.id == PeriodGrade.academic_period_id)
+        .join(Institution, Institution.id == AcademicPeriod.institution_id)
+        .where(
+            Institution.name == ALNOOR_SPEC.institution_name,
+            Subject.code == subject_code,
+            Grade.name == grade_name,
+        )
+        .order_by(Subtopic.sequence)
+    )
+    assert subtopic is not None
+    return subtopic
 
 
 def test_list_materials(client: TestClient, enrolled_student_headers: dict[str, str]) -> None:
@@ -92,5 +145,125 @@ def test_unenrolled_student_cannot_see_materials(client: TestClient) -> None:
     assert listed.json() == []
     assert (
         client.get("/api/v1/materials/rectangles_squares_properties", headers=headers).status_code
-        == 403
+        == 404
     )
+
+
+def _login(client: TestClient, email: str, password: str, institution_name: str) -> dict[str, str]:
+    login = client.post(
+        "/api/v1/auth/login",
+        json={"email": email, "password": password, "institution_name": institution_name},
+    )
+    assert login.status_code == 200, login.text
+    return {"Authorization": f"Bearer {login.json()['access_token']}"}
+
+
+def _assign_poc_teacher(db: Session) -> None:
+    institution = db.scalar(select(Institution).where(Institution.name == POC_INSTITUTION_NAME))
+    assert institution is not None
+    user = User(
+        institution_id=institution.id,
+        email=POC_TEACHER_EMAIL,
+        full_name="POC Math Teacher",
+        password_hash=hash_password(POC_TEACHER_PASSWORD),
+        status=UserStatus.ACTIVE,
+    )
+    db.add(user)
+    db.flush()
+    db.add(UserRole(user_id=user.id, role=RoleName.TEACHER))
+    period = db.scalar(
+        select(AcademicPeriod).where(
+            AcademicPeriod.institution_id == institution.id,
+            AcademicPeriod.name == POC_PERIOD_NAME,
+        )
+    )
+    grade = db.scalar(
+        select(Grade).where(Grade.institution_id == institution.id, Grade.name == POC_GRADE_NAME)
+    )
+    subject = db.scalar(
+        select(Subject).where(
+            Subject.institution_id == institution.id, Subject.code == POC_SUBJECT_CODE
+        )
+    )
+    assert period is not None and grade is not None and subject is not None
+    period_grade = db.scalar(
+        select(PeriodGrade).where(
+            PeriodGrade.academic_period_id == period.id, PeriodGrade.grade_id == grade.id
+        )
+    )
+    assert period_grade is not None
+    offering = db.scalar(
+        select(GradeSubjectOffering).where(
+            GradeSubjectOffering.period_grade_id == period_grade.id,
+            GradeSubjectOffering.subject_id == subject.id,
+        )
+    )
+    assert offering is not None
+    db.add(
+        TeachingAssignment(
+            teacher_user_id=user.id,
+            academic_period_id=period.id,
+            grade_subject_offering_id=offering.id,
+            section_id=None,
+            status=TeachingAssignmentStatus.ACTIVE,
+        )
+    )
+    db.commit()
+
+
+def test_teacher_reads_taught_lesson_and_quiz(client: TestClient, seeded_db: Session) -> None:
+    _assign_poc_teacher(seeded_db)
+    headers = _login(client, POC_TEACHER_EMAIL, POC_TEACHER_PASSWORD, POC_INSTITUTION_NAME)
+
+    lesson = client.get("/api/v1/materials/rectangles_squares_properties", headers=headers)
+    assert lesson.status_code == 200, lesson.text
+    assert lesson.json()["progress"] is None
+
+    quiz = client.get("/api/v1/materials/square_numbers_patterns/quiz", headers=headers)
+    assert quiz.status_code == 200, quiz.text
+    payload = quiz.json()
+    assert len(payload["questions"]) == 10
+    serialized = str(payload)
+    assert "Answer Key" not in serialized
+    assert "correct_option_label" not in serialized
+
+    lesson_id = lesson.json()["id"]
+    progress = client.put(
+        f"/api/v1/subtopics/{lesson_id}/material-progress",
+        headers=headers,
+        json={"status": "completed"},
+    )
+    assert progress.status_code == 403
+    assert progress.json()["detail"] == "Student enrollment required"
+
+    enrollments = client.get("/api/v1/me/enrollments", headers=headers)
+    assert enrollments.status_code == 200
+    assert enrollments.json()["grade_enrollments"] == []
+    assert enrollments.json()["subject_enrollments"] == []
+
+
+def test_teacher_directory_and_other_subject_404(client: TestClient, clean_db: str) -> None:
+    engine = create_engine(to_sync_url(clean_db), pool_pre_ping=True)
+    with Session(engine) as session:
+        generate_school(session, ALNOOR_SPEC)
+        session.commit()
+        english_subtopic = _alnoor_subtopic(session, subject_code="ENG", grade_name="Grade 8")
+        taught_subtopic = _alnoor_subtopic(session, subject_code="MATH", grade_name="Grade 8")
+        english_id = english_subtopic.id
+        taught_slug = taught_subtopic.slug
+    engine.dispose()
+
+    headers = _login(client, ALNOOR_TEACHER, "demo1234", ALNOOR_SPEC.institution_name)
+    directory = client.get("/api/v1/me/learning-directory", headers=headers)
+    assert directory.status_code == 200, directory.text
+    names = {(row["grade_name"], row["name"]) for row in directory.json()["subjects"]}
+    assert ("Grade 8", "Mathematics") in names
+    assert ("Grade 9", "Science") in names
+    assert ("Grade 8", "English") not in names
+
+    other = client.get(f"/api/v1/subtopics/{english_id}/material", headers=headers)
+    assert other.status_code == 404
+
+    taught_quiz = client.get(f"/api/v1/materials/{taught_slug}/quiz", headers=headers)
+    assert taught_quiz.status_code == 200, taught_quiz.text
+    assert "correct_option_label" not in str(taught_quiz.json())

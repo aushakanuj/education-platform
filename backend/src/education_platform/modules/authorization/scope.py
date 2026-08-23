@@ -117,6 +117,17 @@ class Scope:
         """Whether this pair is in the principal's world, taught or studied."""
         return self.unrestricted or _matches(self.offering_sections, offering_id, section_id)
 
+    def covers_offering(self, offering_id: UUID, *, institution_id: UUID) -> bool:
+        """Whether this offering is in the principal's world at all.
+
+        Unlike `allows_offering`, this does not take a section. A student enrolled in
+        section A still covers the offering when the caller has no section to pass — which
+        is the usual case for a lesson or quiz, which belong to the offering, not a class.
+        """
+        if institution_id != self.institution_id:
+            return False
+        return self.unrestricted or offering_id in self.offering_ids
+
 
 def _matches(pairs: frozenset[OfferingSection], offering: UUID, section: UUID | None) -> bool:
     """A NULL-section pair covers every section of that offering."""

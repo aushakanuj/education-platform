@@ -2932,12 +2932,54 @@ button.card {
   background: var(--bg);
 }
 
+button.teacher-item-list__row {
+  width: 100%;
+  font: inherit;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+button.teacher-item-list__row:hover:not(:disabled) {
+  background: var(--surface);
+}
+
+button.teacher-item-list__row.is-active {
+  border-color: color-mix(in srgb, var(--accent) 40%, var(--border));
+  background: var(--accent-soft);
+}
+
+button.teacher-item-list__row:disabled {
+  cursor: default;
+  opacity: 0.75;
+}
+
 .teacher-item-list__kind {
   display: block;
   font-family: var(--font-mono);
   font-size: 0.68rem;
   color: var(--ink-muted);
   margin-top: 0.15rem;
+}
+
+.teacher-preview {
+  margin-top: 1rem;
+  padding-top: 0.85rem;
+  border-top: 1px solid var(--border);
+  display: grid;
+  gap: 0.75rem;
+}
+
+.teacher-preview h4,
+.teacher-preview h5 {
+  margin: 0 0 0.35rem;
+}
+
+.teacher-preview__questions {
+  margin: 0;
+  padding-left: 1.2rem;
+  display: grid;
+  gap: 0.85rem;
 }
 
 @media (max-width: 720px) {

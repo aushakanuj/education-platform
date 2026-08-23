@@ -7,11 +7,17 @@ import { ClassesPage } from "./ClassesPage";
 import { RosterPage } from "./RosterPage";
 import { SectionPage } from "./SectionPage";
 import type { StudentInsightPage } from "../../api/insights";
+import type { LearningDirectory } from "../../api/types";
 
 const fetchStudentInsights = vi.fn();
+const fetchLearningDirectory = vi.fn();
 
 vi.mock("../../api/insights", () => ({
   fetchStudentInsights: (...args: unknown[]) => fetchStudentInsights(...args),
+}));
+
+vi.mock("../../api/materials", () => ({
+  fetchLearningDirectory: () => fetchLearningDirectory(),
 }));
 
 function studentRow(over: Partial<StudentInsightPage["items"][number]>) {
@@ -48,9 +54,27 @@ function renderApp(initialPath = "/teacher") {
   );
 }
 
+function directory(): LearningDirectory {
+  return {
+    subjects: [
+      {
+        id: "subj-math",
+        code: "MATH",
+        name: "Mathematics",
+        grade_name: "Grade 8",
+        academic_period_name: "Term 1 2026",
+        progress_percent: 40,
+        topics: [],
+      },
+    ],
+  };
+}
+
 describe("navigating from a class to its students", () => {
   beforeEach(() => {
     fetchStudentInsights.mockReset();
+    fetchLearningDirectory.mockReset();
+    fetchLearningDirectory.mockResolvedValue(directory());
     fetchStudentInsights.mockResolvedValue({
       scope_description: "2 students across 1 assignment",
       rows_returned: 2,
@@ -71,6 +95,10 @@ describe("navigating from a class to its students", () => {
 
     expect(await screen.findByRole("heading", { level: 1, name: "Grade 8 · 8A" })).toBeInTheDocument();
     expect(screen.getByRole("link", { name: /Student roster/ })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: /Mathematics/ })).toHaveAttribute(
+      "href",
+      "/teacher/classes/grade-8-8a/subjects/subj-math",
+    );
   });
 
   it("reaches the roster and lists the students", async () => {
