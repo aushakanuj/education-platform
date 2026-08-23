@@ -16,6 +16,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import Session
 
 from education_platform.db.url import to_sync_url
+from education_platform.modules.materials.seed import POC_INSTITUTION_NAME
 from education_platform.modules.synthetic.generator import SchoolSpec, generate_school
 
 TEST_SPEC = SchoolSpec(sections_per_grade=2, students_per_section=3, term_weeks=2)
@@ -24,6 +25,9 @@ PASSWORD = "demo1234"
 
 ADMIN = "fatima.almansouri@alnoor.school"
 TEACHER = "meera.krishnan@alnoor.school"
+#: Seeded into POC Demo School by the HTTP client fixture, before this file generates
+#: Al Noor. Two tenants on one server is the only way to test the tenant boundary at all.
+POC_ADMIN = "admin@demo.school"
 
 
 @pytest.fixture()
@@ -37,10 +41,10 @@ def api(client: TestClient, clean_db: str) -> Iterator[TestClient]:
     yield client
 
 
-def _headers(api: TestClient, email: str) -> dict[str, str]:
+def _headers(api: TestClient, email: str, institution_name: str = SCHOOL) -> dict[str, str]:
     response = api.post(
         "/api/v1/auth/login",
-        json={"email": email, "password": PASSWORD, "institution_name": SCHOOL},
+        json={"email": email, "password": PASSWORD, "institution_name": institution_name},
     )
     assert response.status_code == 200, response.text
     return {"Authorization": f"Bearer {response.json()['access_token']}"}
@@ -249,3 +253,51 @@ def test_a_refused_detail_read_is_still_audited(api: TestClient) -> None:
     assert refused, "a refused detail read must appear in the audit trail"
     assert refused[0]["payload"]["rows_returned"] == 0
     assert "not in scope" in refused[0]["payload"]["detail"]
+
+
+# ---------------------------------------------------------------- the tenant boundary
+
+# These exist because the authoring module shipped without them and a cross-tenant leak
+# went with it (`b895828`): `unrestricted` was read as "no filter" rather than "the whole
+# school". `scope_predicate` pins the institution in both of its branches, so these reads
+# were already correct -- but "correct by reading the code" is not the same as proven, and
+# the authoring bug is what that difference costs. Role-versus-role tests inside one school
+# cannot fail on a tenant bug, however many of them there are.
+
+
+def test_an_administrator_does_not_see_another_institution_students(api: TestClient) -> None:
+    """The strongest form: the caller is unrestricted, and still bounded by their school."""
+    al_noor = api.get("/api/v1/insights/students?limit=500", headers=_headers(api, ADMIN)).json()
+    poc = api.get(
+        "/api/v1/insights/students?limit=500",
+        headers=_headers(api, POC_ADMIN, POC_INSTITUTION_NAME),
+    ).json()
+
+    assert al_noor["rows_returned"] > 0, "the Al Noor administrator must see their own school"
+    al_noor_ids = {row["student_id"] for row in al_noor["items"]}
+    poc_ids = {row["student_id"] for row in poc["items"]}
+    assert al_noor_ids.isdisjoint(poc_ids), "no student may appear under two institutions"
+
+
+def test_an_administrator_cannot_open_another_institution_student(api: TestClient) -> None:
+    """404, the same answer an invented id gives — the detail page's form of the rule."""
+    al_noor_student = api.get(
+        "/api/v1/insights/students?limit=1", headers=_headers(api, ADMIN)
+    ).json()["items"][0]["student_id"]
+
+    response = api.get(
+        f"/api/v1/insights/students/{al_noor_student}",
+        headers=_headers(api, POC_ADMIN, POC_INSTITUTION_NAME),
+    )
+    assert response.status_code == 404
+    assert response.json()["detail"] == "No such student"
+
+
+def test_the_scope_description_does_not_count_another_institution(api: TestClient) -> None:
+    """ "Whole institution" has to mean one institution, including in what we tell the user."""
+    poc = api.get(
+        "/api/v1/insights/students?limit=500",
+        headers=_headers(api, POC_ADMIN, POC_INSTITUTION_NAME),
+    ).json()
+    assert poc["scope_description"] == "Whole institution"
+    assert all(row["grade"] != "Grade 9" for row in poc["items"]) or poc["rows_returned"] == 0
