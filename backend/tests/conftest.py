@@ -21,6 +21,9 @@ from education_platform.db.session import get_session, reset_engine
 from education_platform.db.url import to_async_url, to_sync_url
 from education_platform.main import app
 from education_platform.modules.materials.seed import seed_approved_materials
+from education_platform.modules.text_to_sql.nodes.load_schema import (
+    _load_filtered_schema_context,
+)
 
 _ = _models
 
@@ -32,6 +35,22 @@ STUDENT_EMAIL = "student@example.com"
 STUDENT_PASSWORD = "password123"
 
 DEFAULT_TEST_DATABASE_URL = "postgresql+asyncpg://education:education@localhost:5432/education_test"
+
+
+@pytest.fixture(autouse=True)
+def _clear_schema_context_cache() -> Iterator[None]:
+    """Not a Postgres fixture — lives here (not in test_text_to_sql_load_schema.py)
+    specifically so it applies file-wide, not just to that one test module. Tests that
+    monkeypatch `load_schema`'s `SCHEMA_CATALOG_PATH` to simulate a missing/malformed
+    file rely on this: `_load_filtered_schema_context` is `@lru_cache`d, and a stale
+    cache from an earlier *successful* read silently masks a later failure test instead
+    of raising — confirmed by deliberately disabling this fixture and watching that
+    exact failure mode reproduce. Any future test that exercises the real
+    text-to-SQL graph (not just this node in isolation) needs the same protection.
+    """
+    _load_filtered_schema_context.cache_clear()
+    yield
+    _load_filtered_schema_context.cache_clear()
 
 
 def _test_database_url() -> str:

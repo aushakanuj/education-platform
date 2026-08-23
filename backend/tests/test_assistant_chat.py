@@ -47,7 +47,6 @@ from education_platform.modules.rag.chunking import TextChunk, content_hash
 from education_platform.modules.rag.models import (
     IngestJob,
     IngestJobStatus,
-    IngestTargetKind,
     KnowledgeDocument,
     KnowledgeDocumentVersion,
     KnowledgeDocumentVersionStatus,
@@ -174,7 +173,7 @@ def test_chat_crud_and_message_without_openrouter(client: TestClient) -> None:
                     "id": str(uuid4()),
                     "label": "Attendance Handbook",
                     "excerpt": "Students must notify the office after three absences.",
-                    "doc_kind": "knowledge_document",
+                    "doc_kind": "knowledge_document_version",
                     "doc_id": str(uuid4()),
                     "distance": 0.1,
                 }
@@ -575,9 +574,9 @@ def test_graph_state_and_tool_contracts() -> None:
     with pytest.raises(ValidationError):
         RetrieveChunksArgs(query="attendance", limit=99)
     with pytest.raises(ValidationError):
-        RetrieveChunksArgs(query="ok", doc_kind="knowledge_document_version")
-    assert RetrieveChunksArgs(query="ok", doc_kind="knowledge_document").doc_kind == (
-        "knowledge_document"
+        RetrieveChunksArgs(query="ok", doc_kind="knowledge_document")
+    assert RetrieveChunksArgs(query="ok", doc_kind="knowledge_document_version").doc_kind == (
+        "knowledge_document_version"
     )
     with pytest.raises(ValidationError):
         RetrieveChunksResult(chunks=[], count=1)
@@ -586,7 +585,7 @@ def test_graph_state_and_tool_contracts() -> None:
         id="c1",
         label="Policy",
         excerpt="Three absences trigger escalation.",
-        doc_kind="knowledge_document",
+        doc_kind="knowledge_document_version",
         doc_id="d1",
         distance=0.2,
     )
@@ -651,8 +650,7 @@ async def test_retrieve_chunks_hydrates_ingested_knowledge_document(
     seeded_db.add(version)
     seeded_db.flush()
     job = IngestJob(
-        target_kind=IngestTargetKind.KNOWLEDGE_DOCUMENT_VERSION,
-        target_id=version.id,
+        knowledge_document_version_id=version.id,
         status=IngestJobStatus.QUEUED,
     )
     seeded_db.add(job)
@@ -689,5 +687,5 @@ async def test_retrieve_chunks_hydrates_ingested_knowledge_document(
     chunk = result["chunks"][0]
     assert chunk["label"] == "Learner Attendance Policy"
     assert "three absences" in chunk["excerpt"].lower()
-    assert chunk["doc_kind"] == "knowledge_document"
+    assert chunk["doc_kind"] == "knowledge_document_version"
     get_settings.cache_clear()
