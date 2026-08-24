@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { Navigate, useParams } from "react-router-dom";
 
-import { getMaterialQuiz, getSubtopicMaterial } from "../../api/materials";
+import { getSubtopicMaterial, getSubtopicQuiz } from "../../api/materials";
 import type { LessonMaterial, QuizMaterial, QuizSummary, TopicNode } from "../../api/types";
 import { Crumbs } from "../../components/Crumbs";
 import { MarkdownContent } from "../../components/MarkdownContent";
@@ -11,7 +11,7 @@ import { findClass, useTeacherClasses } from "../../lib/useTeacherClasses";
 type Tab = "lessons" | "quizzes";
 
 type OpenLesson = { kind: "lesson"; subtopicId: string };
-type OpenQuiz = { kind: "quiz"; slug: string };
+type OpenQuiz = { kind: "quiz"; subtopicId: string };
 type OpenItem = OpenLesson | OpenQuiz;
 
 export function SubjectMaterialsPage() {
@@ -75,13 +75,13 @@ export function SubjectMaterialsPage() {
     }
   }
 
-  async function openQuiz(slug: string) {
-    setOpenItem({ kind: "quiz", slug });
+  async function openQuiz(subtopicId: string) {
+    setOpenItem({ kind: "quiz", subtopicId });
     setPreviewError(null);
     setLesson(null);
     setPreviewLoading(true);
     try {
-      setQuiz(await getMaterialQuiz(slug));
+      setQuiz(await getSubtopicQuiz(subtopicId));
     } catch (err: unknown) {
       setQuiz(null);
       setPreviewError(err instanceof Error ? err.message : "Could not load the quiz.");
@@ -189,7 +189,7 @@ export function SubjectMaterialsPage() {
                 topic={activeTopic}
                 openItem={openItem}
                 onOpenLesson={(id) => void openLesson(id)}
-                onOpenQuiz={(slug) => void openQuiz(slug)}
+                onOpenQuiz={(id) => void openQuiz(id)}
               />
               {previewLoading && (
                 <p className="muted" role="status">
@@ -231,7 +231,7 @@ function TabBody({
   topic: TopicNode;
   openItem: OpenItem | null;
   onOpenLesson: (subtopicId: string) => void;
-  onOpenQuiz: (slug: string) => void;
+  onOpenQuiz: (subtopicId: string) => void;
 }) {
   switch (tab) {
     case "lessons":
@@ -262,13 +262,13 @@ function TabBody({
         <ul className="teacher-item-list">
           {topic.subtopics.map((subtopic) => {
             if (!subtopic.quiz?.available || !subtopic.quiz.id) return null;
-            const selected = openItem?.kind === "quiz" && openItem.slug === subtopic.slug;
+            const selected = openItem?.kind === "quiz" && openItem.subtopicId === subtopic.id;
             return (
               <li key={subtopic.quiz.id}>
                 <button
                   type="button"
                   className={`teacher-item-list__row${selected ? " is-active" : ""}`}
-                  onClick={() => onOpenQuiz(subtopic.slug)}
+                  onClick={() => onOpenQuiz(subtopic.id)}
                 >
                   <span>
                     {subtopic.quiz.title ?? subtopic.title}
