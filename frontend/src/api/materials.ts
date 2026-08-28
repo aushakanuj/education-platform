@@ -15,6 +15,11 @@ export async function getSubtopicMaterial(subtopicId: string): Promise<LessonMat
   return apiRequest<LessonMaterial>(`/subtopics/${encodeURIComponent(subtopicId)}/material`);
 }
 
+export async function getSubtopicQuiz(subtopicId: string): Promise<QuizMaterial> {
+  return apiRequest<QuizMaterial>(`/subtopics/${encodeURIComponent(subtopicId)}/quiz`);
+}
+
+/** Legacy slug path — prefer getSubtopicQuiz; slugs collide across subjects/grades. */
 export async function getMaterialQuiz(topicId: string): Promise<QuizMaterial> {
   return apiRequest<QuizMaterial>(`/materials/${encodeURIComponent(topicId)}/quiz`);
 }

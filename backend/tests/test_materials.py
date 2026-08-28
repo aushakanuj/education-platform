@@ -250,6 +250,7 @@ def test_teacher_directory_and_other_subject_404(client: TestClient, clean_db: s
         english_subtopic = _alnoor_subtopic(session, subject_code="ENG", grade_name="Grade 8")
         taught_subtopic = _alnoor_subtopic(session, subject_code="MATH", grade_name="Grade 8")
         english_id = english_subtopic.id
+        taught_id = taught_subtopic.id
         taught_slug = taught_subtopic.slug
     engine.dispose()
 
@@ -264,6 +265,84 @@ def test_teacher_directory_and_other_subject_404(client: TestClient, clean_db: s
     other = client.get(f"/api/v1/subtopics/{english_id}/material", headers=headers)
     assert other.status_code == 404
 
+    # Slug is unique inside Meera's Math+Science scope, so the legacy path still works.
     taught_quiz = client.get(f"/api/v1/materials/{taught_slug}/quiz", headers=headers)
     assert taught_quiz.status_code == 200, taught_quiz.text
     assert "correct_option_label" not in str(taught_quiz.json())
+
+    by_id = client.get(f"/api/v1/subtopics/{taught_id}/quiz", headers=headers)
+    assert by_id.status_code == 200, by_id.text
+    assert by_id.json()["id"] == taught_quiz.json()["id"]
+
+
+def test_ambiguous_slug_404_and_subtopic_quiz_is_precise(client: TestClient, clean_db: str) -> None:
+    """English and Arabic both use slug ``grammar``; picking the first match was wrong."""
+    engine = create_engine(to_sync_url(clean_db), pool_pre_ping=True)
+    with Session(engine) as session:
+        generate_school(session, ALNOOR_SPEC)
+        session.commit()
+        eng_grammar = session.scalar(
+            select(Subtopic)
+            .join(Topic, Topic.id == Subtopic.topic_id)
+            .join(
+                GradeSubjectOffering,
+                GradeSubjectOffering.id == Topic.grade_subject_offering_id,
+            )
+            .join(Subject, Subject.id == GradeSubjectOffering.subject_id)
+            .join(PeriodGrade, PeriodGrade.id == GradeSubjectOffering.period_grade_id)
+            .join(Grade, Grade.id == PeriodGrade.grade_id)
+            .join(AcademicPeriod, AcademicPeriod.id == PeriodGrade.academic_period_id)
+            .join(Institution, Institution.id == AcademicPeriod.institution_id)
+            .where(
+                Institution.name == ALNOOR_SPEC.institution_name,
+                Subject.code == "ENG",
+                Grade.name == "Grade 8",
+                Subtopic.slug == "grammar",
+            )
+        )
+        arb_grammar = session.scalar(
+            select(Subtopic)
+            .join(Topic, Topic.id == Subtopic.topic_id)
+            .join(
+                GradeSubjectOffering,
+                GradeSubjectOffering.id == Topic.grade_subject_offering_id,
+            )
+            .join(Subject, Subject.id == GradeSubjectOffering.subject_id)
+            .join(PeriodGrade, PeriodGrade.id == GradeSubjectOffering.period_grade_id)
+            .join(Grade, Grade.id == PeriodGrade.grade_id)
+            .join(AcademicPeriod, AcademicPeriod.id == PeriodGrade.academic_period_id)
+            .join(Institution, Institution.id == AcademicPeriod.institution_id)
+            .where(
+                Institution.name == ALNOOR_SPEC.institution_name,
+                Subject.code == "ARB",
+                Grade.name == "Grade 8",
+                Subtopic.slug == "grammar",
+            )
+        )
+        assert eng_grammar is not None and arb_grammar is not None
+        assert eng_grammar.id != arb_grammar.id
+        eng_grammar_id = eng_grammar.id
+        arb_grammar_id = arb_grammar.id
+    engine.dispose()
+
+    # Grade 8 students are enrolled in every subject, so both grammar offerings are in scope.
+    # With ALNOOR_SPEC sizing, students 1–12 are Grades 6–7; student13 is the first Grade 8.
+    headers = _login(client, "student13@alnoor.school", "demo1234", ALNOOR_SPEC.institution_name)
+    ambiguous = client.get("/api/v1/materials/grammar/quiz", headers=headers)
+    assert ambiguous.status_code == 404, ambiguous.text
+
+    eng_quiz = client.get(f"/api/v1/subtopics/{eng_grammar_id}/quiz", headers=headers)
+    arb_quiz = client.get(f"/api/v1/subtopics/{arb_grammar_id}/quiz", headers=headers)
+    assert eng_quiz.status_code == 200, eng_quiz.text
+    assert arb_quiz.status_code == 200, arb_quiz.text
+    assert eng_quiz.json()["id"] != arb_quiz.json()["id"]
+    assert "Grammar" in eng_quiz.json()["title"]
+    assert "Grammar" in arb_quiz.json()["title"]
+    assert "correct_option_label" not in str(eng_quiz.json())
+    assert "correct_option_label" not in str(arb_quiz.json())
+
+    admin = _login(
+        client, "fatima.almansouri@alnoor.school", "demo1234", ALNOOR_SPEC.institution_name
+    )
+    assert client.get("/api/v1/materials/grammar/quiz", headers=admin).status_code == 404
+    assert client.get(f"/api/v1/subtopics/{eng_grammar_id}/quiz", headers=admin).status_code == 200
