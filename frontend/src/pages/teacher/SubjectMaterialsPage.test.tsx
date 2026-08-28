@@ -10,7 +10,7 @@ import type { LearningDirectory, LessonMaterial, QuizMaterial, QuizSummary } fro
 const fetchStudentInsights = vi.fn();
 const fetchLearningDirectory = vi.fn();
 const getSubtopicMaterial = vi.fn();
-const getMaterialQuiz = vi.fn();
+const getSubtopicQuiz = vi.fn();
 const startAttempt = vi.fn();
 
 vi.mock("../../api/insights", () => ({
@@ -20,7 +20,7 @@ vi.mock("../../api/insights", () => ({
 vi.mock("../../api/materials", () => ({
   fetchLearningDirectory: () => fetchLearningDirectory(),
   getSubtopicMaterial: (...args: unknown[]) => getSubtopicMaterial(...args),
-  getMaterialQuiz: (...args: unknown[]) => getMaterialQuiz(...args),
+  getSubtopicQuiz: (...args: unknown[]) => getSubtopicQuiz(...args),
 }));
 
 vi.mock("../../api/attempts", () => ({
@@ -169,12 +169,12 @@ describe("SubjectMaterialsPage", () => {
     fetchStudentInsights.mockReset();
     fetchLearningDirectory.mockReset();
     getSubtopicMaterial.mockReset();
-    getMaterialQuiz.mockReset();
+    getSubtopicQuiz.mockReset();
     startAttempt.mockReset();
     fetchStudentInsights.mockResolvedValue(insightPage());
     fetchLearningDirectory.mockResolvedValue(directory());
     getSubtopicMaterial.mockResolvedValue(lesson());
-    getMaterialQuiz.mockResolvedValue(quizMaterial());
+    getSubtopicQuiz.mockResolvedValue(quizMaterial());
   });
 
   it("loads live directory units instead of fixtures", async () => {
@@ -203,7 +203,7 @@ describe("SubjectMaterialsPage", () => {
     await user.click(screen.getByRole("tab", { name: "Quizzes" }));
     await user.click(screen.getByRole("button", { name: /Fractions check/ }));
 
-    expect(getMaterialQuiz).toHaveBeenCalledWith("fractions");
+    expect(getSubtopicQuiz).toHaveBeenCalledWith("st-1");
     expect(await screen.findByText("What is 1/2 + 1/2?")).toBeInTheDocument();
     expect(screen.getByText("1")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /submit/i })).not.toBeInTheDocument();
