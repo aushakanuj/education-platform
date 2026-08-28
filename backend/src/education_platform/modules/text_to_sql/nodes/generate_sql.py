@@ -24,6 +24,21 @@ again, that re-entry still consumes one of the 3 retries, same as a validation
 rejection would. Exempting LLM failures from the retry budget would need a
 graph.py/validate_sql.py change (a separate signal the routing checks), which is out
 of this node's scope.
+
+Self-reference sentinel (`'__CURRENT_USER_ID__'`): for the tables apply_role_scope
+scopes down to *exactly* the asking user's own rows (student_360, quiz_attempts, etc.),
+the model never needs to write a self-filter at all — apply_role_scope adds it silently.
+But for a table it only institution-pins (teaching_assignments, users, ...), a question
+like "what subject do I teach" genuinely needs a `teacher_user_id = <me>` filter that
+only the model can write, and this node never gives the model any real identity value to
+use (no user_id, no name, no email — by design, matching the rest of this pipeline's
+identity-sourcing discipline). Observed failure mode without this: the model fabricates
+a placeholder literal (e.g. `'Your Name Here'`) that matches nothing, producing a
+confidently-wrong empty answer for a real, answerable question. The system prompt below
+teaches one fixed, literal token instead (never a name/guess/subquery); apply_role_scope
+resolves it to the real `state["user_id"]` before execution — the same node, and the
+same "identity only ever comes from state, never from the model" discipline, that
+already builds every other identity-keyed predicate in this pipeline.
 """
 
 from __future__ import annotations
@@ -53,6 +68,19 @@ the question asks. Row-level access enforcement for that role is applied in a \
 separate step after your query is generated; you do not need to hand-roll \
 access-control filtering yourself, but do not drop a WHERE clause the question itself \
 asks for.
+- If the question needs to compare a column against the identity of the person asking \
+(e.g. "what subject do I teach" needs teacher_user_id = <the asking teacher>, "what's \
+my email" needs id = <the asking user>), you do not know that person's real ID, name, \
+or email — never invent, guess, or leave blank a value for this. Instead write the \
+exact literal string '__CURRENT_USER_ID__' (including the quotes and underscores) as \
+the comparison value; a separate step after generation resolves it to the asking \
+user's real, verified identity. Example: a teacher asking "what subject do I teach" \
+becomes `SELECT s.name FROM teaching_assignments ta JOIN grade_subject_offerings gso \
+ON gso.id = ta.grade_subject_offering_id JOIN subjects s ON s.id = gso.subject_id \
+WHERE ta.teacher_user_id = '__CURRENT_USER_ID__'`. Only use this for a genuine \
+self-reference to the asking user — never for any other person the question names or \
+implies (a specific student, another teacher), and never when the question doesn't \
+need it at all.
 - Return ONLY the SQL query, in a single ```sql fenced code block, with no other \
 commentary before or after it."""
 

@@ -46,7 +46,29 @@ ROLE_VIOLATION: Final[str] = "ROLE_VIOLATION"
 user_role isn't allowed to run or see it — a policy rejection, not a correctness one.
 Raised by apply_role_scope."""
 
-_ERROR_CATEGORIES: Final[frozenset[str]] = frozenset({LLM_ERROR, VALIDATION_ERROR, ROLE_VIOLATION})
+EXECUTION_ERROR: Final[str] = "EXECUTION_ERROR"
+"""The SQL was valid (Task 5) and authorized (Task 6), but the database itself failed to
+run it — a timeout, a connection failure, a constraint violation the earlier checks
+couldn't have predicted. Not something generate_sql can fix by rewriting SQL, so this
+routes to honest_refusal like the other two, never back into the retry loop. The detail
+attached here is always a generic, user-safe message — never the raw driver/Postgres
+error text, which can carry schema/constraint names or query fragments; the real detail
+goes to logging and state["audit_entry"] instead. Raised by execute_sql."""
+
+AUDIT_ERROR: Final[str] = "AUDIT_ERROR"
+"""A real answer was legitimately produced, but the audit record for it could not be
+persisted (a DB error/connection issue in audit_log itself, not in anything upstream).
+Per this project's charter, role-based access and the audit trail are equally committed
+guarantees, not one scoped down for the other's convenience — so this is a fail-closed
+category: audit_log overwrites what would have been a served answer with a refusal rather
+than let one reach the caller with no corresponding audit record. Raised by audit_log,
+and only by audit_log; every other category above means no trustworthy answer existed to
+protect in the first place, this one means an answer existed and was deliberately
+withheld anyway."""
+
+_ERROR_CATEGORIES: Final[frozenset[str]] = frozenset(
+    {LLM_ERROR, VALIDATION_ERROR, ROLE_VIOLATION, EXECUTION_ERROR, AUDIT_ERROR}
+)
 
 
 def format_error(category: str, detail: str) -> str:

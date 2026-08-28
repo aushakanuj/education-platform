@@ -1,21 +1,32 @@
 """Text-to-SQL LangGraph skeleton: structure and routing only, no node logic yet.
 
-Pipeline shape:
+Happy path:
 
-    load_schema -> generate_sql -> validate_sql
-         |              ^                | valid -> apply_role_scope -> execute_sql -> sanity_check
-         | load failed  | retry          | invalid, retries exhausted        |                |
-         +-------------------------------+-> honest_refusal <---------------+  suspicious/normal
-                                                |          role violation                       |
-                                                +-------------------> compose_answer <-----------+
-                                                                            |
-                                                                        audit_log -> END
+    load_schema -> generate_sql -> validate_sql -> apply_role_scope -> execute_sql
+        -> sanity_check -> compose_answer -> audit_log -> END
+
+honest_refusal is reached from four independent failure branches, none of which loop back
+into generate_sql's retry path: load_schema's "error", validate_sql's "refuse" once
+retries are exhausted, apply_role_scope's ROLE_VIOLATION, and execute_sql's
+EXECUTION_ERROR. Only validate_sql's own "retry" edge goes back to generate_sql, and only
+while retry_count < MAX_RETRIES — see `_route_after_validate` and `MAX_RETRIES`.
+honest_refusal itself then also feeds into audit_log, same as compose_answer, so refusals
+get logged too.
 
 Most nodes in `modules/text_to_sql/nodes/` are still pass-through placeholders (see that
-package's docstring); `load_schema`, `generate_sql`, `validate_sql`, and `apply_role_scope`
-are implemented, so the routing functions for those stages inspect real signals. The rest
+package's docstring); `load_schema`, `generate_sql`, `validate_sql`, `apply_role_scope`,
+`execute_sql`, `sanity_check`, `compose_answer`, `audit_log`, and `honest_refusal` are
+implemented, so the routing functions for those stages inspect real signals. The rest
 fall back to fixed placeholder decisions, each flagged with a TODO for the follow-up task
 that implements the remaining node logic.
+
+Note on `honest_refusal` and `audit_log`: `audit_log`'s own fail-closed path (Task 10,
+`AUDIT_ERROR`) does not route back through `honest_refusal` — `audit_log` runs strictly
+after it on every path (see the edges below: `honest_refusal -> audit_log -> END`,
+unconditional), so it produces its own refusal text directly rather than looping back.
+`honest_refusal` still formats a message for `AUDIT_ERROR` as one of its five categories,
+for defensive completeness and direct-invocation testing, but that branch is not
+reachable through the compiled graph today.
 """
 
 from __future__ import annotations
@@ -62,22 +73,23 @@ def _route_after_apply_role_scope(state: TextToSQLState) -> Literal["ok", "refus
     return "refuse" if state.get("error") else "ok"
 
 
+def _route_after_execute(state: TextToSQLState) -> Literal["ok", "refuse"]:
+    # execute_sql sets state["error"] (EXECUTION_ERROR) on a genuine DB-level failure —
+    # timeout, connection failure, unexpected constraint violation. The SQL was already
+    # proven valid and authorized by the time it got here, so generate_sql rewriting it
+    # again can't fix a database failure; this goes straight to honest_refusal, same as
+    # a validate_sql/apply_role_scope rejection, never back into the retry loop.
+    return "refuse" if state.get("error") else "ok"
+
+
 def _route_after_sanity_check(state: TextToSQLState) -> Literal["suspicious", "normal"]:
-    # TODO(sanity_check): once sanity_check actually inspects query_result for
-    # anomalies, route off that signal instead of defaulting to "normal".
-    return "suspicious" if state.get("error") else "normal"
-
-
-async def _mark_confidence_low(state: TextToSQLState) -> TextToSQLState:
-    # LangGraph conditional-edge routers can only select a destination node, not also
-    # update state — so the "with low/high confidence" half of the sanity_check
-    # routing needs a tiny node of its own to actually write state["confidence"].
-    # This is graph-wiring glue, not one of the nine domain nodes.
-    return {**state, "confidence": "low"}
-
-
-async def _mark_confidence_high(state: TextToSQLState) -> TextToSQLState:
-    return {**state, "confidence": "high"}
+    # sanity_check (Task 8) is the sole owner of state["confidence"] — it's fully decided
+    # there, not by this router or by which node runs next. "medium" and "low" both route
+    # via "suspicious": nothing downstream currently behaves differently between them
+    # (compose_answer reads state["confidence"] directly for its own phrasing, not the
+    # edge that was taken), so collapsing them here loses no information. See
+    # sanity_check.py's module docstring for the full reasoning.
+    return "normal" if state.get("confidence") == "high" else "suspicious"
 
 
 def build_text_to_sql_graph() -> CompiledStateGraph[TextToSQLState, None, TextToSQLState]:
@@ -92,8 +104,6 @@ def build_text_to_sql_graph() -> CompiledStateGraph[TextToSQLState, None, TextTo
     graph.add_node("compose_answer", compose_answer)
     graph.add_node("audit_log", audit_log)
     graph.add_node("honest_refusal", honest_refusal)
-    graph.add_node("_mark_confidence_low", _mark_confidence_low)
-    graph.add_node("_mark_confidence_high", _mark_confidence_high)
 
     graph.set_entry_point("load_schema")
     graph.add_conditional_edges(
@@ -124,18 +134,28 @@ def build_text_to_sql_graph() -> CompiledStateGraph[TextToSQLState, None, TextTo
             "refuse": "honest_refusal",
         },
     )
-    graph.add_edge("execute_sql", "sanity_check")
+    graph.add_conditional_edges(
+        "execute_sql",
+        _route_after_execute,
+        {
+            "ok": "sanity_check",
+            "refuse": "honest_refusal",
+        },
+    )
 
+    # Both keys route to the same node: sanity_check already decided state["confidence"]
+    # ("medium" and "low" both take the "suspicious" edge — see _route_after_sanity_check).
+    # Kept as a conditional edge with two named keys, rather than a single add_edge,
+    # purely for graph-shape/trace readability — there is deliberately no glue node here
+    # anymore to set confidence, since sanity_check already did.
     graph.add_conditional_edges(
         "sanity_check",
         _route_after_sanity_check,
         {
-            "suspicious": "_mark_confidence_low",
-            "normal": "_mark_confidence_high",
+            "suspicious": "compose_answer",
+            "normal": "compose_answer",
         },
     )
-    graph.add_edge("_mark_confidence_low", "compose_answer")
-    graph.add_edge("_mark_confidence_high", "compose_answer")
 
     graph.add_edge("compose_answer", "audit_log")
     graph.add_edge("honest_refusal", "audit_log")

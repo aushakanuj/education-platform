@@ -1,17 +1,27 @@
 """Unit tests for the text-to-SQL load_schema node's excluded-content filter.
 
-No database needed — load_schema is pure file I/O plus string processing.
+No database needed for load_schema itself — it's pure file I/O plus string processing —
+with one exception: test_load_schema_failure_routes_to_honest_refusal_via_graph runs the
+full compiled graph, and audit_log (Task 10) now runs unconditionally at the end of every
+full graph invocation regardless of which path was taken, so that one test needs Postgres
+via the usual `clean_db` fixture plus a real seeded institution/user.
 """
 
 from __future__ import annotations
 
 import re
 import sys
+from collections.abc import Iterator
 from pathlib import Path
 from typing import Protocol, cast
+from uuid import UUID
 
 import pytest
+from sqlalchemy import create_engine
+from sqlalchemy.orm import Session
 
+from education_platform.db.url import to_sync_url
+from education_platform.modules.auth.models import Institution, User
 from education_platform.modules.text_to_sql.graph import build_text_to_sql_graph
 from education_platform.modules.text_to_sql.nodes.load_schema import (
     EXCLUDED_TABLES,
@@ -41,6 +51,30 @@ class _LoadSchemaModule(Protocol):
 _MODULE = cast(
     _LoadSchemaModule, sys.modules["education_platform.modules.text_to_sql.nodes.load_schema"]
 )
+
+
+@pytest.fixture()
+def seeded_admin_user(clean_db: str) -> Iterator[tuple[UUID, UUID]]:
+    """(institution_id, user_id) real rows -- needed only by the one full-graph test in
+    this file, now that audit_log writes a real AuditEvent (FK-constrained to both) at
+    the end of every invocation.
+    """
+    engine = create_engine(to_sync_url(clean_db), pool_pre_ping=True)
+    with Session(engine) as session:
+        inst = Institution(name="Load-Schema Test School", timezone="UTC")
+        session.add(inst)
+        session.flush()
+        user = User(
+            institution_id=inst.id,
+            email="admin@load-schema-test.school",
+            full_name="Admin",
+            password_hash="unused",
+        )
+        session.add(user)
+        session.commit()
+        ids = (inst.id, user.id)
+    engine.dispose()
+    yield ids
 
 
 def _raw_catalog() -> str:
@@ -289,15 +323,19 @@ def test_validate_filtered_raises_if_a_required_table_goes_missing() -> None:
         _validate_filtered(mutated)
 
 
-async def test_load_schema_failure_routes_to_honest_refusal_via_graph(tmp_path: Path) -> None:
+async def test_load_schema_failure_routes_to_honest_refusal_via_graph(
+    tmp_path: Path, seeded_admin_user: tuple[UUID, UUID]
+) -> None:
+    institution_id, user_id = seeded_admin_user
     original_path = _MODULE.SCHEMA_CATALOG_PATH
     _MODULE.SCHEMA_CATALOG_PATH = tmp_path / "missing.md"
     try:
         graph = build_text_to_sql_graph()
         initial: TextToSQLState = {
             "question": "q",
-            "user_id": "u1",
+            "user_id": str(user_id),
             "user_role": "admin",
+            "institution_id": str(institution_id),
             "schema_context": "",
             "generated_sql": None,
             "validated_sql": None,
@@ -316,7 +354,9 @@ async def test_load_schema_failure_routes_to_honest_refusal_via_graph(tmp_path: 
         _load_filtered_schema_context.cache_clear()
 
     assert result["error"] is not None
-    # generate_sql/validate_sql/sanity_check never ran: schema_context stayed empty and
-    # confidence (only ever set by the sanity_check branch) was never touched.
+    # generate_sql/validate_sql/sanity_check never ran: schema_context stayed empty.
     assert result["schema_context"] == ""
-    assert result["confidence"] is None
+    # sanity_check itself never touched confidence (it never ran on this failure path),
+    # but honest_refusal (Task 11) sets it to "low" whenever it's still unset by the time
+    # a refusal is produced — the correct, spec'd behavior, not a bug.
+    assert result["confidence"] == "low"

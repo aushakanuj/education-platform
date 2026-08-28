@@ -43,13 +43,84 @@ cheaper than full alias resolution, and safe here specifically because the schem
 confirms both names are unique to their one table across the whole schema, so any
 occurrence, from any alias, is unambiguous and always worth rejecting.
 
+Table coverage (fail-closed allowlist, not a blocklist): a live investigation found that a
+question routed entirely through `student_subject_enrollments`/`grade_subject_offerings`/
+`subjects`/`period_grades` — none of which were in this node's original 5-table sensitive
+list — returned real, unscoped, institution-wide data (a school-wide enrollment count, not
+one teacher's own students) with no warning. The original design ("scope only these named
+tables, everything else passes through untouched") makes every future addition to
+`load_schema.REQUIRED_TABLES` exempt by default unless someone remembers to also add it
+here. This is inverted: every table `validate_sql` can hand back (i.e. every name in
+`REQUIRED_TABLES` other than the always-blocked `question_answer_keys`) must be classified
+into exactly one of `STUDENT_SCOPED_TABLES` or `INSTITUTION_SCOPED_TABLES` below, or the
+query is refused outright (`_find_unscopable_table_reference`) — a table skips scoping only
+because someone deliberately, reviewably placed it on one of these two lists, never because
+nobody thought to.
+
+`STUDENT_SCOPED_TABLES` carries rows scoped to an individual student — every SELECT scope
+that touches one gets the institution pin *and* the role's self/taught row predicate (a
+student sees only their own rows; a teacher sees rows for the (offering, section) pairs
+they teach). `INSTITUTION_SCOPED_TABLES` is institution-boundary data that isn't
+individually student- or teacher-restricted by nature (a grade name, a subject list, the
+institution's own row) but does still belong to exactly one institution and must not leak
+across tenants — every SELECT scope that touches one gets the institution pin only, for
+every role including admin.
+
+Explicitly *not* covered by either list, and therefore refused rather than silently passed
+through: the curriculum-content tables (`topics`, `subtopics`, `learning_outcomes`,
+`source_materials`, `source_material_versions`, `source_chunks`, `questions`,
+`question_versions`, `question_options`, `question_outcome_tags`, `common_mastery_quizzes`,
+`quiz_versions`, `quiz_items`, `quiz_material_bindings`, `quiz_releases`). A live check
+against this database confirmed these *are* institution-partitioned in practice (a shared
+top-level curriculum is the eventual design intent per the module README, but today each
+institution's `grade_subject_offerings` hangs its own `topics`, so the two seeded
+institutions have disjoint topic/question sets) — but each one's institution path is a
+3-to-6-hop join chain distinct per table, and reviewing all of them is real, separate work
+deferred as a known, documented, lower-severity gap (curriculum content, not personal
+data) rather than guessed at here. Refusing these outright is a deliberate, temporary
+regression in what the assistant can answer, preferred over resurrecting the exact
+silently-unscoped behavior this fix exists to close.
+
 `query_source` branch (Step 4): a value of `"template"` skips the AST rewrite entirely (a
 template's SQL already has the scoping logic — row *and* institution — hand-written into it
 by its author) and just records identity in the audit entry. There is no template caller
 yet — this is a clean no-op path for a future task, not dead code. The column blocklist
 above still runs unconditionally regardless of this branch, per its own "applies ...
 regardless of query_source" rule — a template author could still make the same mistake a
-generated query could.
+generated query could. The fail-closed table-coverage check below is likewise skipped for
+templates, on the same reasoning: their scoping (or deliberate lack of it) is hand-reviewed
+by the template's own author, not this node.
+
+Self-reference sentinel (`'__CURRENT_USER_ID__'`): `STUDENT_SCOPED_TABLES` never needs
+this — apply_role_scope already narrows those to the asking user's own rows silently, so
+the model never has to write a self-filter for them at all. But `INSTITUTION_SCOPED_TABLES`
+only gets the institution pin (deliberately — see that constant's own docstring), so a
+question like "what subject do I teach" (teaching_assignments) or "what's my email"
+(users) genuinely needs a `<owner column> = <the asking user>` filter that only the model
+can write, and generate_sql never gives it a real identity value to use. Left
+unaddressed, the model either fabricates a placeholder that matches nothing (the observed
+failure: a literal like `'Your Name Here'`) or drops the self-filter entirely, over-
+returning institution-wide data. generate_sql's prompt instead teaches one fixed, literal
+token; `_resolve_current_user_sentinel` finds and replaces it with the real
+`state["user_id"]` here, before any row/institution scoping runs — the same node, and
+the same identity-sourcing discipline (state only, never the question or model output),
+already used for every other identity-keyed predicate in this file. This runs for every
+role, not just teacher/student: nothing about self-reference is role-specific, and this
+node is not the layer that decides whether a role should be allowed to ask about itself.
+
+If the model needs self-reference but doesn't use the token — a still-fabricated literal,
+or a subquery guessing at identity — this is deliberately *not* caught by a dedicated
+rejection or pattern-matching check here. Any such check would be pattern-matching an
+open-ended set of possible fabrications (the model could invent any string, not just the
+one literal observed so far), which is exactly the kind of fragile, easily-incomplete text
+heuristic this pipeline already avoids leaning on (see sanity_check.py's own two
+heuristic checks, each explicitly labeled as a guess, never a certainty). The residual
+failure mode is also a data-quality problem, not a security one: apply_role_scope's own
+institution/row predicates below are ANDed on regardless of what the model's own WHERE
+clause says, so a still-wrong self-reference can only ever produce a wrong *answer*
+(most often an empty one), never a widened one — and sanity_check's existing
+`zero_rows`/`zero_valued_aggregate` checks already catch that exact symptom and downgrade
+confidence accordingly, with no new mechanism needed.
 """
 
 from __future__ import annotations
@@ -66,16 +137,42 @@ from education_platform.modules.text_to_sql.state import (
 )
 
 # Tables whose rows carry information scoped to an individual student — every SELECT
-# scope (outer query, CTE, or nested subquery) that touches one of these gets a row
-# predicate ANDed on, keyed off state["user_id"]/state["user_role"]. Named and reviewable
-# here rather than inferred from, say, "has a student_id column" at runtime.
-SCOPE_SENSITIVE_TABLES: Final[frozenset[str]] = frozenset(
+# scope (outer query, CTE, or nested subquery) that touches one of these gets the
+# institution pin *and* a self/taught row predicate ANDed on, keyed off
+# state["user_id"]/state["user_role"]. Named and reviewable here rather than inferred
+# from, say, "has a student_id column" at runtime.
+STUDENT_SCOPED_TABLES: Final[frozenset[str]] = frozenset(
     {
         "student_360",
         "student_profiles",
         "quiz_attempts",
         "attendance_records",
         "student_material_progress",
+        "student_subject_enrollments",
+        "student_grade_enrollments",
+        "attempt_answers",
+    }
+)
+
+# Tables that belong to exactly one institution but aren't individually student- or
+# teacher-restricted by nature (a grade's name, a subject list, the institution's own
+# row) — every SELECT scope that touches one of these gets the institution pin only, for
+# every role including admin. See the module docstring's "Table coverage" section for why
+# this list exists (as the allowlist half of a fail-closed inversion) and why the
+# curriculum-content tables below are deliberately on neither list yet.
+INSTITUTION_SCOPED_TABLES: Final[frozenset[str]] = frozenset(
+    {
+        "institutions",
+        "users",
+        "user_roles",
+        "refresh_sessions",
+        "grades",
+        "subjects",
+        "academic_periods",
+        "period_grades",
+        "sections",
+        "grade_subject_offerings",
+        "teaching_assignments",
     }
 )
 
@@ -92,6 +189,33 @@ _BLOCKED_TABLE_NAMES: Final[frozenset[str]] = frozenset({"question_answer_keys"}
 # question crafted to make generate_sql alias a real table `ta`/`sse`/`sge`/`sp` can never
 # shadow — and thereby defeat — the injected predicate's own internal correlation.
 _ALIAS_PREFIX: Final[str] = "__ars_"
+
+
+# The fixed, literal self-reference token generate_sql's prompt teaches the model to
+# write verbatim whenever a question needs to compare a column against the asking
+# user's own identity (e.g. `teacher_user_id = '__CURRENT_USER_ID__'`) — see
+# generate_sql.py's own docstring/system prompt for why this exists. An ordinary string
+# literal, not SQL bind-parameter syntax (`:name`): validate_sql and sqlglot need no
+# special-casing to accept it, it round-trips through ordinary parsing exactly like any
+# other string value the model might have written, and it's resolved here — the one
+# place in this pipeline that already builds every other identity-keyed literal from
+# state["user_id"] — via the same find-then-replace mechanism `_apply_row_scoping` uses
+# for its own injected predicates.
+_CURRENT_USER_SENTINEL: Final[str] = "__CURRENT_USER_ID__"
+
+
+def _resolve_current_user_sentinel(tree: exp.Expr, user_id: str) -> None:
+    # Materialize the matching literal nodes to a list *before* replacing any of them:
+    # `find_all` is a live traversal, and `Literal.replace()` swaps a node in place —
+    # exactly the mutate-while-iterating hazard `_apply_row_scoping`'s own docstring
+    # warns about, here on exp.Literal instead of exp.Select.
+    targets = [
+        literal
+        for literal in tree.find_all(exp.Literal)
+        if literal.is_string and literal.this == _CURRENT_USER_SENTINEL
+    ]
+    for literal in targets:
+        literal.replace(exp.Literal.string(user_id))
 
 
 def _find_blocklist_violation(tree: exp.Expr) -> str | None:
@@ -145,22 +269,49 @@ def _direct_tables(select_node: exp.Select) -> list[exp.Table]:
     return tables
 
 
-def _sensitive_table_refs(
+def _scoped_table_refs(
     select_node: exp.Select, excluded_aliases: set[str]
 ) -> list[tuple[str, str]]:
-    """(alias-or-name, canonical sensitive table name) for each sensitive table this
-    select scope directly references.
+    """(alias-or-name, canonical table name) for each table this select scope directly
+    references that is on `STUDENT_SCOPED_TABLES` or `INSTITUTION_SCOPED_TABLES`. Which of
+    the two a name belongs to is re-derived by the caller (`_apply_row_scoping`) rather
+    than tagged here, since the two tiers dispatch to different predicate builders below.
     """
     refs: list[tuple[str, str]] = []
     for table_node in _direct_tables(select_node):
         name = table_node.name
         if name.lower() in excluded_aliases:
             continue  # a reference to a CTE/derived table by name, not a real table
-        if name.lower() not in SCOPE_SENSITIVE_TABLES:
+        if name.lower() not in STUDENT_SCOPED_TABLES and name.lower() not in (
+            INSTITUTION_SCOPED_TABLES
+        ):
             continue
         alias = table_node.alias or table_node.name
         refs.append((alias, name.lower()))
     return refs
+
+
+def _find_unscopable_table_reference(tree: exp.Expr, excluded_aliases: set[str]) -> str | None:
+    """A table this query directly references that is on neither `STUDENT_SCOPED_TABLES`
+    nor `INSTITUTION_SCOPED_TABLES` — i.e. one `validate_sql` allowed through (it's in
+    `load_schema.REQUIRED_TABLES`) but that nobody has yet reviewed and classified for
+    role-based scoping here. Fail closed: refuse the query rather than let it pass through
+    unscoped, which is exactly the gap this rewrite exists to close. See the module
+    docstring's "Table coverage" section for the current list of deferred tables this
+    surfaces for (curriculum content, not personal data).
+    """
+    for select_node in tree.find_all(exp.Select):
+        for table_node in _direct_tables(select_node):
+            name = table_node.name.lower()
+            if name in excluded_aliases:
+                continue
+            if name in STUDENT_SCOPED_TABLES or name in INSTITUTION_SCOPED_TABLES:
+                continue
+            return (
+                f"table `{table_node.name}` is not yet reviewed for role-based scoping "
+                "and cannot be queried by the text-to-SQL assistant"
+            )
+    return None
 
 
 def _self_student_subquery(user_id_literal: str) -> str:
@@ -207,10 +358,39 @@ def _taught_via_enrollment_exists(user_id_literal: str, enrollment_col: str) -> 
     )
 
 
+def _taught_period_grade_exists(
+    user_id_literal: str, period_grade_col: str, section_col: str
+) -> str:
+    """A teacher "teaches" a `student_grade_enrollments` row if any of their teaching
+    assignments' offering belongs to that row's `period_grade_id` — one level up from
+    `_taught_offering_exists`, which matches a specific offering rather than the grade as
+    a whole, since `student_grade_enrollments` predates subject enrollment. This is
+    deliberately coarser than the subject-level tables: `student_grade_enrollments` has
+    no subject dimension of its own, so an all-sections (`section_id IS NULL`) grant for
+    *any* subject taught in that grade correctly reaches every student's grade-level row
+    in that grade — not only the students of that one subject.
+    """
+    p = _ALIAS_PREFIX
+    return (
+        f"EXISTS (SELECT 1 FROM teaching_assignments {p}ta "
+        f"JOIN grade_subject_offerings {p}gso ON {p}gso.id = {p}ta.grade_subject_offering_id "
+        f"WHERE {p}ta.teacher_user_id = {user_id_literal} "
+        f"AND {p}ta.status = 'active' "
+        f"AND {p}gso.period_grade_id = {period_grade_col} "
+        f"AND ({p}ta.section_id IS NULL OR {p}ta.section_id = {section_col}))"
+    )
+
+
 def _self_predicate_sql(table: str, alias: str, user_id_literal: str) -> str:
     if table == "student_profiles":
         return f"{alias}.user_id = {user_id_literal}"
-    if table in ("student_360", "quiz_attempts", "attendance_records"):
+    if table in (
+        "student_360",
+        "quiz_attempts",
+        "attendance_records",
+        "student_subject_enrollments",
+        "student_grade_enrollments",
+    ):
         return f"{alias}.student_id IN {_self_student_subquery(user_id_literal)}"
     if table == "student_material_progress":
         return (
@@ -218,10 +398,16 @@ def _self_predicate_sql(table: str, alias: str, user_id_literal: str) -> str:
             "(SELECT id FROM student_subject_enrollments WHERE student_id IN "
             f"{_self_student_subquery(user_id_literal)})"
         )
+    if table == "attempt_answers":
+        return (
+            f"{alias}.attempt_id IN (SELECT id FROM quiz_attempts WHERE student_id IN "
+            f"{_self_student_subquery(user_id_literal)})"
+        )
     raise AssertionError(f"unhandled sensitive table {table!r}")
 
 
 def _taught_predicate_sql(table: str, alias: str, user_id_literal: str) -> str:
+    p = _ALIAS_PREFIX
     if table == "student_profiles":
         return f"{alias}.id IN {_taught_student_ids_subquery(user_id_literal)}"
     if table in ("student_360", "attendance_records"):
@@ -232,6 +418,24 @@ def _taught_predicate_sql(table: str, alias: str, user_id_literal: str) -> str:
         return _taught_via_enrollment_exists(
             user_id_literal, f"{alias}.student_subject_enrollment_id"
         )
+    if table == "student_subject_enrollments":
+        section_subquery = (
+            f"(SELECT {p}sge.section_id FROM student_grade_enrollments {p}sge "
+            f"WHERE {p}sge.id = {alias}.grade_enrollment_id)"
+        )
+        return _taught_offering_exists(
+            user_id_literal, f"{alias}.grade_subject_offering_id", section_subquery
+        )
+    if table == "student_grade_enrollments":
+        return _taught_period_grade_exists(
+            user_id_literal, f"{alias}.period_grade_id", f"{alias}.section_id"
+        )
+    if table == "attempt_answers":
+        enrollment_subquery = (
+            f"(SELECT {p}qa.student_subject_enrollment_id FROM quiz_attempts {p}qa "
+            f"WHERE {p}qa.id = {alias}.attempt_id)"
+        )
+        return _taught_via_enrollment_exists(user_id_literal, enrollment_subquery)
     raise AssertionError(f"unhandled sensitive table {table!r}")
 
 
@@ -249,36 +453,98 @@ def _row_predicate_sql(table: str, alias: str, role: str, user_id_literal: str) 
 def _institution_predicate_sql(table: str, alias: str, institution_id_literal: str) -> str:
     """Pins `alias` (a reference to `table`) to the caller's own institution. Applied for
     every role, admin included — mirrors scope_predicate()'s `institution` clause, which
-    is ANDed on before the unrestricted-for-admin short-circuit, never after it.
+    is ANDed on before the unrestricted-for-admin short-circuit, never after it. Covers
+    both `STUDENT_SCOPED_TABLES` (paired with a self/taught row predicate) and
+    `INSTITUTION_SCOPED_TABLES` (this predicate alone).
     """
+    p = _ALIAS_PREFIX
     if table in ("student_360", "student_profiles"):
         return f"{alias}.institution_id = {institution_id_literal}"
-    if table in ("quiz_attempts", "attendance_records"):
+    if table in (
+        "quiz_attempts",
+        "attendance_records",
+        "student_subject_enrollments",
+        "student_grade_enrollments",
+    ):
         return (
             f"{alias}.student_id IN "
             f"(SELECT id FROM student_profiles WHERE institution_id = {institution_id_literal})"
         )
     if table == "student_material_progress":
-        p = _ALIAS_PREFIX
         return (
             f"{alias}.student_subject_enrollment_id IN "
             f"(SELECT {p}sse.id FROM student_subject_enrollments {p}sse "
             f"JOIN student_profiles {p}sp ON {p}sp.id = {p}sse.student_id "
             f"WHERE {p}sp.institution_id = {institution_id_literal})"
         )
-    raise AssertionError(f"unhandled sensitive table {table!r}")
+    if table == "attempt_answers":
+        return (
+            f"{alias}.attempt_id IN (SELECT {p}qa.id FROM quiz_attempts {p}qa "
+            f"WHERE {p}qa.student_id IN "
+            f"(SELECT id FROM student_profiles WHERE institution_id = {institution_id_literal}))"
+        )
+    if table == "institutions":
+        return f"{alias}.id = {institution_id_literal}"
+    if table == "users":
+        return f"{alias}.institution_id = {institution_id_literal}"
+    if table in ("user_roles", "refresh_sessions"):
+        return (
+            f"{alias}.user_id IN "
+            f"(SELECT id FROM users WHERE institution_id = {institution_id_literal})"
+        )
+    if table in ("grades", "subjects", "academic_periods"):
+        return f"{alias}.institution_id = {institution_id_literal}"
+    if table == "period_grades":
+        return (
+            f"{alias}.academic_period_id IN "
+            f"(SELECT id FROM academic_periods WHERE institution_id = {institution_id_literal})"
+        )
+    if table in ("sections", "grade_subject_offerings"):
+        return (
+            f"{alias}.period_grade_id IN "
+            f"(SELECT {p}pg.id FROM period_grades {p}pg "
+            f"JOIN academic_periods {p}ap ON {p}ap.id = {p}pg.academic_period_id "
+            f"WHERE {p}ap.institution_id = {institution_id_literal})"
+        )
+    if table == "teaching_assignments":
+        return (
+            f"{alias}.academic_period_id IN "
+            f"(SELECT id FROM academic_periods WHERE institution_id = {institution_id_literal})"
+        )
+    raise AssertionError(f"unhandled scoped table {table!r}")
 
 
 def _apply_row_scoping(
-    tree: exp.Expr, *, role: str, user_id_literal: str, institution_id_literal: str
+    tree: exp.Expr,
+    *,
+    excluded_aliases: set[str],
+    role: str,
+    user_id_literal: str,
+    institution_id_literal: str,
 ) -> None:
-    excluded_aliases = _cte_and_derived_aliases(tree)
-    for select_node in tree.find_all(exp.Select):
-        for alias, table in _sensitive_table_refs(select_node, excluded_aliases):
+    # Materialize the select scopes (and each one's scoped-table refs) to a plain list
+    # *before* mutating anything: `.where()` below parses and splices in a new subquery,
+    # which is itself an exp.Select containing further scoped-table references (an
+    # INSTITUTION_SCOPED_TABLES predicate can reference another INSTITUTION_SCOPED_TABLES
+    # table, e.g. grade_subject_offerings -> period_grades -> academic_periods). Since
+    # `find_all` is a live traversal of the tree, iterating it directly here would walk
+    # into those newly-injected subqueries too and try to scope them all over again —
+    # each pass injecting another nested subquery for `find_all` to discover, which never
+    # terminates. Injected subqueries are this function's own, already-correct-by-
+    # construction SQL; they must never be re-scanned by the mechanism that wrote them.
+    work = [
+        (select_node, refs)
+        for select_node in tree.find_all(exp.Select)
+        if (refs := _scoped_table_refs(select_node, excluded_aliases))
+    ]
+    for select_node, refs in work:
+        for alias, table in refs:
             # .where() ANDs onto any existing WHERE by default (append=True) — this can
             # only narrow what the query already asks for, never replace or OR into it.
             institution_sql = _institution_predicate_sql(table, alias, institution_id_literal)
             select_node.where(institution_sql, copy=False, dialect="postgres")
+            if table not in STUDENT_SCOPED_TABLES:
+                continue  # INSTITUTION_SCOPED_TABLES gets the institution pin only
             if role == "admin":
                 continue  # unrestricted beyond institution, mirrors Scope.unrestricted
             role_sql = _row_predicate_sql(table, alias, role, user_id_literal)
@@ -323,10 +589,22 @@ async def apply_role_scope(state: TextToSQLState) -> TextToSQLState:
             },
         }
 
+    _resolve_current_user_sentinel(tree, user_id)
+
+    excluded_aliases = _cte_and_derived_aliases(tree)
+    unscopable = _find_unscopable_table_reference(tree, excluded_aliases)
+    if unscopable is not None:
+        return {
+            **state,
+            "validated_sql": None,
+            "error": format_error(ROLE_VIOLATION, unscopable),
+        }
+
     user_id_literal = exp.Literal.string(user_id).sql(dialect="postgres")
     institution_id_literal = exp.Literal.string(institution_id).sql(dialect="postgres")
     _apply_row_scoping(
         tree,
+        excluded_aliases=excluded_aliases,
         role=role,
         user_id_literal=user_id_literal,
         institution_id_literal=institution_id_literal,

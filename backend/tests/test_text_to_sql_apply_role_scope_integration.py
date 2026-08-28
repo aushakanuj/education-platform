@@ -35,6 +35,7 @@ from sqlalchemy import create_engine, select, text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.orm import Session
 
+import education_platform.modules.text_to_sql.graph as graph_module
 from education_platform.db.url import to_async_url, to_sync_url
 from education_platform.modules.academics.models import (
     AcademicPeriod,
@@ -47,8 +48,24 @@ from education_platform.modules.academics.models import (
     StudentGradeEnrollment,
     StudentSubjectEnrollment,
     Subject,
+    Subtopic,
     TeachingAssignment,
     TeachingAssignmentStatus,
+    Topic,
+)
+from education_platform.modules.assessments.models import (
+    AttemptAnswer,
+    CommonMasteryQuiz,
+    Question,
+    QuestionType,
+    QuestionVersion,
+    QuestionVersionStatus,
+    QuizAttempt,
+    QuizAttemptStatus,
+    QuizResultReleaseMode,
+    QuizScope,
+    QuizVersion,
+    QuizVersionStatus,
 )
 from education_platform.modules.attendance.models import AttendanceRecord, AttendanceStatus
 from education_platform.modules.auth.models import (
@@ -58,11 +75,17 @@ from education_platform.modules.auth.models import (
     User,
     UserRole,
 )
+from education_platform.modules.authorization.predicate import ScopeColumns, scope_predicate_for
 from education_platform.modules.authorization.scope import scope_for
 from education_platform.modules.insights.models import student_360
 from education_platform.modules.insights.service import scope_predicate
+from education_platform.modules.text_to_sql.graph import build_text_to_sql_graph
 from education_platform.modules.text_to_sql.nodes.apply_role_scope import apply_role_scope
-from education_platform.modules.text_to_sql.state import TextToSQLState
+from education_platform.modules.text_to_sql.state import (
+    ROLE_VIOLATION,
+    TextToSQLState,
+    error_category,
+)
 
 
 @dataclass(frozen=True)
@@ -73,6 +96,11 @@ class _Fixture:
     teacher_user_id: UUID
     admin_user_id: UUID
 
+    # Second teacher, Math *all sections* (section_id NULL) — contrasts with the primary
+    # teacher's Math/8A-only grant for the Q3 regression: same phrased question, two
+    # teachers, two different correctly-scoped counts.
+    teacher2_user_id: UUID
+
     section_a_id: UUID  # "8A" — the teacher's Math assignment names this section only
     section_b_id: UUID  # "8B" — outside the Math assignment; inside the NULL-section one
 
@@ -82,6 +110,17 @@ class _Fixture:
 
     # Logged-in student in Math/8B: same subject, wrong section — must be excluded.
     student_b_math_id: UUID
+
+    # student_a_math's/student_b_math's own StudentSubjectEnrollment row (Math), for the
+    # Q3-shape and student_subject_enrollments tests.
+    enrollment_a_math_id: UUID
+    enrollment_b_math_id: UUID
+
+    # A quiz attempt (+ its one attempt_answer) per Math student, for attempt_answers.
+    attempt_a_math_id: UUID
+    answer_a_math_id: UUID
+    attempt_b_math_id: UUID
+    answer_b_math_id: UUID
 
     # Logged-in student in Science/8A: reached only via the NULL-section ("all sections")
     # grant, since the teacher's Science assignment names no section.
@@ -148,12 +187,19 @@ def _seed(session: Session) -> _Fixture:
         full_name="Admin",
         password_hash="unused",
     )
-    session.add_all([teacher, admin])
+    teacher2 = User(
+        institution_id=inst1.id,
+        email="teacher2@ars-integration.school",
+        full_name="Teacher Two",
+        password_hash="unused",
+    )
+    session.add_all([teacher, admin, teacher2])
     session.flush()
     session.add_all(
         [
             UserRole(user_id=teacher.id, role=RoleName.TEACHER),
             UserRole(user_id=admin.id, role=RoleName.ADMINISTRATOR),
+            UserRole(user_id=teacher2.id, role=RoleName.TEACHER),
         ]
     )
 
@@ -177,10 +223,21 @@ def _seed(session: Session) -> _Fixture:
             status=TeachingAssignmentStatus.ACTIVE,
         )
     )
+    # Second teacher: Math, *all* sections (section_id NULL) — reaches both 8A and 8B,
+    # unlike the primary teacher's 8A-only Math grant.
+    session.add(
+        TeachingAssignment(
+            teacher_user_id=teacher2.id,
+            academic_period_id=period.id,
+            grade_subject_offering_id=offering_math.id,
+            section_id=None,
+            status=TeachingAssignmentStatus.ACTIVE,
+        )
+    )
 
     def _enroll_student(
         *, identifier: str, section: Section, offering: GradeSubjectOffering, with_login: bool
-    ) -> StudentProfile:
+    ) -> tuple[StudentProfile, StudentSubjectEnrollment]:
         user_id: UUID | None = None
         if with_login:
             user = User(
@@ -211,14 +268,13 @@ def _seed(session: Session) -> _Fixture:
         )
         session.add(grade_enrollment)
         session.flush()
-        session.add(
-            StudentSubjectEnrollment(
-                student_id=profile.id,
-                grade_enrollment_id=grade_enrollment.id,
-                grade_subject_offering_id=offering.id,
-                status=EnrollmentStatus.ACTIVE,
-            )
+        subject_enrollment = StudentSubjectEnrollment(
+            student_id=profile.id,
+            grade_enrollment_id=grade_enrollment.id,
+            grade_subject_offering_id=offering.id,
+            status=EnrollmentStatus.ACTIVE,
         )
+        session.add(subject_enrollment)
         session.add(
             AttendanceRecord(
                 student_id=profile.id,
@@ -230,22 +286,87 @@ def _seed(session: Session) -> _Fixture:
             )
         )
         session.flush()
-        return profile
+        return profile, subject_enrollment
 
-    student_a_math = _enroll_student(
+    student_a_math, enrollment_a_math = _enroll_student(
         identifier="stu-a-math", section=section_a, offering=offering_math, with_login=True
     )
-    student_b_math = _enroll_student(
+    student_b_math, enrollment_b_math = _enroll_student(
         identifier="stu-b-math", section=section_b, offering=offering_math, with_login=True
     )
-    student_a_science = _enroll_student(
+    student_a_science, _enrollment_a_science = _enroll_student(
         identifier="stu-a-science", section=section_a, offering=offering_science, with_login=True
     )
-    student_b_science_provisioned = _enroll_student(
+    student_b_science_provisioned, _enrollment_b_science = _enroll_student(
         identifier="stu-b-science-noauth",
         section=section_b,
         offering=offering_science,
         with_login=False,
+    )
+
+    # Quiz-attempt chain, for attempt_answers: Question -> QuestionVersion (curriculum
+    # content, deliberately out of scope for this fix) feed into real quiz_attempts /
+    # attempt_answers rows (in scope), one per Math student, so the teacher/student row
+    # predicates on the newly-scoped attempt_answers table can be proven against live data.
+    topic = Topic(grade_subject_offering_id=offering_math.id, name="Algebra", slug="algebra", sequence=1)
+    session.add(topic)
+    session.flush()
+    subtopic = Subtopic(topic_id=topic.id, name="Linear Equations", slug="linear-eq", sequence=1)
+    session.add(subtopic)
+    session.flush()
+    question = Question(subtopic_id=subtopic.id, code="Q1")
+    session.add(question)
+    session.flush()
+    question_version = QuestionVersion(
+        question_id=question.id,
+        version_number=1,
+        prompt="Solve for x: x + 1 = 2",
+        question_type=QuestionType.NUMERIC,
+        lifecycle_status=QuestionVersionStatus.PUBLISHED,
+    )
+    session.add(question_version)
+    session.flush()
+    quiz = CommonMasteryQuiz(
+        subtopic_id=subtopic.id, quiz_scope=QuizScope.SUBTOPIC_MASTERY, title="Linear Equations Quiz"
+    )
+    session.add(quiz)
+    session.flush()
+    quiz_version = QuizVersion(
+        quiz_id=quiz.id,
+        version_number=1,
+        lifecycle_status=QuizVersionStatus.RELEASED,
+        result_release_mode=QuizResultReleaseMode.IMMEDIATE,
+    )
+    session.add(quiz_version)
+    session.flush()
+
+    def _record_attempt(
+        *, student: StudentProfile, enrollment: StudentSubjectEnrollment
+    ) -> tuple[UUID, UUID]:
+        attempt = QuizAttempt(
+            student_id=student.id,
+            student_subject_enrollment_id=enrollment.id,
+            quiz_version_id=quiz_version.id,
+            attempt_number=1,
+            status=QuizAttemptStatus.SCORED,
+        )
+        session.add(attempt)
+        session.flush()
+        answer = AttemptAnswer(
+            attempt_id=attempt.id,
+            question_version_id=question_version.id,
+            selected_numeric=1,
+            is_correct=True,
+        )
+        session.add(answer)
+        session.flush()
+        return attempt.id, answer.id
+
+    attempt_a_math_id, answer_a_math_id = _record_attempt(
+        student=student_a_math, enrollment=enrollment_a_math
+    )
+    attempt_b_math_id, answer_b_math_id = _record_attempt(
+        student=student_b_math, enrollment=enrollment_b_math
     )
 
     # Institution 2: overlapping-looking (same grade name, same shape) but must stay
@@ -265,11 +386,18 @@ def _seed(session: Session) -> _Fixture:
         other_institution_id=inst2.id,
         teacher_user_id=teacher.id,
         admin_user_id=admin.id,
+        teacher2_user_id=teacher2.id,
         section_a_id=section_a.id,
         section_b_id=section_b.id,
         student_a_math_id=student_a_math.id,
         student_a_math_user_id=student_a_math.user_id,
         student_b_math_id=student_b_math.id,
+        enrollment_a_math_id=enrollment_a_math.id,
+        enrollment_b_math_id=enrollment_b_math.id,
+        attempt_a_math_id=attempt_a_math_id,
+        answer_a_math_id=answer_a_math_id,
+        attempt_b_math_id=attempt_b_math_id,
+        answer_b_math_id=answer_b_math_id,
         student_a_science_id=student_a_science.id,
         student_b_science_provisioned_id=student_b_science_provisioned.id,
         other_student_id=other_student.id,
@@ -449,6 +577,246 @@ async def test_cross_check_student_scope_matches_scope_predicate(
     assert scope_predicate_set == {(seeded.student_a_math_id, seeded.section_a_id)}
 
 
+# --- Priority fix: Q3 regression — student_subject_enrollments/grade_subject_offerings
+# --- routed entirely outside the original 5 sensitive tables --------------------------
+
+
+async def test_q3_shape_no_longer_returns_school_wide_count(
+    async_session: AsyncSession, seeded: _Fixture
+) -> None:
+    """The exact shape of the live query that leaked: "how many students enrolled for
+    maths subject for grade 8", routed entirely through student_subject_enrollments /
+    grade_subject_offerings / subjects / period_grades — none of which were in the
+    original SCOPE_SENSITIVE_TABLES list. Before this fix this returned a school-wide
+    count (2, in this fixture: student_a_math + student_b_math); after it, the primary
+    teacher's Math/8A-only grant must narrow it to 1.
+    """
+    sql = (
+        "SELECT COUNT(DISTINCT se.student_id) AS student_count "
+        "FROM student_subject_enrollments se "
+        "JOIN grade_subject_offerings gso ON se.grade_subject_offering_id = gso.id "
+        "JOIN subjects s ON gso.subject_id = s.id "
+        "JOIN period_grades pg ON gso.period_grade_id = pg.id "
+        "WHERE s.name = 'Mathematics' AND se.status = 'active'"
+    )
+    rows = await _run_scoped(
+        async_session,
+        sql=sql,
+        user_id=seeded.teacher_user_id,
+        role="teacher",
+        institution_id=seeded.institution_id,
+    )
+    assert rows[0]["student_count"] == 1  # student_a_math only — 8A, not 8B
+
+
+async def test_q3_shape_two_teachers_get_different_correctly_scoped_counts(
+    async_session: AsyncSession, seeded: _Fixture
+) -> None:
+    """Same phrased question, two teachers, two different counts — the primary teacher's
+    Math/8A-only grant sees 1 student; the second teacher's Math/all-sections grant sees
+    both (2). Neither is the unscoped school-wide total that used to be returned
+    regardless of which teacher asked.
+    """
+    sql = (
+        "SELECT COUNT(DISTINCT se.student_id) AS student_count "
+        "FROM student_subject_enrollments se "
+        "JOIN grade_subject_offerings gso ON se.grade_subject_offering_id = gso.id "
+        "JOIN subjects s ON gso.subject_id = s.id "
+        "WHERE s.name = 'Mathematics' AND se.status = 'active'"
+    )
+    rows_teacher1 = await _run_scoped(
+        async_session,
+        sql=sql,
+        user_id=seeded.teacher_user_id,
+        role="teacher",
+        institution_id=seeded.institution_id,
+    )
+    rows_teacher2 = await _run_scoped(
+        async_session,
+        sql=sql,
+        user_id=seeded.teacher2_user_id,
+        role="teacher",
+        institution_id=seeded.institution_id,
+    )
+    assert rows_teacher1[0]["student_count"] == 1
+    assert rows_teacher2[0]["student_count"] == 2
+    assert rows_teacher1[0]["student_count"] != rows_teacher2[0]["student_count"]
+
+
+async def test_student_subject_enrollments_cross_institution_isolation(
+    async_session: AsyncSession, seeded: _Fixture
+) -> None:
+    rows = await _run_scoped(
+        async_session,
+        sql="SELECT student_id FROM student_subject_enrollments",
+        user_id=seeded.admin_user_id,
+        role="admin",
+        institution_id=seeded.institution_id,
+    )
+    ids = {row["student_id"] for row in rows}
+    assert seeded.other_student_id not in ids
+    assert seeded.student_a_math_id in ids
+
+
+# --- Priority fix: student_grade_enrollments (same class of gap, one level up) --------
+
+
+async def test_student_grade_enrollments_all_sections_grant_reaches_whole_grade(
+    async_session: AsyncSession, seeded: _Fixture
+) -> None:
+    # student_grade_enrollments carries no subject dimension (it's the whole-grade
+    # enrollment, not a per-subject one) -- an all-sections (section_id NULL) teaching
+    # assignment for *any* subject in that grade correctly grants visibility into every
+    # student's grade-level row in that grade, not just the students of that one subject.
+    # Both teacher 1 (Science, all sections) and teacher 2 (Math, all sections) hold such
+    # a grant here, so both see all four students -- this is the predicate matching
+    # student_grade_enrollments' actual (coarser) granularity, not a scoping gap.
+    all_students = {
+        seeded.student_a_math_id,
+        seeded.student_b_math_id,
+        seeded.student_a_science_id,
+        seeded.student_b_science_provisioned_id,
+    }
+    for teacher_id in (seeded.teacher_user_id, seeded.teacher2_user_id):
+        rows = await _run_scoped(
+            async_session,
+            sql="SELECT student_id FROM student_grade_enrollments",
+            user_id=teacher_id,
+            role="teacher",
+            institution_id=seeded.institution_id,
+        )
+        assert {row["student_id"] for row in rows} == all_students
+
+
+async def test_student_grade_enrollments_student_sees_only_own_row(
+    async_session: AsyncSession, seeded: _Fixture
+) -> None:
+    rows = await _run_scoped(
+        async_session,
+        sql="SELECT student_id FROM student_grade_enrollments",
+        user_id=seeded.student_a_math_user_id,
+        role="student",
+        institution_id=seeded.institution_id,
+    )
+    assert {row["student_id"] for row in rows} == {seeded.student_a_math_id}
+
+
+# --- Priority fix: attempt_answers (individual quiz-answer content, no direct
+# --- student_id/institution_id of its own -- resolved via quiz_attempts) --------------
+
+
+async def test_attempt_answers_teacher_scoping_specific_section_excludes_other_section(
+    async_session: AsyncSession, seeded: _Fixture
+) -> None:
+    rows = await _run_scoped(
+        async_session,
+        sql="SELECT id FROM attempt_answers",
+        user_id=seeded.teacher_user_id,
+        role="teacher",
+        institution_id=seeded.institution_id,
+    )
+    ids = {row["id"] for row in rows}
+    assert seeded.answer_a_math_id in ids  # Math/8A -- teacher 1's specific grant
+    assert seeded.answer_b_math_id not in ids  # Math/8B -- outside that grant
+
+
+async def test_attempt_answers_teacher2_all_sections_sees_both(
+    async_session: AsyncSession, seeded: _Fixture
+) -> None:
+    rows = await _run_scoped(
+        async_session,
+        sql="SELECT id FROM attempt_answers",
+        user_id=seeded.teacher2_user_id,
+        role="teacher",
+        institution_id=seeded.institution_id,
+    )
+    ids = {row["id"] for row in rows}
+    assert ids == {seeded.answer_a_math_id, seeded.answer_b_math_id}
+
+
+async def test_attempt_answers_student_sees_only_own_answers(
+    async_session: AsyncSession, seeded: _Fixture
+) -> None:
+    rows = await _run_scoped(
+        async_session,
+        sql="SELECT id FROM attempt_answers",
+        user_id=seeded.student_a_math_user_id,
+        role="student",
+        institution_id=seeded.institution_id,
+    )
+    assert {row["id"] for row in rows} == {seeded.answer_a_math_id}
+
+
+# --- Priority fix: INSTITUTION_SCOPED_TABLES (not individually restricted, but must
+# --- not leak across tenants) ----------------------------------------------------------
+
+
+async def test_users_table_institution_pin_hides_other_institutions_users(
+    async_session: AsyncSession, seeded: _Fixture
+) -> None:
+    # Add a user at the other institution so this test has something to prove hidden.
+    other_inst_user = User(
+        institution_id=seeded.other_institution_id,
+        email="other-inst-user@ars-integration.school",
+        full_name="Other Institution User",
+        password_hash="unused",
+    )
+    async_session.add(other_inst_user)
+    await async_session.flush()
+
+    for role in ("admin", "teacher", "student"):
+        rows = await _run_scoped(
+            async_session,
+            sql="SELECT id, email FROM users",
+            user_id=seeded.teacher_user_id,
+            role=role,
+            institution_id=seeded.institution_id,
+        )
+        emails = {row["email"] for row in rows}
+        assert "other-inst-user@ars-integration.school" not in emails
+        assert "teacher@ars-integration.school" in emails
+
+
+async def test_subjects_and_grades_pinned_to_institution_for_every_role(
+    async_session: AsyncSession, seeded: _Fixture
+) -> None:
+    other_subject = Subject(
+        institution_id=seeded.other_institution_id, name="Other Institution Subject", code="OTH"
+    )
+    async_session.add(other_subject)
+    await async_session.flush()
+
+    for role in ("admin", "teacher", "student"):
+        rows = await _run_scoped(
+            async_session,
+            sql="SELECT name FROM subjects",
+            user_id=seeded.teacher_user_id,
+            role=role,
+            institution_id=seeded.institution_id,
+        )
+        names = {row["name"] for row in rows}
+        assert "Other Institution Subject" not in names
+        assert "Mathematics" in names
+
+
+async def test_teaching_assignments_institution_pin_not_self_only(
+    async_session: AsyncSession, seeded: _Fixture
+) -> None:
+    # Deliberate scope of this pass: teaching_assignments gets the institution pin, not a
+    # self-only row predicate -- teacher 1 sees teacher 2's assignment rows too, just not
+    # another institution's.
+    rows = await _run_scoped(
+        async_session,
+        sql="SELECT teacher_user_id FROM teaching_assignments",
+        user_id=seeded.teacher_user_id,
+        role="teacher",
+        institution_id=seeded.institution_id,
+    )
+    teacher_ids = {row["teacher_user_id"] for row in rows}
+    assert seeded.teacher_user_id in teacher_ids
+    assert seeded.teacher2_user_id in teacher_ids
+
+
 # --- Item 5: institution isolation, admin included ------------------------------------
 
 
@@ -466,3 +834,240 @@ async def test_admin_never_sees_another_institutions_rows(
 
     assert seeded.other_student_id not in ids
     assert seeded.student_a_math_id in ids  # sanity: still sees their own institution
+
+
+async def test_cross_check_admin_scope_matches_scope_predicate_across_institutions(
+    async_session: AsyncSession, seeded: _Fixture
+) -> None:
+    """`scope_predicate()`/`scope_predicate_for()` runs `institution == scope.institution_id`
+    unconditionally, even for `scope.unrestricted` admin scopes (that "unconditional even
+    for unrestricted" behaviour is the change PR #128 made) -- confirm our node's own
+    institution predicate agrees with it directly, not just that our node alone stays
+    within one institution.
+
+    `student_profiles` carries no `grade_subject_offering_id`/`section_id` of its own, so
+    those two `ScopeColumns` slots are filled with a column that is never actually read:
+    `scope_predicate_for` returns right after the institution check for an unrestricted
+    scope, before either slot is touched. This is exactly the gap Q2 identifies -- no real
+    `ScopeColumns` mapping exists yet for `student_profiles`, only enough of one to prove
+    the admin/institution rule for this one query shape.
+    """
+    principal = _FakePrincipal(
+        user_id=seeded.admin_user_id,
+        institution_id=seeded.institution_id,
+        email="admin@ars-integration.school",
+        roles=frozenset({RoleName.ADMINISTRATOR.value}),
+        student_profile_id=None,
+    )
+    scope = await scope_for(async_session, principal)
+    table = StudentProfile.__table__
+    columns = ScopeColumns(
+        institution_id=table.c.institution_id,
+        student_id=table.c.id,
+        grade_subject_offering_id=table.c.id,
+        section_id=table.c.id,
+    )
+    predicate_rows = (
+        await async_session.execute(
+            select(StudentProfile.id).where(scope_predicate_for(scope, columns))
+        )
+    ).all()
+    predicate_ids = {row.id for row in predicate_rows}
+
+    node_rows = await _run_scoped(
+        async_session,
+        sql="SELECT id FROM student_profiles",
+        user_id=seeded.admin_user_id,
+        role="admin",
+        institution_id=seeded.institution_id,
+    )
+    node_ids = {row["id"] for row in node_rows}
+
+    assert predicate_ids == node_ids
+    assert seeded.other_student_id not in predicate_ids
+    assert seeded.student_a_math_id in predicate_ids
+
+
+# --- Fix (Finding 2): self-reference sentinel, through the full compiled graph --------
+
+
+async def test_what_subject_do_i_teach_returns_real_answer_through_full_graph(
+    monkeypatch: pytest.MonkeyPatch, seeded: _Fixture
+) -> None:
+    """The exact observed defect: "what subject do I teach" resolves through
+    teaching_assignments (INSTITUTION_SCOPED_TABLES -- institution pin only, no
+    self-narrowing), so the model needs a genuine self-reference filter it has no real
+    value for. Before this fix it fabricated a placeholder that matched nothing; now the
+    prompt's fixed sentinel gets resolved to the real teacher_user_id and the query
+    returns real data -- the seeded teacher genuinely teaches Math and Science.
+    """
+    sentinel_sql = (
+        "SELECT DISTINCT s.name AS subject_name FROM teaching_assignments ta "
+        "JOIN grade_subject_offerings gso ON gso.id = ta.grade_subject_offering_id "
+        "JOIN subjects s ON s.id = gso.subject_id "
+        "WHERE ta.teacher_user_id = '__CURRENT_USER_ID__' AND ta.status = 'active'"
+    )
+
+    async def _fake_generate_sql(state: TextToSQLState) -> TextToSQLState:
+        return {**state, "generated_sql": sentinel_sql, "error": None}
+
+    monkeypatch.setattr(graph_module, "generate_sql", _fake_generate_sql)
+    graph = build_text_to_sql_graph()
+    initial: TextToSQLState = {
+        "question": "what subject do I teach?",
+        "user_id": str(seeded.teacher_user_id),
+        "user_role": "teacher",
+        "institution_id": str(seeded.institution_id),
+        "schema_context": "",
+        "generated_sql": None,
+        "validated_sql": None,
+        "retry_count": 0,
+        "query_result": None,
+        "result_row_count": None,
+        "natural_answer": None,
+        "confidence": None,
+        "provenance": None,
+        "error": None,
+        "audit_entry": None,
+    }
+    result = await graph.ainvoke(initial, config={"recursion_limit": 15})
+
+    assert result["error"] is None
+    # Real, non-empty, correct answer -- not the confidently-wrong empty result the
+    # fabricated-placeholder defect produced.
+    subject_names = {row["subject_name"] for row in result["query_result"]}
+    assert subject_names == {"Mathematics", "Science"}
+    assert result["result_row_count"] == 2
+
+    # Assert on content, not just the final answer: a lucky-correct answer over a still-
+    # fabricated literal would be a false pass. generated_sql (pre-resolution) must carry
+    # the fixed token, never the real ID; validated_sql (post apply_role_scope) must carry
+    # the real teacher's ID and must not still contain the sentinel or any fabricated
+    # literal in its place.
+    assert "__CURRENT_USER_ID__" in result["generated_sql"]
+    assert str(seeded.teacher_user_id) not in result["generated_sql"]
+    assert str(seeded.teacher_user_id) in result["validated_sql"]
+    assert "__CURRENT_USER_ID__" not in result["validated_sql"]
+
+
+async def test_question_without_self_reference_is_unaffected_through_full_graph(
+    monkeypatch: pytest.MonkeyPatch, seeded: _Fixture
+) -> None:
+    # Confirms this fix doesn't overcorrect into requiring/expecting the sentinel where a
+    # question never needed self-reference at all.
+    async def _fake_generate_sql(state: TextToSQLState) -> TextToSQLState:
+        return {**state, "generated_sql": "SELECT name FROM subjects", "error": None}
+
+    monkeypatch.setattr(graph_module, "generate_sql", _fake_generate_sql)
+    graph = build_text_to_sql_graph()
+    initial: TextToSQLState = {
+        "question": "what subjects exist in the school?",
+        "user_id": str(seeded.teacher_user_id),
+        "user_role": "teacher",
+        "institution_id": str(seeded.institution_id),
+        "schema_context": "",
+        "generated_sql": None,
+        "validated_sql": None,
+        "retry_count": 0,
+        "query_result": None,
+        "result_row_count": None,
+        "natural_answer": None,
+        "confidence": None,
+        "provenance": None,
+        "error": None,
+        "audit_entry": None,
+    }
+    result = await graph.ainvoke(initial, config={"recursion_limit": 15})
+
+    assert result["error"] is None
+    names = {row["name"] for row in result["query_result"]}
+    assert names == {"Mathematics", "Science"}
+    assert "__CURRENT_USER_ID__" not in result["validated_sql"]
+    assert str(seeded.teacher_user_id) not in result["validated_sql"]
+
+
+async def test_student_self_reference_also_resolves_through_full_graph(
+    monkeypatch: pytest.MonkeyPatch, seeded: _Fixture
+) -> None:
+    # Step 0 finding: this gap is symmetric, not teacher-only -- a student asking "what's
+    # my email" over `users` (also INSTITUTION_SCOPED_TABLES) needs the identical fix.
+    async def _fake_generate_sql(state: TextToSQLState) -> TextToSQLState:
+        return {
+            **state,
+            "generated_sql": "SELECT email FROM users WHERE id = '__CURRENT_USER_ID__'",
+            "error": None,
+        }
+
+    monkeypatch.setattr(graph_module, "generate_sql", _fake_generate_sql)
+    graph = build_text_to_sql_graph()
+    initial: TextToSQLState = {
+        "question": "what's my email address?",
+        "user_id": str(seeded.student_a_math_user_id),
+        "user_role": "student",
+        "institution_id": str(seeded.institution_id),
+        "schema_context": "",
+        "generated_sql": None,
+        "validated_sql": None,
+        "retry_count": 0,
+        "query_result": None,
+        "result_row_count": None,
+        "natural_answer": None,
+        "confidence": None,
+        "provenance": None,
+        "error": None,
+        "audit_entry": None,
+    }
+    result = await graph.ainvoke(initial, config={"recursion_limit": 15})
+
+    assert result["error"] is None
+    assert result["query_result"] == [{"email": "stu-a-math@ars-integration.school"}]
+    assert str(seeded.student_a_math_user_id) in result["validated_sql"]
+    assert "__CURRENT_USER_ID__" not in result["validated_sql"]
+
+
+# --- Graph-level: ROLE_VIOLATION routes to honest_refusal, not the retry loop ----------
+#
+# Moved here from test_text_to_sql_apply_role_scope.py (deliberately DB-free): now that
+# audit_log (Task 10) runs unconditionally at the end of every full graph invocation, any
+# test exercising the *compiled graph* end to end needs a real database — this file
+# already has it via `seeded`/`clean_db`.
+
+
+async def test_role_violation_routes_to_honest_refusal_through_compiled_graph(
+    monkeypatch: pytest.MonkeyPatch, seeded: _Fixture
+) -> None:
+    async def _fake_generate_sql(state: TextToSQLState) -> TextToSQLState:
+        # Bypass the real LLM call: hand validate_sql a query that will pass validation
+        # but that apply_role_scope must reject on blocklist grounds.
+        return {**state, "generated_sql": "SELECT password_hash FROM users", "error": None}
+
+    # graph.py did `from ...nodes import generate_sql`, binding its own module-level
+    # name — patching the nodes submodule's attribute (like generate_sql's own test
+    # file does) would not affect graph.py's already-bound reference; patch graph.py's
+    # own name instead, which build_text_to_sql_graph() resolves at call time.
+    monkeypatch.setattr(graph_module, "generate_sql", _fake_generate_sql)
+
+    graph = build_text_to_sql_graph()
+    initial: TextToSQLState = {
+        "question": "irrelevant",
+        "user_id": str(seeded.admin_user_id),
+        "user_role": "admin",
+        "institution_id": str(seeded.institution_id),
+        "schema_context": "",
+        "generated_sql": None,
+        "validated_sql": None,
+        "retry_count": 0,
+        "query_result": None,
+        "result_row_count": None,
+        "natural_answer": None,
+        "confidence": None,
+        "provenance": None,
+        "error": None,
+        "audit_entry": None,
+    }
+    result = await graph.ainvoke(initial, config={"recursion_limit": 15})
+
+    assert error_category(result["error"]) == ROLE_VIOLATION
+    # Did not loop back into generate_sql's retry path: retry_count stayed at whatever
+    # validate_sql left it at (0 — it succeeded first try), not incremented again.
+    assert result["retry_count"] == 0

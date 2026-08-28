@@ -1,8 +1,8 @@
 """Text-to-SQL pipeline nodes. Each module holds one graph node; see graph.py for wiring.
 
-All nodes are placeholders for now — they pass state through unchanged. Node logic
-(schema loading, SQL generation/validation, role scoping, execution, sanity checking,
-answer composition, and audit logging) is implemented in a follow-up task.
+All nine nodes (schema loading, SQL generation/validation, role scoping, execution,
+sanity checking, answer composition, honest refusal, and audit logging) are implemented;
+see each module's own docstring for its specific behavior and design decisions.
 """
 
 from education_platform.modules.text_to_sql.nodes.apply_role_scope import (

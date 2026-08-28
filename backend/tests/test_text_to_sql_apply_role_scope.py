@@ -6,14 +6,12 @@ every check. Tests inspect the rewritten SQL text/AST directly rather than execu
 
 from __future__ import annotations
 
-import pytest
 import sqlglot
 from sqlglot import exp
 
-import education_platform.modules.text_to_sql.graph as graph_module
-from education_platform.modules.text_to_sql.graph import build_text_to_sql_graph
 from education_platform.modules.text_to_sql.nodes.apply_role_scope import (
-    SCOPE_SENSITIVE_TABLES,
+    INSTITUTION_SCOPED_TABLES,
+    STUDENT_SCOPED_TABLES,
     apply_role_scope,
 )
 from education_platform.modules.text_to_sql.state import (
@@ -275,10 +273,21 @@ async def test_unrecognized_role_denies_all_rows_on_sensitive_table() -> None:
     assert "inst-1" in where  # institution pin still applies even though rows are denied
 
 
-async def test_query_touching_zero_sensitive_tables_passes_through_unscoped() -> None:
+async def test_query_touching_only_institution_scoped_tables_gets_institution_pin_only() -> (
+    None
+):
+    # subjects/grades aren't individually student- or teacher-restricted (a subject named
+    # "Mathematics" isn't private), but they do belong to exactly one institution and must
+    # not leak across tenants — unlike the original 5-table design, this is no longer a
+    # full pass-through: it gets the institution pin, and nothing more (no self/taught
+    # predicate, and no difference between student/teacher/admin).
     sql = "SELECT * FROM subjects s JOIN grades g ON g.id = s.institution_id"
-    validated = await _scoped(sql, role="student", user_id="x")
-    assert _where_sql(validated) == ""
+    for role in ("admin", "teacher", "student"):
+        validated = await _scoped(sql, role=role, user_id="x", institution_id="inst-1")
+        where = _where_sql(validated)
+        assert "s.institution_id = 'inst-1'" in where
+        assert "g.institution_id" in where
+        assert "AND" in where.upper()  # both tables pinned, not just one
 
 
 async def test_subquery_over_sensitive_table_is_scoped_independently_from_outer_query() -> None:
@@ -326,6 +335,266 @@ async def test_row_predicate_is_anded_never_replaces_existing_where() -> None:
     assert " AND " in where.upper()
 
 
+# --- Fix (Finding 2): self-reference sentinel resolution ------------------------------
+
+
+async def test_current_user_sentinel_resolved_to_real_user_id() -> None:
+    validated = await _scoped(
+        "SELECT * FROM teaching_assignments WHERE teacher_user_id = '__CURRENT_USER_ID__'",
+        role="teacher",
+        user_id="teacher-real-id",
+        institution_id="inst-1",
+    )
+    assert "teacher-real-id" in validated
+    assert "__CURRENT_USER_ID__" not in validated
+
+
+async def test_current_user_sentinel_resolved_for_every_role() -> None:
+    for role in ("admin", "teacher", "student"):
+        validated = await _scoped(
+            "SELECT id FROM users WHERE id = '__CURRENT_USER_ID__'",
+            role=role,
+            user_id="the-real-user",
+            institution_id="inst-1",
+        )
+        assert "the-real-user" in validated
+        assert "__CURRENT_USER_ID__" not in validated
+
+
+async def test_current_user_sentinel_resolved_for_student_self_reference_too() -> None:
+    # Step 0 finding: the gap isn't teacher-only — a student asking "what's my email"
+    # over `users` (INSTITUTION_SCOPED_TABLES, institution-pin only, no self-narrowing)
+    # needs the identical resolution.
+    validated = await _scoped(
+        "SELECT email FROM users WHERE id = '__CURRENT_USER_ID__'",
+        role="student",
+        user_id="student-real-id",
+        institution_id="inst-1",
+    )
+    assert "student-real-id" in validated
+    assert "__CURRENT_USER_ID__" not in validated
+
+
+async def test_query_without_sentinel_is_unaffected() -> None:
+    # teaching_assignments is INSTITUTION_SCOPED_TABLES (institution pin only, no
+    # self/taught row predicate), so the real user_id has no other reason to appear here
+    # at all -- confirms this fix doesn't leak identity into a query that never asked for it.
+    sql = "SELECT * FROM teaching_assignments WHERE status = 'active'"
+    validated = await _scoped(sql, role="teacher", user_id="teacher-1", institution_id="inst-1")
+    assert "active" in validated
+    assert "teacher-1" not in validated
+
+
+async def test_sentinel_does_not_match_a_similar_but_different_literal() -> None:
+    # Only the exact sentinel string is resolved -- a literal that merely contains it as
+    # a substring, or differs in case, must be left completely untouched.
+    validated = await _scoped(
+        "SELECT * FROM teaching_assignments WHERE status = '__current_user_id__'",
+        role="teacher",
+        user_id="teacher-1",
+        institution_id="inst-1",
+    )
+    assert "__current_user_id__" in validated
+    assert "teacher-1" not in validated
+
+
+async def test_multiple_sentinel_occurrences_all_resolved() -> None:
+    sql = (
+        "SELECT * FROM teaching_assignments ta "
+        "WHERE ta.teacher_user_id = '__CURRENT_USER_ID__' "
+        "OR ta.academic_period_id IN "
+        "(SELECT academic_period_id FROM teaching_assignments WHERE teacher_user_id = "
+        "'__CURRENT_USER_ID__')"
+    )
+    validated = await _scoped(sql, role="teacher", user_id="teacher-1", institution_id="inst-1")
+    assert validated.count("teacher-1") == 2
+    assert "__CURRENT_USER_ID__" not in validated
+
+
+async def test_sentinel_resolved_before_fail_closed_table_check() -> None:
+    # A sentinel used inside a deferred/unscopable table's query must still hit the
+    # fail-closed refusal on the table itself -- resolving identity first doesn't create
+    # a bypass for the table-coverage gate.
+    error = await _rejected(
+        "SELECT * FROM topics WHERE grade_subject_offering_id = '__CURRENT_USER_ID__'",
+        role="teacher",
+        user_id="teacher-1",
+    )
+    assert "topics" in error
+    assert "not yet reviewed for role-based scoping" in error
+
+
+# --- Fail-closed table coverage: newly-promoted STUDENT_SCOPED_TABLES ----------------
+
+
+async def test_student_subject_enrollments_student_restricted_to_own_row() -> None:
+    validated = await _scoped(
+        "SELECT * FROM student_subject_enrollments sse",
+        role="student",
+        user_id="student-user-1",
+        institution_id="inst-1",
+    )
+    where = _where_sql(validated)
+    assert "sse.student_id" in where
+    assert "student-user-1" in where
+    assert "inst-1" in where
+
+
+async def test_student_subject_enrollments_teacher_restricted_to_taught_offering() -> None:
+    # Same section_id-IS-NULL-means-all-sections rule as attendance_records/student_360,
+    # but resolved through student_grade_enrollments (this table has no section_id of its
+    # own) — this is the exact Q3 shape (a query that never touches any of the original
+    # 5 sensitive tables at all).
+    validated = await _scoped(
+        "SELECT * FROM student_subject_enrollments sse",
+        role="teacher",
+        user_id="teacher-1",
+        institution_id="inst-1",
+    )
+    tree = sqlglot.parse_one(validated, read="postgres")
+    outer_select = next(tree.find_all(exp.Select))
+    exists_node = _teaching_assignments_exists(outer_select)
+    where_sql = outer_select.args["where"].sql(dialect="postgres")
+    assert "teacher-1" in where_sql
+    assert "inst-1" in where_sql
+    inner_sql = exists_node.sql(dialect="postgres")
+    assert "grade_subject_offering_id" in inner_sql
+    assert "student_grade_enrollments" in inner_sql  # section resolved via this join
+
+
+async def test_student_grade_enrollments_student_restricted_to_own_row() -> None:
+    validated = await _scoped(
+        "SELECT * FROM student_grade_enrollments sge",
+        role="student",
+        user_id="student-user-1",
+        institution_id="inst-1",
+    )
+    where = _where_sql(validated)
+    assert "sge.student_id" in where
+    assert "student-user-1" in where
+    assert "inst-1" in where
+
+
+async def test_student_grade_enrollments_teacher_restricted_to_taught_period_grade() -> None:
+    validated = await _scoped(
+        "SELECT * FROM student_grade_enrollments sge",
+        role="teacher",
+        user_id="teacher-1",
+        institution_id="inst-1",
+    )
+    tree = sqlglot.parse_one(validated, read="postgres")
+    outer_select = next(tree.find_all(exp.Select))
+    exists_node = _teaching_assignments_exists(outer_select)
+    inner_sql = exists_node.sql(dialect="postgres")
+    assert "sge.period_grade_id" in inner_sql
+    assert "sge.section_id" in inner_sql
+    assert "grade_subject_offerings" in inner_sql
+    where_sql = outer_select.args["where"].sql(dialect="postgres")
+    assert "teacher-1" in where_sql
+
+
+async def test_attempt_answers_student_restricted_to_own_attempts() -> None:
+    validated = await _scoped(
+        "SELECT * FROM attempt_answers aa",
+        role="student",
+        user_id="student-user-1",
+        institution_id="inst-1",
+    )
+    where = _where_sql(validated)
+    assert "aa.attempt_id" in where
+    assert "quiz_attempts" in where
+    assert "student-user-1" in where
+    assert "inst-1" in where
+
+
+async def test_attempt_answers_teacher_restricted_to_taught_attempts() -> None:
+    validated = await _scoped(
+        "SELECT * FROM attempt_answers aa",
+        role="teacher",
+        user_id="teacher-1",
+        institution_id="inst-1",
+    )
+    where = _where_sql(validated)
+    assert "aa.attempt_id" in where
+    assert "quiz_attempts" in where
+    assert "teacher-1" in where
+
+
+async def test_admin_on_newly_scoped_student_tables_is_institution_only() -> None:
+    for table, alias in (
+        ("student_subject_enrollments", "sse"),
+        ("student_grade_enrollments", "sge"),
+        ("attempt_answers", "aa"),
+    ):
+        validated = await _scoped(
+            f"SELECT * FROM {table} {alias}",
+            role="admin",
+            user_id="admin-1",
+            institution_id="inst-1",
+        )
+        where = _where_sql(validated).lower()
+        assert "inst-1" in where
+        assert "exists" not in where  # no taught-offering EXISTS clause for admin
+
+
+# --- Fail-closed table coverage: INSTITUTION_SCOPED_TABLES and refusal ---------------
+
+
+async def test_users_table_pinned_to_institution_for_every_role() -> None:
+    for role in ("admin", "teacher", "student"):
+        validated = await _scoped(
+            "SELECT full_name, email FROM users u", role=role, user_id="x", institution_id="i-1"
+        )
+        assert "u.institution_id = 'i-1'" in _where_sql(validated)
+
+
+async def test_teaching_assignments_pinned_to_institution_not_just_own_row() -> None:
+    # Institution-boundary only, per the design decision — teaching_assignments doesn't
+    # get a self/taught row predicate on top, just the institution pin, same as any other
+    # INSTITUTION_SCOPED_TABLES entry.
+    validated = await _scoped(
+        "SELECT * FROM teaching_assignments ta",
+        role="teacher",
+        user_id="teacher-1",
+        institution_id="i-1",
+    )
+    where = _where_sql(validated)
+    assert "academic_periods" in where
+    assert "i-1" in where
+    assert "teacher-1" not in where  # no self-only narrowing for this table (yet)
+
+
+async def test_deferred_curriculum_table_is_refused_not_passed_through() -> None:
+    # topics/questions/etc. are real, institution-partitioned data (confirmed against the
+    # live schema) but each needs its own bespoke multi-hop join predicate that hasn't
+    # been reviewed yet — refuse outright rather than silently resurrect the exact
+    # unscoped-pass-through gap this fix exists to close.
+    for sql in (
+        "SELECT * FROM topics t",
+        "SELECT * FROM questions q",
+        "SELECT * FROM quiz_releases qr",
+    ):
+        error = await _rejected(sql, role="teacher", user_id="x")
+        assert "not yet reviewed for role-based scoping" in error
+
+
+async def test_deferred_table_joined_alongside_a_classified_table_still_refused() -> None:
+    sql = "SELECT * FROM topics t JOIN subjects s ON s.id = t.grade_subject_offering_id"
+    error = await _rejected(sql, role="teacher", user_id="x")
+    assert "topics" in error
+
+
+async def test_template_query_source_skips_fail_closed_table_check() -> None:
+    # A template author is trusted to have hand-reviewed their own SQL, deferred tables
+    # included — matches the existing "template skips the AST rewrite" behavior.
+    sql = "SELECT * FROM topics t"
+    result = await apply_role_scope(
+        _state(sql, role="teacher", user_id="x", query_source="template")
+    )
+    assert result["error"] is None
+    assert result["validated_sql"] == sql
+
+
 # --- Step 4: query_source branch ------------------------------------------------------
 
 
@@ -371,7 +640,7 @@ async def test_rejection_clears_validated_sql_and_leaves_retry_count_untouched()
     assert result["retry_count"] == 1  # untouched — not generate_sql's job to retry into
 
 
-async def test_scope_sensitive_tables_is_the_documented_set() -> None:
+async def test_student_scoped_tables_is_the_documented_set() -> None:
     assert frozenset(
         {
             "student_360",
@@ -379,48 +648,72 @@ async def test_scope_sensitive_tables_is_the_documented_set() -> None:
             "quiz_attempts",
             "attendance_records",
             "student_material_progress",
+            "student_subject_enrollments",
+            "student_grade_enrollments",
+            "attempt_answers",
         }
-    ) == SCOPE_SENSITIVE_TABLES
+    ) == STUDENT_SCOPED_TABLES
 
 
-# --- Graph-level: ROLE_VIOLATION routes to honest_refusal, not the retry loop ----------
+async def test_institution_scoped_tables_is_the_documented_set() -> None:
+    assert frozenset(
+        {
+            "institutions",
+            "users",
+            "user_roles",
+            "refresh_sessions",
+            "grades",
+            "subjects",
+            "academic_periods",
+            "period_grades",
+            "sections",
+            "grade_subject_offerings",
+            "teaching_assignments",
+        }
+    ) == INSTITUTION_SCOPED_TABLES
 
 
-async def test_role_violation_routes_to_honest_refusal_through_compiled_graph(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    async def _fake_generate_sql(state: TextToSQLState) -> TextToSQLState:
-        # Bypass the real LLM call: hand validate_sql a query that will pass validation
-        # but that apply_role_scope must reject on blocklist grounds.
-        return {**state, "generated_sql": "SELECT password_hash FROM users", "error": None}
+async def test_student_and_institution_scoped_tables_are_disjoint() -> None:
+    assert STUDENT_SCOPED_TABLES & INSTITUTION_SCOPED_TABLES == set()
 
-    # graph.py did `from ...nodes import generate_sql`, binding its own module-level
-    # name — patching the nodes submodule's attribute (like generate_sql's own test
-    # file does) would not affect graph.py's already-bound reference; patch graph.py's
-    # own name instead, which build_text_to_sql_graph() resolves at call time.
-    monkeypatch.setattr(graph_module, "generate_sql", _fake_generate_sql)
 
-    graph = build_text_to_sql_graph()
-    initial: TextToSQLState = {
-        "question": "irrelevant",
-        "user_id": "admin-1",
-        "user_role": "admin",
-        "institution_id": "inst-1",
-        "schema_context": "",
-        "generated_sql": None,
-        "validated_sql": None,
-        "retry_count": 0,
-        "query_result": None,
-        "result_row_count": None,
-        "natural_answer": None,
-        "confidence": None,
-        "provenance": None,
-        "error": None,
-        "audit_entry": None,
-    }
-    result = await graph.ainvoke(initial, config={"recursion_limit": 15})
+async def test_every_required_table_except_deferred_curriculum_ones_is_classified() -> None:
+    # Fail-closed drift guard, mirroring validate_sql's own REQUIRED_TABLES cross-check:
+    # every table load_schema exposes to the LLM must be deliberately classified into one
+    # of the two scoping tiers, or explicitly named here as a known, documented, deferred
+    # gap (see the module docstring's "Table coverage" section) — never silently missing
+    # from all three, which would mean a future REQUIRED_TABLES addition passes through
+    # unscoped again without anyone noticing.
+    from education_platform.modules.text_to_sql.nodes.load_schema import REQUIRED_TABLES
 
-    assert error_category(result["error"]) == ROLE_VIOLATION
-    # Did not loop back into generate_sql's retry path: retry_count stayed at whatever
-    # validate_sql left it at (0 — it succeeded first try), not incremented again.
-    assert result["retry_count"] == 0
+    deferred_curriculum_tables = frozenset(
+        {
+            "topics",
+            "subtopics",
+            "learning_outcomes",
+            "source_materials",
+            "source_material_versions",
+            "source_chunks",
+            "questions",
+            "question_versions",
+            "question_options",
+            "question_outcome_tags",
+            "common_mastery_quizzes",
+            "quiz_versions",
+            "quiz_items",
+            "quiz_material_bindings",
+            "quiz_releases",
+        }
+    )
+    always_blocked_tables = frozenset({"question_answer_keys"})
+    classified = STUDENT_SCOPED_TABLES | INSTITUTION_SCOPED_TABLES | deferred_curriculum_tables
+    unaccounted = set(REQUIRED_TABLES) - classified - always_blocked_tables
+    assert not unaccounted, f"new REQUIRED_TABLES entries with no scoping review: {unaccounted}"
+
+
+# Graph-level: "ROLE_VIOLATION routes to honest_refusal, not the retry loop" used to live
+# here, but now that audit_log (Task 10) runs unconditionally at the end of every full
+# graph invocation, any full-graph test needs a real database — moved to
+# test_text_to_sql_apply_role_scope_integration.py
+# (test_role_violation_routes_to_honest_refusal_through_compiled_graph), which already has
+# the Postgres fixtures this file deliberately does not.

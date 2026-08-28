@@ -5,6 +5,8 @@ from __future__ import annotations
 import pytest
 
 from education_platform.modules.text_to_sql.state import (
+    AUDIT_ERROR,
+    EXECUTION_ERROR,
     LLM_ERROR,
     ROLE_VIOLATION,
     VALIDATION_ERROR,
@@ -13,7 +15,9 @@ from education_platform.modules.text_to_sql.state import (
 )
 
 
-@pytest.mark.parametrize("category", [LLM_ERROR, VALIDATION_ERROR, ROLE_VIOLATION])
+@pytest.mark.parametrize(
+    "category", [LLM_ERROR, VALIDATION_ERROR, ROLE_VIOLATION, EXECUTION_ERROR, AUDIT_ERROR]
+)
 def test_format_and_parse_round_trip(category: str) -> None:
     formatted = format_error(category, "some detail")
     assert formatted == f"{category}: some detail"
@@ -31,10 +35,10 @@ def test_error_category_returns_none_for_none() -> None:
 
 def test_error_category_returns_none_for_foreign_text() -> None:
     # Text that never went through format_error (legacy, or a bug in some node) should
-    # not be misclassified as one of the three known categories.
+    # not be misclassified as one of the known categories.
     assert error_category("some random exception message") is None
     assert error_category("validate_sql: old-style unprefixed message") is None
 
 
-def test_the_three_categories_are_distinct() -> None:
-    assert len({LLM_ERROR, VALIDATION_ERROR, ROLE_VIOLATION}) == 3
+def test_the_five_categories_are_distinct() -> None:
+    assert len({LLM_ERROR, VALIDATION_ERROR, ROLE_VIOLATION, EXECUTION_ERROR, AUDIT_ERROR}) == 5
