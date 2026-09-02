@@ -414,14 +414,154 @@ async def test_multiple_sentinel_occurrences_all_resolved() -> None:
 async def test_sentinel_resolved_before_fail_closed_table_check() -> None:
     # A sentinel used inside a deferred/unscopable table's query must still hit the
     # fail-closed refusal on the table itself -- resolving identity first doesn't create
-    # a bypass for the table-coverage gate.
+    # a bypass for the table-coverage gate. Uses a table name that will never be
+    # classified (not real curriculum content, just a stand-in for "some future
+    # REQUIRED_TABLES addition nobody has reviewed yet") so this test's claim about
+    # *ordering* stays true regardless of which real tables are classified over time.
     error = await _rejected(
-        "SELECT * FROM topics WHERE grade_subject_offering_id = '__CURRENT_USER_ID__'",
+        "SELECT * FROM some_future_table WHERE grade_subject_offering_id = '__CURRENT_USER_ID__'",
         role="teacher",
         user_id="teacher-1",
     )
-    assert "topics" in error
+    assert "some_future_table" in error
     assert "not yet reviewed for role-based scoping" in error
+
+
+# --- Fix (Row 28): sentinel bound against a structurally wrong identity column --------
+
+
+async def test_row_28_exact_shape_teacher_sentinel_against_student_id_rejected() -> None:
+    # The exact live query: unqualified `student_id` (no table prefix), single-table
+    # FROM student_360, teacher role. Must reject, not silently bind and execute.
+    error = await _rejected(
+        "SELECT AVG(mastery_percent) AS average_score FROM student_360 "
+        "WHERE student_id = '__CURRENT_USER_ID__'",
+        role="teacher",
+        user_id="teacher-1",
+    )
+    assert "does not identify the asking user" in error
+
+
+async def test_qualified_teacher_sentinel_against_student_id_rejected() -> None:
+    # Same mismatch, but with an explicit alias qualifier instead of row 28's bare
+    # column -- confirms the qualified-column resolution path independently.
+    error = await _rejected(
+        "SELECT s.full_name FROM student_360 s WHERE s.student_id = '__CURRENT_USER_ID__'",
+        role="teacher",
+        user_id="teacher-1",
+    )
+    assert "does not identify the asking user" in error
+
+
+async def test_reverse_case_student_sentinel_against_teacher_identity_rejected() -> None:
+    # Step 0's reverse case: a student's own token can no more claim to be a specific
+    # teacher than a teacher's can claim to be a specific student.
+    error = await _rejected(
+        "SELECT * FROM teaching_assignments WHERE teacher_user_id = '__CURRENT_USER_ID__'",
+        role="student",
+        user_id="student-1",
+    )
+    assert "does not identify the asking user" in error
+
+
+async def test_reverse_case_student_sentinel_against_recorded_by_rejected() -> None:
+    error = await _rejected(
+        "SELECT * FROM attendance_records WHERE recorded_by_user_id = '__CURRENT_USER_ID__'",
+        role="student",
+        user_id="student-1",
+    )
+    assert "does not identify the asking user" in error
+
+
+async def test_legitimate_self_reference_cases_are_unaffected() -> None:
+    # Rows 15/16/18's real shapes -- teacher token against teacher_user_id, and the
+    # role-agnostic users.id -- must still resolve and scope normally, not be rejected.
+    validated = await _scoped(
+        "SELECT s.name FROM teaching_assignments ta "
+        "JOIN grade_subject_offerings gso ON gso.id = ta.grade_subject_offering_id "
+        "JOIN subjects s ON s.id = gso.subject_id "
+        "WHERE ta.teacher_user_id = '__CURRENT_USER_ID__'",
+        role="teacher",
+        user_id="teacher-1",
+        institution_id="inst-1",
+    )
+    assert "teacher-1" in validated
+    assert "__CURRENT_USER_ID__" not in validated
+
+    validated2 = await _scoped(
+        "SELECT s.name FROM teaching_assignments ta JOIN sections s ON s.id = ta.section_id "
+        "WHERE ta.teacher_user_id = '__CURRENT_USER_ID__'",
+        role="teacher",
+        user_id="teacher-1",
+        institution_id="inst-1",
+    )
+    assert "teacher-1" in validated2
+
+    validated3 = await _scoped(
+        "SELECT email FROM users WHERE id = '__CURRENT_USER_ID__'",
+        role="teacher",
+        user_id="teacher-1",
+        institution_id="inst-1",
+    )
+    assert "teacher-1" in validated3
+
+
+async def test_admin_sentinel_allowed_against_either_identity_shape() -> None:
+    # Admin is otherwise unrestricted elsewhere in this file; the identity-mismatch check
+    # extends that same posture rather than inventing a narrower rule for admin alone.
+    for sql, alias in (
+        ("SELECT * FROM student_360 s WHERE s.student_id = '__CURRENT_USER_ID__'", "s"),
+        (
+            "SELECT * FROM teaching_assignments ta WHERE ta.teacher_user_id = "
+            "'__CURRENT_USER_ID__'",
+            "ta",
+        ),
+    ):
+        validated = await _scoped(
+            sql, role="admin", user_id="admin-1", institution_id="inst-1"
+        )
+        assert "admin-1" in validated
+
+
+async def test_unqualified_column_in_a_join_is_not_guessed_at() -> None:
+    # A bare column with more than one table in scope is genuinely ambiguous -- must not
+    # be rejected on a guess, and must still resolve/scope normally.
+    validated = await _scoped(
+        "SELECT sp.full_name FROM student_profiles sp "
+        "JOIN student_360 s360 ON s360.student_id = sp.id "
+        "WHERE user_id = '__CURRENT_USER_ID__'",  # bare -- ambiguous between the two tables
+        role="student",
+        user_id="student-1",
+        institution_id="inst-1",
+    )
+    assert "student-1" in validated
+
+
+async def test_mismatch_check_runs_before_sentinel_substitution() -> None:
+    # If substitution ran first, the mismatch check would see the real UUID, not the
+    # sentinel, and could never detect anything -- confirm rejection actually happens.
+    result = await apply_role_scope(
+        _state(
+            "SELECT * FROM student_360 WHERE student_id = '__CURRENT_USER_ID__'",
+            role="teacher",
+            user_id="teacher-1",
+        )
+    )
+    assert result["validated_sql"] is None
+    assert "teacher-1" not in (result.get("error") or "")  # never leaked into the error
+
+
+async def test_deferred_table_takes_priority_over_a_coincidental_identity_mismatch() -> None:
+    # A query touching an unreviewed/deferred table must be refused for *that*, not for
+    # a coincidentally-also-true identity mismatch on a column nobody has classified.
+    # Same synthetic-table reasoning as the ordering test above.
+    error = await _rejected(
+        "SELECT * FROM some_future_table WHERE grade_subject_offering_id = '__CURRENT_USER_ID__'",
+        role="teacher",
+        user_id="teacher-1",
+    )
+    assert "not yet reviewed for role-based scoping" in error
+    assert "does not identify the asking user" not in error
 
 
 # --- Fail-closed table coverage: newly-promoted STUDENT_SCOPED_TABLES ----------------
@@ -565,13 +705,13 @@ async def test_teaching_assignments_pinned_to_institution_not_just_own_row() -> 
 
 
 async def test_deferred_curriculum_table_is_refused_not_passed_through() -> None:
-    # topics/questions/etc. are real, institution-partitioned data (confirmed against the
-    # live schema) but each needs its own bespoke multi-hop join predicate that hasn't
-    # been reviewed yet — refuse outright rather than silently resurrect the exact
-    # unscoped-pass-through gap this fix exists to close.
+    # These are real, institution-partitioned data (confirmed against the live schema)
+    # but each is scheduled for Batch 3 of the deferred-curriculum scoping project and
+    # hasn't been reviewed yet as of this batch (Batch 1) — refuse outright rather than
+    # silently resurrect the exact unscoped-pass-through gap this fix exists to close.
     for sql in (
-        "SELECT * FROM topics t",
-        "SELECT * FROM questions q",
+        "SELECT * FROM source_chunks sc",
+        "SELECT * FROM quiz_items qi",
         "SELECT * FROM quiz_releases qr",
     ):
         error = await _rejected(sql, role="teacher", user_id="x")
@@ -579,20 +719,180 @@ async def test_deferred_curriculum_table_is_refused_not_passed_through() -> None
 
 
 async def test_deferred_table_joined_alongside_a_classified_table_still_refused() -> None:
-    sql = "SELECT * FROM topics t JOIN subjects s ON s.id = t.grade_subject_offering_id"
+    sql = "SELECT * FROM quiz_releases qr JOIN subjects s ON s.id = qr.quiz_version_id"
     error = await _rejected(sql, role="teacher", user_id="x")
-    assert "topics" in error
+    assert "quiz_releases" in error
 
 
 async def test_template_query_source_skips_fail_closed_table_check() -> None:
     # A template author is trusted to have hand-reviewed their own SQL, deferred tables
     # included — matches the existing "template skips the AST rewrite" behavior.
-    sql = "SELECT * FROM topics t"
+    sql = "SELECT * FROM quiz_releases qr"
     result = await apply_role_scope(
         _state(sql, role="teacher", user_id="x", query_source="template")
     )
     assert result["error"] is None
     assert result["validated_sql"] == sql
+
+
+# --- Batch 1: deferred-curriculum-table scoping project -------------------------------
+# topics/subtopics/learning_outcomes/source_materials/questions/common_mastery_quizzes
+# move from "refused" to INSTITUTION_SCOPED_TABLES. AST-only checks that the predicate
+# text nests the right one-hop wrapper; live-data proof of correct row narrowing lives in
+# test_text_to_sql_apply_role_scope_integration.py.
+
+
+async def test_topics_pinned_via_one_hop_to_grade_subject_offerings() -> None:
+    validated = await _scoped(
+        "SELECT * FROM topics t", role="teacher", user_id="x", institution_id="inst-1"
+    )
+    where = _where_sql(validated)
+    assert "t.grade_subject_offering_id" in where
+    assert "grade_subject_offerings" in where
+    assert "inst-1" in where
+
+
+async def test_subtopics_pinned_via_one_hop_to_topics() -> None:
+    validated = await _scoped(
+        "SELECT * FROM subtopics st", role="teacher", user_id="x", institution_id="inst-1"
+    )
+    where = _where_sql(validated)
+    assert "st.topic_id" in where
+    assert "topics" in where
+    assert "grade_subject_offerings" in where  # topics' own predicate nested one level in
+    assert "inst-1" in where
+
+
+async def test_learning_outcomes_source_materials_questions_pinned_via_subtopic_id() -> None:
+    for table, alias in (
+        ("learning_outcomes", "lo"),
+        ("source_materials", "sm"),
+        ("questions", "q"),
+    ):
+        validated = await _scoped(
+            f"SELECT * FROM {table} {alias}",
+            role="teacher",
+            user_id="x",
+            institution_id="inst-1",
+        )
+        where = _where_sql(validated)
+        assert f"{alias}.subtopic_id" in where
+        assert "subtopics" in where
+        assert "inst-1" in where
+
+
+async def test_common_mastery_quizzes_pinned_via_either_subtopic_or_topic() -> None:
+    validated = await _scoped(
+        "SELECT * FROM common_mastery_quizzes cmq",
+        role="teacher",
+        user_id="x",
+        institution_id="inst-1",
+    )
+    where = _where_sql(validated)
+    assert "cmq.subtopic_id is not null" in where.lower()
+    assert "cmq.topic_id is not null" in where.lower()
+    assert "subtopics" in where
+    assert "topics" in where
+    assert "inst-1" in where
+
+
+async def test_admin_on_batch_1_curriculum_tables_is_institution_only() -> None:
+    # No self/taught row predicate exists for any of these — none has a student or
+    # teacher identity column at all — so admin vs. teacher vs. student should produce
+    # the identical institution-only predicate (mirrors
+    # test_admin_on_newly_scoped_student_tables_is_institution_only's shape, but here
+    # every role gets the same result since there's no row predicate to skip).
+    for table, alias in (
+        ("topics", "t"),
+        ("subtopics", "st"),
+        ("learning_outcomes", "lo"),
+        ("source_materials", "sm"),
+        ("questions", "q"),
+        ("common_mastery_quizzes", "cmq"),
+    ):
+        wheres = {
+            role: _where_sql(
+                await _scoped(
+                    f"SELECT * FROM {table} {alias}",
+                    role=role,
+                    user_id="x",
+                    institution_id="inst-1",
+                )
+            )
+            for role in ("admin", "teacher", "student")
+        }
+        assert wheres["admin"] == wheres["teacher"] == wheres["student"]
+
+
+# --- Batch 2: deferred-curriculum-table scoping project -------------------------------
+# source_material_versions/question_versions/quiz_versions -- each one hop from a
+# Batch-1 table.
+
+
+async def test_batch_2_tables_pinned_via_one_hop_to_batch_1_parent() -> None:
+    cases = (
+        ("source_material_versions", "smv", "source_material_id", "source_materials"),
+        ("question_versions", "qv", "question_id", "questions"),
+        ("quiz_versions", "qzv", "quiz_id", "common_mastery_quizzes"),
+    )
+    for table, alias, fk_column, parent_table in cases:
+        validated = await _scoped(
+            f"SELECT * FROM {table} {alias}",
+            role="teacher",
+            user_id="x",
+            institution_id="inst-1",
+        )
+        where = _where_sql(validated)
+        assert f"{alias}.{fk_column}" in where
+        assert parent_table in where
+        assert "inst-1" in where
+
+
+async def test_admin_on_batch_2_curriculum_tables_is_institution_only() -> None:
+    for table, alias in (
+        ("source_material_versions", "smv"),
+        ("question_versions", "qv"),
+        ("quiz_versions", "qzv"),
+    ):
+        wheres = {
+            role: _where_sql(
+                await _scoped(
+                    f"SELECT * FROM {table} {alias}",
+                    role=role,
+                    user_id="x",
+                    institution_id="inst-1",
+                )
+            )
+            for role in ("admin", "teacher", "student")
+        }
+        assert wheres["admin"] == wheres["teacher"] == wheres["student"]
+
+
+async def test_batch_2_tables_no_longer_refused() -> None:
+    for table, alias in (
+        ("source_material_versions", "smv"),
+        ("question_versions", "qv"),
+        ("quiz_versions", "qzv"),
+    ):
+        result = await apply_role_scope(
+            _state(f"SELECT * FROM {table} {alias}", role="teacher", user_id="x")
+        )
+        assert result["error"] is None, f"{table}: {result.get('error')!r}"
+
+
+async def test_batch_1_tables_no_longer_refused() -> None:
+    for table, alias in (
+        ("topics", "t"),
+        ("subtopics", "st"),
+        ("learning_outcomes", "lo"),
+        ("source_materials", "sm"),
+        ("questions", "q"),
+        ("common_mastery_quizzes", "cmq"),
+    ):
+        result = await apply_role_scope(
+            _state(f"SELECT * FROM {table} {alias}", role="teacher", user_id="x")
+        )
+        assert result["error"] is None, f"{table}: {result.get('error')!r}"
 
 
 # --- Step 4: query_source branch ------------------------------------------------------
@@ -669,6 +969,17 @@ async def test_institution_scoped_tables_is_the_documented_set() -> None:
             "sections",
             "grade_subject_offerings",
             "teaching_assignments",
+            # Batch 1 of the deferred-curriculum-table scoping project.
+            "topics",
+            "subtopics",
+            "learning_outcomes",
+            "source_materials",
+            "questions",
+            "common_mastery_quizzes",
+            # Batch 2.
+            "source_material_versions",
+            "question_versions",
+            "quiz_versions",
         }
     ) == INSTITUTION_SCOPED_TABLES
 
@@ -686,20 +997,15 @@ async def test_every_required_table_except_deferred_curriculum_ones_is_classifie
     # unscoped again without anyone noticing.
     from education_platform.modules.text_to_sql.nodes.load_schema import REQUIRED_TABLES
 
+    # Batches 1-2 (topics/subtopics/learning_outcomes/source_materials/questions/
+    # common_mastery_quizzes/source_material_versions/question_versions/quiz_versions)
+    # have moved to INSTITUTION_SCOPED_TABLES; the remainder are still deferred pending
+    # Batch 3.
     deferred_curriculum_tables = frozenset(
         {
-            "topics",
-            "subtopics",
-            "learning_outcomes",
-            "source_materials",
-            "source_material_versions",
             "source_chunks",
-            "questions",
-            "question_versions",
             "question_options",
             "question_outcome_tags",
-            "common_mastery_quizzes",
-            "quiz_versions",
             "quiz_items",
             "quiz_material_bindings",
             "quiz_releases",

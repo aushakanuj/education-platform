@@ -32,7 +32,11 @@ from education_platform.modules.text_to_sql.nodes.load_schema import (
     _validate_filtered,
     load_schema,
 )
-from education_platform.modules.text_to_sql.state import TextToSQLState
+from education_platform.modules.text_to_sql.state import (
+    SCHEMA_ERROR,
+    TextToSQLState,
+    error_category,
+)
 
 
 class _LoadSchemaModule(Protocol):
@@ -208,12 +212,14 @@ def test_relevant_glossary_rows_survive() -> None:
 
 
 def test_general_gotcha_bullets_survive_scrubbed_of_excluded_names() -> None:
+    # The double-prefixed-CHECK-constraint gotcha bullet that used to live here was
+    # removed from schema_catalog.md entirely (migration d0e1f2a3b4c5 fixed the bug it
+    # described, and the root cause is fixed at the source too -- see db/base.py -- so
+    # there is nothing left to warn a reader about). This test now only covers the
+    # *other* general bullets that still need scrubbing to survive the excluded-table
+    # line-drop.
     filtered = _filter_schema_catalog(_raw_catalog())
-    assert "silently double-prefixed" in filtered
-    assert "common_mastery_quizzes" in filtered  # the rewritten bullet's new example
-    # And the two tables it originally illustrated with must not have leaked back in.
-    assert "ingest_jobs" not in filtered
-    assert "chunk_embeddings" not in filtered
+    assert "silently double-prefixed" not in filtered
     for snippet in (
         "mastery_percent` is `0`, not `NULL`",
         "Excused attendance is excluded from the denominator",
@@ -278,7 +284,7 @@ async def test_missing_file_sets_error_not_a_broken_context(tmp_path: Path) -> N
         _load_filtered_schema_context.cache_clear()
 
     assert result["error"] is not None
-    assert "load_schema" in result["error"]
+    assert error_category(result["error"]) == SCHEMA_ERROR
     assert result.get("schema_context") in (None, "")
 
 
@@ -294,6 +300,7 @@ async def test_malformed_file_sets_error_not_a_broken_context(tmp_path: Path) ->
         _load_filtered_schema_context.cache_clear()
 
     assert result["error"] is not None
+    assert error_category(result["error"]) == SCHEMA_ERROR
     assert result.get("schema_context") in (None, "")
 
 
@@ -354,9 +361,14 @@ async def test_load_schema_failure_routes_to_honest_refusal_via_graph(
         _load_filtered_schema_context.cache_clear()
 
     assert result["error"] is not None
+    assert error_category(result["error"]) == SCHEMA_ERROR
     # generate_sql/validate_sql/sanity_check never ran: schema_context stayed empty.
     assert result["schema_context"] == ""
     # sanity_check itself never touched confidence (it never ran on this failure path),
     # but honest_refusal (Task 11) sets it to "low" whenever it's still unset by the time
     # a refusal is produced — the correct, spec'd behavior, not a bug.
     assert result["confidence"] == "low"
+    # honest_refusal's fixed, category-keyed message reached the caller -- the real
+    # exception text (which can carry the catalog file's real path) never did.
+    assert result["natural_answer"] == "Something went wrong on our end — please try again."
+    assert "missing.md" not in result["natural_answer"]

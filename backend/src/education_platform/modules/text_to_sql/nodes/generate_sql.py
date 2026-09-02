@@ -39,6 +39,31 @@ teaches one fixed, literal token instead (never a name/guess/subquery); apply_ro
 resolves it to the real `state["user_id"]` before execution — the same node, and the
 same "identity only ever comes from state, never from the model" discipline, that
 already builds every other identity-keyed predicate in this pipeline.
+
+Multi-row-per-entity joins (DISTINCT/EXISTS guidance): a live eval run found "list the
+students enrolled in my subject offerings" returning 120 rows for a teacher with 72 real
+students. Root cause, confirmed against real data: the query joined `teaching_assignments`
+directly, and this teacher (like every teacher in the seed data checked — 24 of 24 have
+this shape) has two assignment rows for the same subject offering, one per section she
+teaches. Every matching student got counted once per matching assignment row. This isn't
+`apply_role_scope`'s bug — its own injected predicates already use `EXISTS(...)`
+specifically to avoid this — it's that the model's own join, written for filtering rather
+than for reading an assignment-specific column, multiplies rows the same way any
+un-deduplicated JOIN would. `quiz_attempts` has the identical shape for a different
+reason (`attempt_number`). The system prompt below teaches the general pattern —
+`DISTINCT` or `EXISTS` — rather than special-casing either table, since this is a
+structural property of the schema (any table modeling a one-to-many relationship the
+question doesn't care about the "many" side of), not a one-off.
+
+Avoid unnecessary deferred-table routing: the same eval run found 3 of 39 questions
+(rows asking about a specific quiz's pass rate, a subject-filtered score list, and
+unsubmitted quiz attempts) routed through `quiz_versions`/`topics` and got refused by
+`apply_role_scope`'s Roadmap-7A deferred-table gate — even though structurally similar
+questions elsewhere in the same run answered successfully via a simpler path (`subjects`
+directly, or `quiz_attempts` alone). A real, recurring pattern (not a one-off), not a
+security concern (the refusal is safe), but an avoidable one: the system prompt below
+asks the model to prefer the simplest join path and reserve the curriculum tables for
+when the question genuinely can't be answered without them.
 """
 
 from __future__ import annotations
@@ -81,6 +106,23 @@ WHERE ta.teacher_user_id = '__CURRENT_USER_ID__'`. Only use this for a genuine \
 self-reference to the asking user — never for any other person the question names or \
 implies (a specific student, another teacher), and never when the question doesn't \
 need it at all.
+- Some tables can legitimately have more than one row per real-world entity you care \
+about — most commonly `teaching_assignments` (a teacher who teaches the same subject to \
+two sections has two rows sharing one grade_subject_offering_id) and `quiz_attempts` (a \
+student who retried a quiz has one row per attempt_number). If you JOIN one of these \
+tables only to check that a qualifying row exists — not to read a value specific to \
+that one row — add `DISTINCT` to your outer SELECT, or reformulate the join as an \
+`EXISTS (...)` subquery. Otherwise the same student can appear more than once in your \
+result, once per matching row, even though the answer should count or list them once.
+- Prefer the simplest join path that actually answers the question. Only join through \
+`topics`, `subtopics`, `questions`, `question_versions`, `common_mastery_quizzes`, or \
+`quiz_versions` when the question genuinely needs curriculum-specific data (a topic \
+name, a specific quiz's identity, a question bank count) that has no simpler \
+equivalent — for example, filtering by *subject* only needs the `subjects` table \
+(never `topics`), and filtering by whether a quiz was passed only needs \
+`quiz_attempts.passed` (never `quiz_versions`). These curriculum tables are currently \
+refused outright by a later step regardless of role, so routing through one \
+unnecessarily turns an answerable question into a refusal.
 - Return ONLY the SQL query, in a single ```sql fenced code block, with no other \
 commentary before or after it."""
 

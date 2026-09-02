@@ -27,12 +27,20 @@ from education_platform.modules.text_to_sql.state import (
     EXECUTION_ERROR,
     LLM_ERROR,
     ROLE_VIOLATION,
+    SCHEMA_ERROR,
     VALIDATION_ERROR,
     TextToSQLState,
     format_error,
 )
 
-ALL_CATEGORIES = (LLM_ERROR, VALIDATION_ERROR, ROLE_VIOLATION, EXECUTION_ERROR, AUDIT_ERROR)
+ALL_CATEGORIES = (
+    SCHEMA_ERROR,
+    LLM_ERROR,
+    VALIDATION_ERROR,
+    ROLE_VIOLATION,
+    EXECUTION_ERROR,
+    AUDIT_ERROR,
+)
 
 # Distinctive markers that must never survive into natural_answer, standing in for the
 # kinds of internals a real error/SQL string would carry.
@@ -61,6 +69,12 @@ def _answer(result: TextToSQLState) -> str:
 
 
 # --- One message per category, category-appropriate -------------------------------------
+
+
+async def test_schema_error_message() -> None:
+    result = await honest_refusal(_state(error=format_error(SCHEMA_ERROR, _SECRET_DETAIL)))
+    answer = _answer(result).lower()
+    assert "our end" in answer or "went wrong" in answer
 
 
 async def test_llm_error_message() -> None:
@@ -120,6 +134,18 @@ async def test_execution_error_and_audit_error_share_the_generic_infrastructure_
     assert execution_error == audit_error
 
 
+async def test_schema_error_shares_the_generic_infrastructure_message_too() -> None:
+    # SCHEMA_ERROR joins the same bucket as EXECUTION_ERROR/AUDIT_ERROR for the same
+    # reason: infrastructure failure, not the user's fault, "try rephrasing" wouldn't help.
+    schema_error = _answer(
+        await honest_refusal(_state(error=format_error(SCHEMA_ERROR, _SECRET_DETAIL)))
+    )
+    execution_error = _answer(
+        await honest_refusal(_state(error=format_error(EXECUTION_ERROR, _SECRET_DETAIL)))
+    )
+    assert schema_error == execution_error
+
+
 # --- Never leaks internals, across every category ----------------------------------------
 
 
@@ -155,14 +181,16 @@ async def test_missing_error_falls_back_gracefully() -> None:
 
 
 async def test_unrecognized_error_text_falls_back_gracefully() -> None:
-    # load_schema's own failure doesn't go through format_error() (see its docstring) —
-    # error_category() returns None for it. Must still produce an honest message, not
-    # crash or produce something nonsensical.
-    result = await honest_refusal(_state(error="load_schema: schema_catalog.md not readable"))
+    # Every node in this pipeline formats state["error"] via format_error() today (see
+    # state.py's own category list), but this fallback must not assume that always holds
+    # -- a category consumer shouldn't break the moment some future producer regresses.
+    # An arbitrary, deliberately-unformatted string exercises that defensively, not tied
+    # to any one node's real (and currently correct) behavior.
+    result = await honest_refusal(_state(error="some prehistoric unformatted failure text"))
     answer = _answer(result)
     assert answer
     assert "went wrong" in answer.lower()
-    assert "schema_catalog.md" not in answer
+    assert "prehistoric" not in answer
 
 
 async def test_empty_state_does_not_crash() -> None:

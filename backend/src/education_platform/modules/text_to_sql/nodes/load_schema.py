@@ -36,6 +36,19 @@ Filtering approach, in order:
    top-level section headers. Any failure here means the filter itself broke (e.g.
    schema_catalog.md's structure changed) — fail loudly rather than ship a silently
    gutted or leaky context.
+
+Any `SchemaCatalogError` from the steps above (missing/unreadable file, or step 6's own
+validation failing) is reported via `format_error(SCHEMA_ERROR, str(exc))`, the same
+category-prefix convention every other node in this pipeline uses — this node used to set
+`state["error"]` as a raw, unformatted string, which meant `error_category()` came back
+`None` for it specifically and audit_log had to keep the raw text alongside the (missing)
+category "so nothing gets lost." Now that this node formats its errors like everything
+else, `error_category()` classifies it correctly too; `state["error"]`'s full text
+(`SchemaCatalogError`'s message, which can include the real catalog file path) still goes
+to `state["audit_entry"]`/logging only, never to the user-facing message — same no-leak
+discipline as `EXECUTION_ERROR`, which `SCHEMA_ERROR` shares its generic honest_refusal
+wording with (see `state.py`'s own docstring for why this got a new category rather than
+reusing EXECUTION_ERROR's).
 """
 
 from __future__ import annotations
@@ -44,7 +57,11 @@ import re
 from functools import lru_cache
 from pathlib import Path
 
-from education_platform.modules.text_to_sql.state import TextToSQLState
+from education_platform.modules.text_to_sql.state import (
+    SCHEMA_ERROR,
+    TextToSQLState,
+    format_error,
+)
 
 SCHEMA_CATALOG_PATH = Path(__file__).resolve().parent.parent / "schema_catalog.md"
 
@@ -201,37 +218,6 @@ def _scrub_general_bullets(text: str) -> str:
         "updates `onupdate=now()`).",
         label="the timestamps convention bullet",
     )
-    text = _replace_once(
-        text,
-        "- **Most named `CHECK` constraints in this database are silently "
-        "double-prefixed from their intended name** (e.g. the intended "
-        "`ck_ingest_jobs_target_kind` was actually stored as "
-        "`ck_ingest_jobs_ck_ingest_jobs_target_kind` before migration `b9c0d1e2f3a4` "
-        "touched it) — a long-standing bug in how `alembic/env.py` binds "
-        "`target_metadata`, affecting every `CheckConstraint(name=...)` declared inside "
-        "`op.create_table(...)` across the migration history. This doesn't affect query "
-        "results (the `CHECK` still enforces correctly; only its catalog name is "
-        "wrong), but it matters if a query inspects "
-        "`information_schema.check_constraints`/`pg_constraint` by name, or if you're "
-        "writing a migration that needs to `DROP`/`ALTER` one of these by its "
-        '"obvious" name — verify the actual name in `pg_constraint` first rather than '
-        "assuming it matches the source code's `name=` argument. Not yet fixed "
-        "schema-wide; only `chunk_embeddings.doc_kind` and `ingest_jobs`' constraint "
-        "(as a side effect of its migration) currently have correct names.",
-        "- **Most named `CHECK` constraints in this database are silently "
-        "double-prefixed from their intended name** (e.g. `common_mastery_quizzes`' "
-        '"exactly one target" constraint, intended as '
-        "`ck_common_mastery_quizzes_exactly_one_target`, is actually stored "
-        "double-prefixed and hash-truncated) — a long-standing bug in how "
-        "`alembic/env.py` binds `target_metadata`, affecting every "
-        "`CheckConstraint(name=...)` declared inside `op.create_table(...)` across the "
-        "migration history. This doesn't affect query results (the `CHECK` still "
-        "enforces correctly; only its catalog name is wrong), but it matters if a "
-        "query inspects `information_schema.check_constraints`/`pg_constraint` by "
-        "name — verify the actual stored name in `pg_constraint` first rather than "
-        "assuming it matches the source code's `name=` argument.",
-        label="the double-prefixed CHECK constraint gotcha bullet",
-    )
     return text
 
 
@@ -316,5 +302,5 @@ async def load_schema(state: TextToSQLState) -> TextToSQLState:
     try:
         schema_context = _load_filtered_schema_context()
     except SchemaCatalogError as exc:
-        return {**state, "error": f"load_schema: {exc}"}
+        return {**state, "error": format_error(SCHEMA_ERROR, str(exc))}
     return {**state, "schema_context": schema_context}

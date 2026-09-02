@@ -27,11 +27,17 @@ so they go in `payload`); `user_id`/`institution_id` go in `AuditEvent`'s own ty
 and `validated_sql` in full — this is the one place in the whole pipeline raw SQL is
 allowed to be persisted (it must never reach `compose_answer`'s output or any user-facing
 field, but an auditor needs the real query); `result_row_count`, `confidence`, the full
-`sanity_check_triggers` list, `retry_count`, and `outcome` ("answered"/"refused") plus,
-if refused, both the formatted error *category* and the raw error text (some upstream
-errors — see `load_schema.py`'s own unformatted `state["error"]` — don't go through
-`format_error()`, so `error_category()` alone can come back `None`; the raw text is kept
-alongside it so nothing is silently lost to that gap). `created_at` is `AuditEvent`'s own
+`sanity_check_triggers` list, `retry_count`, and `outcome` ("answered"/"refused") plus, if
+refused, both the formatted error *category* (`error_category(error)`) and the raw error
+text (`error_detail`) — every node in this pipeline now formats `state["error"]` via
+`format_error()` (load_schema's SCHEMA_ERROR closed the last gap, where its own
+unformatted string used to make `error_category()` come back `None` for it specifically),
+but `error_detail` is kept regardless, for every category, not as a fallback for an
+unparseable one: `SchemaCatalogError`'s message can carry the real catalog file path,
+`SQLAlchemyError`'s can carry schema/constraint fragments — detail an auditor
+investigating a real failure needs and the category alone doesn't carry, the same reason
+`execute_sql` separately records `execution_error_type`/`execution_error_detail` rather
+than trusting `EXECUTION_ERROR` alone to be enough. `created_at` is `AuditEvent`'s own
 server-defaulted timestamp column — nothing extra needed for that.
 
 **Not recorded: `query_result`'s actual row contents, only `result_row_count`.** Copying

@@ -3,7 +3,7 @@ Honors everything upstream nodes already decided — never re-derives or second-
 state["confidence"], state["error"], or the data itself. This node phrases; it does not
 judge.
 
-**LLM call: only when the data actually needs natural-language shaping.** Two result
+**LLM call: only when the data actually needs natural-language shaping.** Three result
 shapes are fully deterministic and get templated phrasing with no model call at all:
 
 * **Zero rows** — "I couldn't find any records matching that question." is the honest,
@@ -15,16 +15,54 @@ shapes are fully deterministic and get templated phrasing with no model call at 
   come out wrong. (This is a *different* case from zero rows: `SELECT COUNT(*) ...`
   always returns exactly one row, even when the count is 0 — that row still goes through
   this path, not the zero-row one.)
+* **A small, single-column list** (2 to `_ENUMERABLE_LIST_ROW_CAP` rows, every row
+  carrying just one column of the same name — e.g. "what subjects do I teach" returning
+  `[{"name": "Mathematics"}, {"name": "Science"}]`). This is the same shape as the
+  single-scalar case, generalized along one dimension (several values instead of one),
+  and it carries the exact same risk the single-scalar case was built to avoid: real
+  evidence (a live eval run) showed the LLM-summarization path silently dropping one of
+  three real values when asked "what subject do I teach" — a teacher with Mathematics and
+  Science assignments got told "You teach Mathematics," Science omitted, no error, no low
+  confidence, nothing to signal the answer was incomplete. That's exactly the "a number
+  that is already correct could come out wrong" failure Task 9 built the single-scalar
+  path to prevent, just for a short list instead of one value — so the same fix applies:
+  enumerate the distinct values directly from the rows (deduplicated, order preserved),
+  never re-typed by a model. The cap (10) is a readability judgment, not a correctness
+  one: enumerating "Mathematics, Science, and English" reads fine; enumerating 30 rows
+  does not, and at that size a real prose summary is more useful anyway — see the LLM
+  path below for anything past the cap, and for any multi-column result at any size,
+  where a safe generic template does not exist.
 
-Everything else — a multi-row result, or a single row with more than one column — goes
-through an LLM call (same OpenRouter client/pattern as generate_sql) to turn the rows into
-readable prose, since summarizing or describing a list well is exactly the kind of task
-templating handles badly and language models handle well. The prompt instructs the model
-to use only the values it's given and never invent, estimate, or alter any of them; if the
-call itself fails (network/API error), this falls back to a generic-but-honest templated
-count rather than surfacing a pipeline error over what is otherwise a fully successful
-query — the LLM only shapes phrasing here, it was never the thing that could make the
-answer wrong.
+  **Scope, deliberately narrow — attribute lists, never entity rosters.** This path
+  fires only when the shared column is literally named `name` (`_single_column_list_shape`
+  gates on the exact string, not just "one column"), never on `full_name` or anything
+  else. That's not an arbitrary restriction: deduplicating is only safe for a small,
+  closed *attribute/category* set (a subject, a section, a grade — "teaches Mathematics"
+  is one true fact no matter how many rows say so) and actively unsafe for an *entity
+  roster* (student names, or any list meant to enumerate distinct people/things), where a
+  repeated-looking value could be a genuine duplicate-row bug or two different real
+  entities sharing a label — either way, silently merging them would hide something worth
+  seeing rather than fix a display quirk. The schema already draws this line on its own:
+  every person-identifying table (`users`, `student_profiles`) names this column
+  `full_name`; every attribute table this pipeline exposes names it bare `name`. A future
+  change that widens this path to more columns must re-justify that the new column is
+  genuinely attribute-shaped, not assume the cap/shape checks alone are sufficient — they
+  were never the safety mechanism here, the column name is.
+
+Everything else — a multi-row result with more than one column, a single-column list
+past the enumeration cap, or a single-column list whose column isn't `name` (a student
+roster, a bare list of scores, ...) — goes through an LLM call (same OpenRouter
+client/pattern as generate_sql) to turn the rows into readable prose, since summarizing or
+describing a larger, richer, or entity-identifying result well is exactly the kind of task
+templating handles badly (or unsafely) and language models handle well. The prompt
+instructs the model to use only the values it's
+given and never invent, estimate, or alter any of them; if the call itself fails
+(network/API error), this falls back to a generic-but-honest templated count rather than
+surfacing a pipeline error over what is otherwise a fully successful query — the LLM only
+shapes phrasing here, it was never the thing that could make the answer wrong. It can,
+however, as the single-column-list finding above shows, make the answer *incomplete*
+without any signal that it did — a real, open risk for every result shape still on this
+path (multi-column, or single-column past the cap), not just the one case just fixed.
 
 **Confidence must show up in the words, not just ride along as a field.** Any
 `state["confidence"]` other than `"high"` gets a fixed, always-appended hedge sentence
@@ -84,6 +122,13 @@ _TRUNCATION_DISCLOSURE: Final[str] = (
 
 _MAX_ROWS_IN_PROMPT: Final[int] = 50
 
+# See the module docstring's third deterministic-templating bullet: a small, single-column
+# list is enumerated directly rather than trusted to an LLM summarization call. Chosen so
+# the enumerated sentence stays readable ("Mathematics, Science, and English") rather than
+# becoming an unreadable wall of comma-separated items -- past this size a real prose
+# summary from the LLM path is more useful than a flat list anyway.
+_ENUMERABLE_LIST_ROW_CAP: Final[int] = 10
+
 _SYSTEM_PROMPT = """You answer questions about school data using ONLY the query result \
 rows you are given.
 
@@ -112,6 +157,72 @@ def _single_scalar_answer(column: str, value: Any) -> str:
     if column.lower() in PERCENTAGE_COLUMNS:
         return f"The {label} is {value}%."
     return f"The {label} is {value}."
+
+
+def _english_join(items: list[str]) -> str:
+    if len(items) == 1:
+        return items[0]
+    if len(items) == 2:
+        return f"{items[0]} and {items[1]}"
+    return ", ".join(items[:-1]) + f", and {items[-1]}"
+
+
+def _single_column_list_shape(rows: list[dict[str, Any]], row_count: int) -> str | None:
+    """The shared column name if every row in `rows` has exactly one column, all sharing
+    that same name, that name is the schema's own attribute-label convention (see below),
+    and the list is short enough to enumerate directly (see `_ENUMERABLE_LIST_ROW_CAP`) —
+    `None` if this isn't that shape at all. `row_count` is the caller's own already-
+    computed count (`state["result_row_count"]`, falling back to `len(rows)`), not
+    re-derived from `len(rows)` here, so a truncated `query_result` list can't be mistaken
+    for a genuinely short result.
+
+    Scope boundary, deliberate and load-bearing — do not widen without re-reading this:
+    this path deduplicates (see `_enumerated_list_answer`), which is only safe for a
+    small, closed *attribute/category* set (a subject name, a section name, a grade name)
+    where two rows carrying the same value are, semantically, the same real-world fact
+    stated twice — "teaches Mathematics" is true once no matter how many of a teacher's
+    rows say so. It is NOT safe for an *entity roster* (student names, or any list where
+    each row is meant to represent a distinct person or thing): two rows with the same
+    name there could be a genuine duplicate-row bug (undetected by this node, which never
+    re-derives correctness — see the module docstring) or, just as plausibly, two
+    different real students who happen to share a name — either way, silently merging
+    them into one listed entry would hide something worth seeing, not fix a display quirk.
+    The schema's own naming convention already draws this line for us: every person-
+    identifying table (`users`, `student_profiles`) names this column `full_name`;
+    every attribute/category table this pipeline exposes (`subjects`, `grades`,
+    `sections`, and their peers) names it bare `name`. Gating on the literal column name
+    `"name"` — not just "single column, short list" — is what keeps this path out of
+    roster territory without needing to know what table the model actually queried.
+    """
+    if not (1 < row_count <= _ENUMERABLE_LIST_ROW_CAP) or len(rows) != row_count:
+        return None
+    columns = {frozenset(row.keys()) for row in rows}
+    if len(columns) != 1:
+        return None
+    (only_columns,) = columns
+    if len(only_columns) != 1:
+        return None
+    (column,) = only_columns
+    if column != "name":
+        return None
+    return column
+
+
+def _enumerated_list_answer(column: str, rows: list[dict[str, Any]]) -> str:
+    # `column` is always literally "name" here — see `_single_column_list_shape`'s gate —
+    # never one of PERCENTAGE_COLUMNS, so no percent-sign formatting applies (a bare list
+    # of percentage values would carry the same "two rows, same value, is that one real
+    # fact or two coincidentally-equal ones?" ambiguity as an entity roster, which is
+    # exactly what that gate exists to keep out of this deterministic path).
+    label = "Name"  # sentence-initial here, unlike the single-scalar template's
+    # "The {label} is ..." mid-sentence placement.
+    seen: dict[str, None] = {}  # dict, not set: preserves first-seen order: deduplicated,
+    # never re-typed by a model, directly from the real rows. Deduplication is safe only
+    # because `column == "name"` restricts this to attribute/category labels (subjects,
+    # sections, grades) — see the scope-boundary note on `_single_column_list_shape`.
+    for row in rows:
+        seen.setdefault(str(row[column]), None)
+    return f"{label}: {_english_join(list(seen))}."
 
 
 def _serialize_rows_for_prompt(rows: list[dict[str, Any]]) -> str:
@@ -159,6 +270,9 @@ async def _compose_core_answer(
     if row_count == 1 and len(rows[0]) == 1:
         ((column, value),) = rows[0].items()
         return _single_scalar_answer(column, value)
+    list_column = _single_column_list_shape(rows, row_count)
+    if list_column is not None:
+        return _enumerated_list_answer(list_column, rows)
     return await _llm_answer(question, rows)
 
 

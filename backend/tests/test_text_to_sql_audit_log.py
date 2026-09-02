@@ -8,8 +8,11 @@ test_text_to_sql_execute_sql.py and test_authorization_scope.py, which use the s
 
 from __future__ import annotations
 
+import sys
 from collections.abc import AsyncIterator, Iterator
 from dataclasses import dataclass
+from pathlib import Path
+from typing import Protocol, cast
 from uuid import UUID, uuid4
 
 import pytest
@@ -23,11 +26,28 @@ from education_platform.db.url import to_async_url, to_sync_url
 from education_platform.modules.auth.models import AuditEvent, Institution, User
 from education_platform.modules.text_to_sql.graph import build_text_to_sql_graph
 from education_platform.modules.text_to_sql.nodes.audit_log import audit_log
+from education_platform.modules.text_to_sql.nodes.load_schema import (
+    _load_filtered_schema_context,
+)
 from education_platform.modules.text_to_sql.state import (
     AUDIT_ERROR,
     ROLE_VIOLATION,
+    SCHEMA_ERROR,
     TextToSQLState,
     error_category,
+)
+
+
+class _LoadSchemaModule(Protocol):
+    SCHEMA_CATALOG_PATH: Path
+
+
+# Same nodes/__init__.py attribute-rebinding gotcha as elsewhere in this suite (see
+# test_text_to_sql_load_schema.py) — reach the real submodule via sys.modules to
+# monkeypatch SCHEMA_CATALOG_PATH.
+_LOAD_SCHEMA_MODULE = cast(
+    _LoadSchemaModule,
+    sys.modules["education_platform.modules.text_to_sql.nodes.load_schema"],
 )
 
 
@@ -180,6 +200,35 @@ async def test_refused_run_also_produces_a_complete_audit_record(
     # The rejected SQL is still on record, even though it was never run.
     assert payload["validated_sql"] is None
     assert "password_hash" in (payload["generated_sql"] or "")
+
+
+async def test_load_schema_failure_audit_record_still_captures_the_real_detail(
+    tmp_path: Path, seeded: _Seeded, async_session: AsyncSession
+) -> None:
+    # Fix: load_schema now formats its errors via format_error()/SCHEMA_ERROR like every
+    # other node, closing the gap that used to make audit_log keep error_detail
+    # specifically "so nothing gets lost" for load_schema's own unformatted string.
+    # Confirms that fix didn't lose anything: the real SchemaCatalogError text (which can
+    # carry the catalog file's real path) is still fully present in error_detail.
+    original_path = _LOAD_SCHEMA_MODULE.SCHEMA_CATALOG_PATH
+    _LOAD_SCHEMA_MODULE.SCHEMA_CATALOG_PATH = tmp_path / "missing-for-audit-test.md"
+    try:
+        graph = build_text_to_sql_graph()
+        result = await graph.ainvoke(_initial_state(seeded), config={"recursion_limit": 15})
+    finally:
+        _LOAD_SCHEMA_MODULE.SCHEMA_CATALOG_PATH = original_path
+        _load_filtered_schema_context.cache_clear()
+
+    assert error_category(result["error"]) == SCHEMA_ERROR
+
+    event = await _latest_audit_event(async_session, seeded.institution_id)
+    payload = event.payload
+    assert payload["outcome"] == "refused"
+    assert payload["error_category"] == SCHEMA_ERROR
+    # The real detail -- including the actual (missing) file path -- is still on record,
+    # not just the category, exactly as it is for every other node's errors.
+    assert payload["error_detail"] == result["error"]
+    assert "missing-for-audit-test.md" in payload["error_detail"]
 
 
 # --- Raw SQL: present in the audit record, never in user-facing fields -----------------

@@ -66,20 +66,42 @@ institution's own row) but does still belong to exactly one institution and must
 across tenants — every SELECT scope that touches one gets the institution pin only, for
 every role including admin.
 
-Explicitly *not* covered by either list, and therefore refused rather than silently passed
-through: the curriculum-content tables (`topics`, `subtopics`, `learning_outcomes`,
-`source_materials`, `source_material_versions`, `source_chunks`, `questions`,
-`question_versions`, `question_options`, `question_outcome_tags`, `common_mastery_quizzes`,
-`quiz_versions`, `quiz_items`, `quiz_material_bindings`, `quiz_releases`). A live check
-against this database confirmed these *are* institution-partitioned in practice (a shared
-top-level curriculum is the eventual design intent per the module README, but today each
+Curriculum-content tables (`topics`, `subtopics`, `learning_outcomes`, `source_materials`,
+`source_material_versions`, `source_chunks`, `questions`, `question_versions`,
+`question_options`, `question_outcome_tags`, `common_mastery_quizzes`, `quiz_versions`,
+`quiz_items`, `quiz_material_bindings`, `quiz_releases`) were deferred here as a known,
+documented gap when the fail-closed inversion above first landed: a live check against
+this database confirmed they *are* institution-partitioned in practice (a shared top-level
+curriculum is the eventual design intent per the module README, but today each
 institution's `grade_subject_offerings` hangs its own `topics`, so the two seeded
-institutions have disjoint topic/question sets) — but each one's institution path is a
-3-to-6-hop join chain distinct per table, and reviewing all of them is real, separate work
-deferred as a known, documented, lower-severity gap (curriculum content, not personal
-data) rather than guessed at here. Refusing these outright is a deliberate, temporary
-regression in what the assistant can answer, preferred over resurrecting the exact
-silently-unscoped behavior this fix exists to close.
+institutions have disjoint topic/question sets), but each one's institution path is a
+multi-hop join chain distinct per table and reviewing all of them was real, separate work.
+That work is now done — every one of the 15 is classified into `INSTITUTION_SCOPED_TABLES`
+below (none of them has any column that reaches student or teacher identity, confirmed by
+tracing every FK against the ORM models, so none needed `STUDENT_SCOPED_TABLES`). None was
+a genuinely fresh multi-join predicate: each table's institution path runs entirely through
+*other tables on this same list*, so scoped in dependency order (topics -> subtopics ->
+{learning_outcomes, source_materials, questions, common_mastery_quizzes} -> {source_material
+_versions, question_versions, quiz_versions} -> {source_chunks, question_options,
+question_outcome_tags, quiz_items, quiz_material_bindings, quiz_releases}), every predicate
+is exactly one hop from an already-scoped, already-tested parent. `_institution_scoped_subquery`
+below composes that one hop by calling back into `_institution_predicate_sql` for the
+parent rather than hand-inlining the parent's own join chain again — a chain N levels deep
+becomes N independently-reviewable one-hop wrappers instead of one hand-assembled N-join
+expression someone could mistranscribe. Landed and verified in three dependency-ordered
+batches, each batch's tests run and confirmed green against a live database before the
+next batch's predicates (which lean on the previous batch's) were written — a bug in an
+earlier batch's predicate would otherwise propagate silently into every table stacked on
+top of it. Three tables (`question_outcome_tags`, `quiz_items`, `quiz_material_bindings`)
+have two non-nullable FKs into two different already-scoped tables; both are checked
+(ANDed), not just one, even though the application layer already enforces both sides share
+an institution at creation time (`authoring/service.py`) — trusting only the layer above is
+exactly the single-point-of-trust posture this project's four-layer defense-in-depth model
+exists to avoid (see Finding 4). `common_mastery_quizzes` has two *nullable* FKs
+(`subtopic_id` xor `topic_id`, CHECK-enforced), so its predicate is a genuine `OR` of two
+conditional branches rather than a plain `IN` — structured so that if neither were ever set
+(unreachable given the CHECK constraint, but not relied upon), both branches evaluate
+false and the row is denied, not silently passed through.
 
 `query_source` branch (Step 4): a value of `"template"` skips the AST rewrite entirely (a
 template's SQL already has the scoping logic — row *and* institution — hand-written into it
@@ -121,6 +143,21 @@ clause says, so a still-wrong self-reference can only ever produce a wrong *answ
 (most often an empty one), never a widened one — and sanity_check's existing
 `zero_rows`/`zero_valued_aggregate` checks already catch that exact symptom and downgrade
 confidence accordingly, with no new mechanism needed.
+
+One shape *is* caught here, though, deliberately: the sentinel used correctly (a real
+self-reference, not a fabrication) but bound against a column that structurally can never
+match the asking role's identity — observed live as `student_360.student_id =
+'__CURRENT_USER_ID__'` for a *teacher* token, which is guaranteed to return nothing no
+matter what the real data says (a teacher's user_id is never a real student_id), yet
+still reported `high` confidence with a refusal-sounding but misleading empty answer.
+Unlike the fabricated-literal case above, this one doesn't require guessing at an
+open-ended set of possible mistakes — the finite, already-enumerated set of identity
+columns in `STUDENT_SCOPED_TABLES`/`INSTITUTION_SCOPED_TABLES` is exactly the kind of
+reviewable allowlist this file already builds elsewhere (see `STUDENT_SCOPED_TABLES`
+itself), so `_find_identity_mismatch` checks the binding against it and rejects
+(`ROLE_VIOLATION` — see that function's docstring for why this category, not a new one,
+and why rejecting outright rather than rewriting the query to a correct self-reference is
+the right response) before `_resolve_current_user_sentinel` ever performs the binding.
 """
 
 from __future__ import annotations
@@ -173,6 +210,21 @@ INSTITUTION_SCOPED_TABLES: Final[frozenset[str]] = frozenset(
         "sections",
         "grade_subject_offerings",
         "teaching_assignments",
+        # Batch 1 of the deferred-curriculum-table scoping project: each reaches
+        # institution through the tables above (or each other) in 1-2 hops. See
+        # `_institution_predicate_sql`'s cases for these tables and the module
+        # docstring's "Curriculum-content tables" section for the dependency order
+        # this batching follows.
+        "topics",
+        "subtopics",
+        "learning_outcomes",
+        "source_materials",
+        "questions",
+        "common_mastery_quizzes",
+        # Batch 2: each is one hop from a Batch-1 table.
+        "source_material_versions",
+        "question_versions",
+        "quiz_versions",
     }
 )
 
@@ -202,6 +254,180 @@ _ALIAS_PREFIX: Final[str] = "__ars_"
 # state["user_id"] — via the same find-then-replace mechanism `_apply_row_scoping` uses
 # for its own injected predicates.
 _CURRENT_USER_SENTINEL: Final[str] = "__CURRENT_USER_ID__"
+
+# Fail-closed allowlist (same posture as STUDENT_SCOPED_TABLES/INSTITUTION_SCOPED_TABLES
+# above, not a blocklist of known-bad columns) of which (table, column) pairs the sentinel
+# may legitimately be compared against, per asking role. Enumerated by walking every
+# identity-shaped column in STUDENT_SCOPED_TABLES/INSTITUTION_SCOPED_TABLES, not guessed
+# from the one observed failure (`student_360.student_id` for a teacher) — see
+# `_find_identity_mismatch`'s docstring for the full reasoning and the columns considered
+# and excluded.
+_TEACHER_IDENTITY_TARGETS: Final[frozenset[tuple[str, str]]] = frozenset(
+    {
+        ("teaching_assignments", "teacher_user_id"),
+        ("attendance_records", "recorded_by_user_id"),
+    }
+)
+_STUDENT_IDENTITY_TARGETS: Final[frozenset[tuple[str, str]]] = frozenset(
+    {
+        ("student_360", "student_id"),
+        ("student_profiles", "user_id"),
+        ("quiz_attempts", "student_id"),
+        ("attendance_records", "student_id"),
+        ("student_subject_enrollments", "student_id"),
+        ("student_grade_enrollments", "student_id"),
+    }
+)
+# `users.id`/`user_roles.user_id`/`refresh_sessions.user_id` all key off the same raw
+# users.id value regardless of which role that user happens to hold — "what's my email"
+# is equally valid self-reference for a teacher or a student, unlike a student_id or
+# teacher_user_id column, which is only ever the right comparison for one specific role.
+_ROLE_AGNOSTIC_IDENTITY_TARGETS: Final[frozenset[tuple[str, str]]] = frozenset(
+    {
+        ("users", "id"),
+        ("user_roles", "user_id"),
+        ("refresh_sessions", "user_id"),
+    }
+)
+
+
+def _valid_identity_targets_for_role(role: str) -> frozenset[tuple[str, str]]:
+    if role == "teacher":
+        return _TEACHER_IDENTITY_TARGETS | _ROLE_AGNOSTIC_IDENTITY_TARGETS
+    if role == "student":
+        return _STUDENT_IDENTITY_TARGETS | _ROLE_AGNOSTIC_IDENTITY_TARGETS
+    # admin (and anything else that reaches here) is otherwise unrestricted elsewhere in
+    # this file (institution pin only, no row predicate) — extending that same posture
+    # here rather than inventing a narrower rule with no basis: allow either identity
+    # shape rather than assume admin can never legitimately hold a teaching or student
+    # role too.
+    return _TEACHER_IDENTITY_TARGETS | _STUDENT_IDENTITY_TARGETS | _ROLE_AGNOSTIC_IDENTITY_TARGETS
+
+
+def _table_for_alias(tree: exp.Expr, alias_or_name: str) -> str | None:
+    """The one real table name `alias_or_name` refers to somewhere in `tree`, or `None`
+    if it doesn't resolve to exactly one — ambiguous or absent is treated as "cannot
+    verify", never as a violation; `_find_identity_mismatch` only ever rejects on a
+    positive, confident match against the allowlist, per its own docstring.
+    """
+    matches = {
+        table.name.lower()
+        for table in tree.find_all(exp.Table)
+        if (table.alias or table.name).lower() == alias_or_name.lower()
+    }
+    if len(matches) != 1:
+        return None
+    return next(iter(matches))
+
+
+def _find_identity_mismatch(
+    tree: exp.Expr, excluded_aliases: set[str], role: str
+) -> str | None:
+    """A `<column> = '__CURRENT_USER_ID__'` comparison whose column is confidently
+    resolved to a table this role's identity could never actually match — e.g. a teacher
+    token compared against `student_360.student_id`, which is guaranteed to return
+    nothing regardless of real data (a teacher's user_id is never a real student_id).
+    Observed live: "what is the average score across all 3 subjects?" produced exactly
+    this shape and still returned `high` confidence with a refusal-sounding but
+    misleading empty answer.
+
+    Rejects rather than repairs: this node narrows queries, it never guesses intent that
+    wasn't expressed — auto-rewriting `student_360.student_id = <teacher>` into a real
+    join through `teaching_assignments`/`student_subject_enrollments` would be inventing
+    what the question "really meant" instead of what it said, the same overreach every
+    other check in this file avoids. A clean rejection lets `honest_refusal` give an
+    honest "that question doesn't resolve the way you meant" instead.
+
+    Category: `ROLE_VIOLATION`, not a new one. This is mechanically identical to every
+    other rejection this node already raises under that category — same node, same "no
+    retry, straight to honest_refusal" routing (a retry can't fix this; the model would
+    need a fundamentally different query shape, not a correction it can apply to the one
+    it wrote) — and reads as one once you take "the asking user_role isn't allowed to...
+    see it" to cover "isn't allowed to claim this identity": a teacher role can no more
+    assert "I am this specific student" than it can read another institution's rows. A
+    sixth top-level category would need its own honest_refusal message, its own
+    audit_log/graph-routing consideration, and its own place in state.py's category
+    docstring for a case ROLE_VIOLATION's existing definition already covers — the same
+    "reuse an established mechanism over multiplying one-off categories" call this
+    pipeline already made for EXECUTION_ERROR/AUDIT_ERROR sharing one honest_refusal
+    message rather than inventing bespoke phrasing per failure node.
+
+    Runs on the *original*, pre-substitution tree — this must decide whether the binding
+    is valid before `_resolve_current_user_sentinel` performs it, not after (once
+    substituted, the literal is just the real UUID and this check can no longer tell it
+    apart from any other identity literal already in the query).
+
+    Deliberately conservative, same reasoning as `STUDENT_SCOPED_TABLES`'s fail-closed
+    table check but inverted in which direction "can't tell" defaults to: only the
+    documented `column = '__CURRENT_USER_ID__'` shape (or reversed operand order) is
+    checked; a *qualified* column (`alias.column`) is resolved via `_table_for_alias`,
+    and an *unqualified* one (row 28's real shape — `student_id`, no prefix) only when
+    its own enclosing `SELECT`'s FROM/JOIN has exactly one table, so there's no ambiguity
+    about which table's schema it belongs to (a bare column inside a multi-table join is
+    left unchecked rather than guessed at). Callers only ever reach this after the
+    fail-closed unscopable-table check has already passed, so every table considered here
+    is one this file has actually classified — that ordering matters: a query touching an
+    unreviewed table gets refused for *that*, not for a coincidentally-also-true identity
+    mismatch on a column nobody has reviewed either way. Checked only against the
+    reviewed allowlist in `_valid_identity_targets_for_role` — every other shape (the
+    sentinel inside a subquery, compared with an operator other than `=`) is left alone
+    rather than guessed at, so this cannot become "a false-positive machine that rejects
+    legitimate self-reference queries" over a shape nobody has actually reviewed.
+    Column-by-column reasoning behind the allowlist:
+    student-identity columns (`student_360.student_id`, `student_profiles.user_id`,
+    `quiz_attempts.student_id`, `attendance_records.student_id`,
+    `student_subject_enrollments.student_id`, `student_grade_enrollments.student_id`) are
+    valid only for a student's own token; teacher-identity columns
+    (`teaching_assignments.teacher_user_id`, `attendance_records.recorded_by_user_id`)
+    only for a teacher's; `users.id`/`user_roles.user_id`/`refresh_sessions.user_id` key
+    off the same raw account identity regardless of role, so both. Every other column in
+    `STUDENT_SCOPED_TABLES`/`INSTITUTION_SCOPED_TABLES` — `student_profiles.id` (a
+    profile's own primary key, a different ID space from `users.id` entirely),
+    `attendance_records`/`student_material_progress`/`attempt_answers`'s non-identity
+    columns, and every plain reference-table column (`grades`, `subjects`,
+    `academic_periods`, `period_grades`, `sections`, `grade_subject_offerings`,
+    `institutions` — none of which carry a user or student identity column at all) — has
+    no legitimate self-reference reading for any role and is never in the allowlist.
+    """
+    valid_targets = _valid_identity_targets_for_role(role)
+    for literal in tree.find_all(exp.Literal):
+        if not (literal.is_string and literal.this == _CURRENT_USER_SENTINEL):
+            continue
+        parent = literal.parent
+        if not isinstance(parent, exp.EQ):
+            continue  # only the documented `column = sentinel` shape is checked
+        other = parent.expression if parent.this is literal else parent.this
+        if not isinstance(other, exp.Column):
+            continue  # can't confidently identify a comparison target; don't reject on it
+        if other.table:
+            # Qualified (`alias.column` or `table.column`) -- resolve the qualifier.
+            if other.table.lower() in excluded_aliases:
+                continue  # a CTE/derived alias, not a real table -- can't classify, skip
+            table_name = _table_for_alias(tree, other.table)
+        else:
+            # Unqualified (`column`, no prefix) -- the real shape row 28's live query
+            # actually used. Only resolvable without ambiguity when the comparison's own
+            # enclosing SELECT has exactly one table in its FROM/JOIN (no join partner's
+            # schema to also consider) -- resolved via the enclosing scope, not the whole
+            # tree, so a bare `student_id` inside a nested subquery is checked against
+            # *that* subquery's own single table, not some unrelated outer one.
+            enclosing = other.find_ancestor(exp.Select)
+            if enclosing is None:
+                continue
+            direct_tables = _direct_tables(enclosing)
+            if len(direct_tables) != 1:
+                continue  # a join -- which table this bare column belongs to is
+                # genuinely ambiguous without per-table schema knowledge; don't guess
+            table_name = direct_tables[0].name.lower()
+        if table_name is None:
+            continue
+        if (table_name, other.name.lower()) in valid_targets:
+            continue
+        return (
+            f"self-reference token compared against `{table_name}.{other.name}`, which "
+            f"does not identify the asking user for role {role!r}"
+        )
+    return None
 
 
 def _resolve_current_user_sentinel(tree: exp.Expr, user_id: str) -> None:
@@ -511,7 +737,71 @@ def _institution_predicate_sql(table: str, alias: str, institution_id_literal: s
             f"{alias}.academic_period_id IN "
             f"(SELECT id FROM academic_periods WHERE institution_id = {institution_id_literal})"
         )
+    if table == "topics":
+        return (
+            f"{alias}.grade_subject_offering_id IN "
+            f"{_institution_scoped_subquery('grade_subject_offerings', institution_id_literal)}"
+        )
+    if table == "subtopics":
+        return (
+            f"{alias}.topic_id IN "
+            f"{_institution_scoped_subquery('topics', institution_id_literal)}"
+        )
+    if table in ("learning_outcomes", "source_materials", "questions"):
+        # All three hang directly off subtopics (one FK apiece: subtopic_id) --
+        # same one-hop shape, deliberately not merged with the subtopics/topics cases
+        # above since the FK column happens to share a name only by coincidence of
+        # schema design, not because these tables are otherwise alike.
+        return (
+            f"{alias}.subtopic_id IN "
+            f"{_institution_scoped_subquery('subtopics', institution_id_literal)}"
+        )
+    if table == "common_mastery_quizzes":
+        # Exactly one of subtopic_id/topic_id is set (CHECK-enforced) -- an OR of two
+        # conditional branches, not a plain IN. If neither were ever set (unreachable
+        # given the CHECK constraint, but not relied upon: see the module docstring),
+        # both IS NOT NULL guards fail, the OR is false, and the row is denied rather
+        # than silently passed through.
+        return (
+            f"(({alias}.subtopic_id IS NOT NULL AND {alias}.subtopic_id IN "
+            f"{_institution_scoped_subquery('subtopics', institution_id_literal)}) "
+            f"OR ({alias}.topic_id IS NOT NULL AND {alias}.topic_id IN "
+            f"{_institution_scoped_subquery('topics', institution_id_literal)}))"
+        )
+    if table == "source_material_versions":
+        return (
+            f"{alias}.source_material_id IN "
+            f"{_institution_scoped_subquery('source_materials', institution_id_literal)}"
+        )
+    if table == "question_versions":
+        return (
+            f"{alias}.question_id IN "
+            f"{_institution_scoped_subquery('questions', institution_id_literal)}"
+        )
+    if table == "quiz_versions":
+        return (
+            f"{alias}.quiz_id IN "
+            f"{_institution_scoped_subquery('common_mastery_quizzes', institution_id_literal)}"
+        )
     raise AssertionError(f"unhandled scoped table {table!r}")
+
+
+def _institution_scoped_subquery(table: str, institution_id_literal: str) -> str:
+    """`(SELECT <alias>.id FROM <table> <alias> WHERE <table's own institution predicate>)`
+    for a `table` already in `INSTITUTION_SCOPED_TABLES` -- used to build a *new* table's
+    institution predicate as "my parent FK's value is in this set of already-correctly-
+    scoped parent ids", one hop at a time. Calls back into `_institution_predicate_sql`
+    for `table` rather than hand-inlining that table's own join chain again here: a chain
+    N levels deep becomes N independently-reviewable one-hop wrappers instead of one
+    hand-assembled N-join expression someone could mistranscribe partway through (see the
+    module docstring's "Curriculum-content tables" section). Aliased by the parent table's
+    own name (via `_ALIAS_PREFIX`) so a query with several of these nested at different
+    depths stays readable; safe to reuse the same alias string at unrelated nesting depths
+    since each is its own independently-scoped subquery, never correlated to a sibling.
+    """
+    alias = f"{_ALIAS_PREFIX}{table}"
+    predicate = _institution_predicate_sql(table, alias, institution_id_literal)
+    return f"(SELECT {alias}.id FROM {table} {alias} WHERE {predicate})"
 
 
 def _apply_row_scoping(
@@ -589,9 +879,15 @@ async def apply_role_scope(state: TextToSQLState) -> TextToSQLState:
             },
         }
 
-    _resolve_current_user_sentinel(tree, user_id)
-
     excluded_aliases = _cte_and_derived_aliases(tree)
+
+    # Runs before the identity-mismatch check below on purpose: that check only means
+    # anything against a table this file has actually reviewed and classified (its
+    # allowlist is built from STUDENT_SCOPED_TABLES/INSTITUTION_SCOPED_TABLES). A query
+    # touching an unreviewed/deferred table should be refused *for that* — "this table
+    # isn't reviewed at all" — not for a coincidentally-also-true identity mismatch on a
+    # column nobody has classified either way; same "don't refuse for the wrong reason"
+    # standard the Fix 5 eval-set correction applied to rows 39/40's refusals.
     unscopable = _find_unscopable_table_reference(tree, excluded_aliases)
     if unscopable is not None:
         return {
@@ -599,6 +895,19 @@ async def apply_role_scope(state: TextToSQLState) -> TextToSQLState:
             "validated_sql": None,
             "error": format_error(ROLE_VIOLATION, unscopable),
         }
+
+    # Must run before _resolve_current_user_sentinel: once the sentinel is substituted
+    # for the real user_id, this can no longer tell "the model's own self-reference
+    # comparison" apart from any other identity literal already in the query.
+    mismatch = _find_identity_mismatch(tree, excluded_aliases, role)
+    if mismatch is not None:
+        return {
+            **state,
+            "validated_sql": None,
+            "error": format_error(ROLE_VIOLATION, mismatch),
+        }
+
+    _resolve_current_user_sentinel(tree, user_id)
 
     user_id_literal = exp.Literal.string(user_id).sql(dialect="postgres")
     institution_id_literal = exp.Literal.string(institution_id).sql(dialect="postgres")

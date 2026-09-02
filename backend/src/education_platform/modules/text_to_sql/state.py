@@ -17,17 +17,34 @@ MAX_RETRIES: Final[int] = 3
 # --- state["error"] class convention ------------------------------------------------
 #
 # Every node that sets state["error"] must format it with `format_error()` below, using
-# exactly one of these three category constants. This is the single documented
-# contract for classifying a failure — nodes that produce an error and nodes that
-# consume one (audit_log, honest_refusal, and eventually compose_answer) all key off
-# the same fixed prefixes instead of each inventing their own wording to grep for.
-# `error_category()` is the matching consumer-side helper; use it rather than hand-
-# rolling another `.startswith(...)` check.
+# exactly one of the category constants in `_ERROR_CATEGORIES`. This is the single
+# documented contract for classifying a failure — nodes that produce an error and nodes
+# that consume one (audit_log, honest_refusal, compose_answer) all key off the same fixed
+# prefixes instead of each inventing their own wording to grep for. `error_category()` is
+# the matching consumer-side helper; use it rather than hand-rolling another
+# `.startswith(...)` check.
 #
-# This is deliberately just three string constants plus two tiny functions, not a
-# structured error type — `state["error"]` stays `str | None`. A real typed error
-# object would be the next step if/when more than these three categories, or fields
-# beyond a category + message, turn out to be needed; not warranted yet.
+# This is deliberately just a handful of string constants plus two tiny functions, not a
+# structured error type — `state["error"]` stays `str | None`. A real typed error object
+# would be the next step if/when fields beyond a category + message turn out to be
+# needed; not warranted yet. (This module started with three categories — LLM_ERROR,
+# VALIDATION_ERROR, ROLE_VIOLATION — then EXECUTION_ERROR and AUDIT_ERROR each earned
+# their own slot rather than folding into an existing one; SCHEMA_ERROR is the third such
+# addition, for the same reason. A new category is cheap precisely because the contract
+# is this small, not a sign the count is meant to stay fixed at whatever it happened to
+# be.)
+
+SCHEMA_ERROR: Final[str] = "SCHEMA_ERROR"
+"""load_schema couldn't produce a usable schema_context at all — schema_catalog.md is
+missing/unreadable, or the excluded-content filter's own post-check failed (over-stripped
+content, a leaked excluded table name, ...). No SQL was even attempted; this is a
+deployment/configuration problem with the catalog file itself, not the database being
+unreachable (EXECUTION_ERROR) or anything about the question or an authored query. Gets
+its own category rather than folding into EXECUTION_ERROR for the same reason AUDIT_ERROR
+got its own in Task 10 rather than folding into it: each category here documents exactly
+one raising node, and load_schema failing before any SQL exists is a genuinely different
+pipeline stage from execute_sql failing to run a real, valid, authorized query. Raised by
+load_schema, and only by load_schema."""
 
 LLM_ERROR: Final[str] = "LLM_ERROR"
 """The LLM/API call itself failed — network error, auth failure, empty completion,
@@ -67,7 +84,7 @@ protect in the first place, this one means an answer existed and was deliberatel
 withheld anyway."""
 
 _ERROR_CATEGORIES: Final[frozenset[str]] = frozenset(
-    {LLM_ERROR, VALIDATION_ERROR, ROLE_VIOLATION, EXECUTION_ERROR, AUDIT_ERROR}
+    {SCHEMA_ERROR, LLM_ERROR, VALIDATION_ERROR, ROLE_VIOLATION, EXECUTION_ERROR, AUDIT_ERROR}
 )
 
 

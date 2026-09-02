@@ -43,6 +43,7 @@ from education_platform.modules.academics.models import (
     EnrollmentStatus,
     Grade,
     GradeSubjectOffering,
+    LearningOutcome,
     PeriodGrade,
     Section,
     StudentGradeEnrollment,
@@ -68,6 +69,7 @@ from education_platform.modules.assessments.models import (
     QuizVersionStatus,
 )
 from education_platform.modules.attendance.models import AttendanceRecord, AttendanceStatus
+from education_platform.modules.materials.models import SourceMaterial, SourceMaterialVersion
 from education_platform.modules.auth.models import (
     Institution,
     RoleName,
@@ -136,6 +138,36 @@ class _Fixture:
     # A different institution's student, structurally identical to the above (same grade
     # name, same shape) but must never appear in institution_id's own results.
     other_student_id: UUID
+
+    # Batch 1 of the deferred-curriculum-table scoping project: institution_id's own
+    # curriculum tree (topic -> subtopic -> {learning_outcome, source_material, question,
+    # subtopic-scoped quiz}), plus a topic-scoped quiz (the other branch of
+    # common_mastery_quizzes' subtopic-xor-topic predicate), and other_institution_id's
+    # structurally-identical parallel tree, to prove institution narrowing on all six.
+    topic_id: UUID
+    subtopic_id: UUID
+    learning_outcome_id: UUID
+    source_material_id: UUID
+    question_id: UUID
+    common_mastery_quiz_subtopic_scoped_id: UUID
+    common_mastery_quiz_topic_scoped_id: UUID
+
+    other_topic_id: UUID
+    other_subtopic_id: UUID
+    other_learning_outcome_id: UUID
+    other_source_material_id: UUID
+    other_question_id: UUID
+    other_common_mastery_quiz_id: UUID
+
+    # Batch 2: one hop from each Batch-1 table above. question_version_id/quiz_version_id
+    # reuse the rows already seeded for the attempt_answers chain.
+    source_material_version_id: UUID
+    question_version_id: UUID
+    quiz_version_id: UUID
+
+    other_source_material_version_id: UUID
+    other_question_version_id: UUID
+    other_quiz_version_id: UUID
 
 
 def _seed(session: Session) -> _Fixture:
@@ -369,6 +401,32 @@ def _seed(session: Session) -> _Fixture:
         student=student_b_math, enrollment=enrollment_b_math
     )
 
+    # Batch 1 curriculum-content rows hanging off the same topic/subtopic seeded above
+    # for the attempt_answers chain, plus a topic-scoped quiz (the other branch of
+    # common_mastery_quizzes' subtopic-xor-topic predicate — `quiz` above is the
+    # subtopic-scoped branch).
+    learning_outcome = LearningOutcome(
+        subtopic_id=subtopic.id, code="LO1", statement="Solve linear equations for one variable"
+    )
+    session.add(learning_outcome)
+    source_material = SourceMaterial(
+        subtopic_id=subtopic.id, title="Linear Equations Notes", slug="linear-eq-notes"
+    )
+    session.add(source_material)
+    session.flush()
+    # Batch 2: one hop from source_material (question_version/quiz_version below already
+    # exist as `question_version`/`quiz_version`, seeded above for the attempt_answers
+    # chain -- reused here rather than duplicated).
+    source_material_version = SourceMaterialVersion(
+        source_material_id=source_material.id, version_number=1, title="Linear Equations Notes v1"
+    )
+    session.add(source_material_version)
+    topic_scoped_quiz = CommonMasteryQuiz(
+        topic_id=topic.id, quiz_scope=QuizScope.TOPIC_MASTERY, title="Algebra Topic Quiz"
+    )
+    session.add(topic_scoped_quiz)
+    session.flush()
+
     # Institution 2: overlapping-looking (same grade name, same shape) but must stay
     # invisible to institution 1's admin.
     other_student = StudentProfile(
@@ -378,6 +436,83 @@ def _seed(session: Session) -> _Fixture:
         full_name="Other Institution Student",
     )
     session.add(other_student)
+    session.flush()
+
+    # Institution 2's own, structurally-identical curriculum tree (same names/slugs as
+    # institution 1's — legal since uniqueness is scoped per grade_subject_offering, not
+    # global) proving Batch 1's predicates narrow by institution, not just by table.
+    other_period = AcademicPeriod(
+        institution_id=inst2.id,
+        name="Term 1",
+        start_date=date(2026, 1, 1),
+        end_date=date(2026, 6, 30),
+        status=AcademicPeriodStatus.ACTIVE,
+    )
+    other_grade = Grade(institution_id=inst2.id, name="Grade 8")
+    other_subject = Subject(institution_id=inst2.id, name="Mathematics", code="MATH")
+    session.add_all([other_period, other_grade, other_subject])
+    session.flush()
+    other_period_grade = PeriodGrade(academic_period_id=other_period.id, grade_id=other_grade.id)
+    session.add(other_period_grade)
+    session.flush()
+    other_offering = GradeSubjectOffering(
+        period_grade_id=other_period_grade.id, subject_id=other_subject.id
+    )
+    session.add(other_offering)
+    session.flush()
+    other_topic = Topic(
+        grade_subject_offering_id=other_offering.id, name="Algebra", slug="algebra", sequence=1
+    )
+    session.add(other_topic)
+    session.flush()
+    other_subtopic = Subtopic(
+        topic_id=other_topic.id, name="Linear Equations", slug="linear-eq", sequence=1
+    )
+    session.add(other_subtopic)
+    session.flush()
+    other_learning_outcome = LearningOutcome(
+        subtopic_id=other_subtopic.id,
+        code="LO1",
+        statement="Solve linear equations for one variable",
+    )
+    session.add(other_learning_outcome)
+    other_source_material = SourceMaterial(
+        subtopic_id=other_subtopic.id, title="Linear Equations Notes", slug="linear-eq-notes"
+    )
+    session.add(other_source_material)
+    other_question = Question(subtopic_id=other_subtopic.id, code="Q1")
+    session.add(other_question)
+    other_quiz = CommonMasteryQuiz(
+        subtopic_id=other_subtopic.id,
+        quiz_scope=QuizScope.SUBTOPIC_MASTERY,
+        title="Linear Equations Quiz",
+    )
+    session.add(other_quiz)
+    session.flush()
+
+    # Batch 2: institution 2's own one-hop-deeper rows, structurally identical to
+    # institution 1's, proving institution narrowing rather than just table narrowing.
+    other_source_material_version = SourceMaterialVersion(
+        source_material_id=other_source_material.id,
+        version_number=1,
+        title="Linear Equations Notes v1",
+    )
+    session.add(other_source_material_version)
+    other_question_version = QuestionVersion(
+        question_id=other_question.id,
+        version_number=1,
+        prompt="Solve for x: x + 1 = 2",
+        question_type=QuestionType.NUMERIC,
+        lifecycle_status=QuestionVersionStatus.PUBLISHED,
+    )
+    session.add(other_question_version)
+    other_quiz_version = QuizVersion(
+        quiz_id=other_quiz.id,
+        version_number=1,
+        lifecycle_status=QuizVersionStatus.RELEASED,
+        result_release_mode=QuizResultReleaseMode.IMMEDIATE,
+    )
+    session.add(other_quiz_version)
     session.flush()
 
     assert student_a_math.user_id is not None
@@ -401,6 +536,25 @@ def _seed(session: Session) -> _Fixture:
         student_a_science_id=student_a_science.id,
         student_b_science_provisioned_id=student_b_science_provisioned.id,
         other_student_id=other_student.id,
+        topic_id=topic.id,
+        subtopic_id=subtopic.id,
+        learning_outcome_id=learning_outcome.id,
+        source_material_id=source_material.id,
+        question_id=question.id,
+        common_mastery_quiz_subtopic_scoped_id=quiz.id,
+        common_mastery_quiz_topic_scoped_id=topic_scoped_quiz.id,
+        other_topic_id=other_topic.id,
+        other_subtopic_id=other_subtopic.id,
+        other_learning_outcome_id=other_learning_outcome.id,
+        other_source_material_id=other_source_material.id,
+        other_question_id=other_question.id,
+        other_common_mastery_quiz_id=other_quiz.id,
+        source_material_version_id=source_material_version.id,
+        question_version_id=question_version.id,
+        quiz_version_id=quiz_version.id,
+        other_source_material_version_id=other_source_material_version.id,
+        other_question_version_id=other_question_version.id,
+        other_quiz_version_id=other_quiz_version.id,
     )
 
 
@@ -817,6 +971,280 @@ async def test_teaching_assignments_institution_pin_not_self_only(
     assert seeded.teacher2_user_id in teacher_ids
 
 
+# --- Batch 1: deferred-curriculum-table scoping project (topics/subtopics/
+# --- learning_outcomes/source_materials/questions/common_mastery_quizzes) -------------
+
+
+async def test_topics_institution_isolation(
+    async_session: AsyncSession, seeded: _Fixture
+) -> None:
+    rows = await _run_scoped(
+        async_session,
+        sql="SELECT id FROM topics",
+        user_id=seeded.teacher_user_id,
+        role="teacher",
+        institution_id=seeded.institution_id,
+    )
+    ids = {row["id"] for row in rows}
+    assert seeded.topic_id in ids
+    assert seeded.other_topic_id not in ids
+
+
+async def test_subtopics_institution_isolation(
+    async_session: AsyncSession, seeded: _Fixture
+) -> None:
+    rows = await _run_scoped(
+        async_session,
+        sql="SELECT id FROM subtopics",
+        user_id=seeded.teacher_user_id,
+        role="teacher",
+        institution_id=seeded.institution_id,
+    )
+    ids = {row["id"] for row in rows}
+    assert seeded.subtopic_id in ids
+    assert seeded.other_subtopic_id not in ids
+
+
+async def test_learning_outcomes_institution_isolation(
+    async_session: AsyncSession, seeded: _Fixture
+) -> None:
+    rows = await _run_scoped(
+        async_session,
+        sql="SELECT id FROM learning_outcomes",
+        user_id=seeded.teacher_user_id,
+        role="teacher",
+        institution_id=seeded.institution_id,
+    )
+    ids = {row["id"] for row in rows}
+    assert seeded.learning_outcome_id in ids
+    assert seeded.other_learning_outcome_id not in ids
+
+
+async def test_source_materials_institution_isolation(
+    async_session: AsyncSession, seeded: _Fixture
+) -> None:
+    rows = await _run_scoped(
+        async_session,
+        sql="SELECT id FROM source_materials",
+        user_id=seeded.teacher_user_id,
+        role="teacher",
+        institution_id=seeded.institution_id,
+    )
+    ids = {row["id"] for row in rows}
+    assert seeded.source_material_id in ids
+    assert seeded.other_source_material_id not in ids
+
+
+async def test_questions_institution_isolation(
+    async_session: AsyncSession, seeded: _Fixture
+) -> None:
+    rows = await _run_scoped(
+        async_session,
+        sql="SELECT id FROM questions",
+        user_id=seeded.teacher_user_id,
+        role="teacher",
+        institution_id=seeded.institution_id,
+    )
+    ids = {row["id"] for row in rows}
+    assert seeded.question_id in ids
+    assert seeded.other_question_id not in ids
+
+
+async def test_common_mastery_quizzes_institution_isolation_both_branches(
+    async_session: AsyncSession, seeded: _Fixture
+) -> None:
+    # Proves both branches of the subtopic-xor-topic OR predicate: the subtopic-scoped
+    # quiz and the topic-scoped quiz (seeded.common_mastery_quiz_topic_scoped_id) both
+    # belong to institution_id and must both be visible; the other institution's
+    # subtopic-scoped quiz must not.
+    rows = await _run_scoped(
+        async_session,
+        sql="SELECT id FROM common_mastery_quizzes",
+        user_id=seeded.teacher_user_id,
+        role="teacher",
+        institution_id=seeded.institution_id,
+    )
+    ids = {row["id"] for row in rows}
+    assert seeded.common_mastery_quiz_subtopic_scoped_id in ids
+    assert seeded.common_mastery_quiz_topic_scoped_id in ids
+    assert seeded.other_common_mastery_quiz_id not in ids
+
+
+_CK_COMMON_MASTERY_QUIZZES_EXACTLY_ONE_TARGET = (
+    "(quiz_scope = 'subtopic_mastery' AND subtopic_id IS NOT NULL AND topic_id IS NULL) OR "
+    "(quiz_scope = 'topic_mastery' AND topic_id IS NOT NULL AND subtopic_id IS NULL)"
+)
+
+
+async def test_common_mastery_quizzes_denies_when_neither_target_is_set(
+    async_session: AsyncSession, seeded: _Fixture, clean_db: str
+) -> None:
+    # Unreachable in practice: ck_common_mastery_quizzes_exactly_one_target enforces
+    # exactly one of subtopic_id/topic_id. Proves apply_role_scope's own predicate fails
+    # closed independently of that DB constraint, not merely because the constraint
+    # happens to prevent the row from existing -- same defense-in-depth posture as the
+    # DB-role grants not trusting the app layer's column blocklist alone. The constraint
+    # is dropped, then restored (row deleted first) before this test returns: `clean_db`
+    # truncates rows between tests but does not restore schema, so a DDL change here
+    # would otherwise leak into every later test in the session.
+    # DROP CONSTRAINT IF EXISTS / unconditional DROP-then-ADD in the restore, and
+    # deleting the offending row *by shape* rather than by a possibly-unbound id, make
+    # this test self-healing if a previous run of it crashed or was killed mid-test
+    # (e.g. a deadlock) and left the schema mid-repair rather than fully restored.
+    engine = create_engine(to_sync_url(clean_db))
+    try:
+        with engine.begin() as conn:
+            conn.execute(
+                text(
+                    "ALTER TABLE common_mastery_quizzes "
+                    "DROP CONSTRAINT IF EXISTS ck_common_mastery_quizzes_exactly_one_target"
+                )
+            )
+            neither_set_id = conn.execute(
+                text(
+                    "INSERT INTO common_mastery_quizzes "
+                    "(id, quiz_scope, subtopic_id, topic_id, title, created_at, updated_at) "
+                    "VALUES (gen_random_uuid(), 'subtopic_mastery', NULL, NULL, 'Orphan Quiz', "
+                    "now(), now()) RETURNING id"
+                )
+            ).scalar_one()
+
+        rows = await _run_scoped(
+            async_session,
+            sql="SELECT id FROM common_mastery_quizzes",
+            user_id=seeded.teacher_user_id,
+            role="teacher",
+            institution_id=seeded.institution_id,
+        )
+        ids = {row["id"] for row in rows}
+        assert neither_set_id not in ids
+        assert seeded.common_mastery_quiz_subtopic_scoped_id in ids  # sanity: real rows unaffected
+    finally:
+        # async_session's SELECT above leaves its transaction open (AsyncSession doesn't
+        # auto-commit), which holds a lock on common_mastery_quizzes -- release it before
+        # the ALTER TABLE below on a separate connection tries to take a conflicting lock
+        # on the same table, or that DDL deadlocks against this very transaction, which
+        # can't be torn down until this function returns.
+        await async_session.rollback()
+        with engine.begin() as conn:
+            conn.execute(
+                text(
+                    "DELETE FROM common_mastery_quizzes "
+                    "WHERE subtopic_id IS NULL AND topic_id IS NULL"
+                )
+            )
+            conn.execute(
+                text(
+                    "ALTER TABLE common_mastery_quizzes "
+                    "DROP CONSTRAINT IF EXISTS ck_common_mastery_quizzes_exactly_one_target"
+                )
+            )
+            conn.execute(
+                text(
+                    "ALTER TABLE common_mastery_quizzes ADD CONSTRAINT "
+                    "ck_common_mastery_quizzes_exactly_one_target CHECK "
+                    f"({_CK_COMMON_MASTERY_QUIZZES_EXACTLY_ONE_TARGET})"
+                )
+            )
+        engine.dispose()
+
+
+async def test_batch_1_tables_no_row_predicate_admin_teacher_student_agree(
+    async_session: AsyncSession, seeded: _Fixture
+) -> None:
+    for table in (
+        "topics",
+        "subtopics",
+        "learning_outcomes",
+        "source_materials",
+        "questions",
+        "common_mastery_quizzes",
+    ):
+        results = {
+            role: {
+                row["id"]
+                for row in await _run_scoped(
+                    async_session,
+                    sql=f"SELECT id FROM {table}",
+                    user_id=seeded.teacher_user_id,
+                    role=role,
+                    institution_id=seeded.institution_id,
+                )
+            }
+            for role in ("admin", "teacher", "student")
+        }
+        assert results["admin"] == results["teacher"] == results["student"], table
+
+
+# --- Batch 2: deferred-curriculum-table scoping project (source_material_versions/
+# --- question_versions/quiz_versions) --------------------------------------------------
+
+
+async def test_source_material_versions_institution_isolation(
+    async_session: AsyncSession, seeded: _Fixture
+) -> None:
+    rows = await _run_scoped(
+        async_session,
+        sql="SELECT id FROM source_material_versions",
+        user_id=seeded.teacher_user_id,
+        role="teacher",
+        institution_id=seeded.institution_id,
+    )
+    ids = {row["id"] for row in rows}
+    assert seeded.source_material_version_id in ids
+    assert seeded.other_source_material_version_id not in ids
+
+
+async def test_question_versions_institution_isolation(
+    async_session: AsyncSession, seeded: _Fixture
+) -> None:
+    rows = await _run_scoped(
+        async_session,
+        sql="SELECT id FROM question_versions",
+        user_id=seeded.teacher_user_id,
+        role="teacher",
+        institution_id=seeded.institution_id,
+    )
+    ids = {row["id"] for row in rows}
+    assert seeded.question_version_id in ids
+    assert seeded.other_question_version_id not in ids
+
+
+async def test_quiz_versions_institution_isolation(
+    async_session: AsyncSession, seeded: _Fixture
+) -> None:
+    rows = await _run_scoped(
+        async_session,
+        sql="SELECT id FROM quiz_versions",
+        user_id=seeded.teacher_user_id,
+        role="teacher",
+        institution_id=seeded.institution_id,
+    )
+    ids = {row["id"] for row in rows}
+    assert seeded.quiz_version_id in ids
+    assert seeded.other_quiz_version_id not in ids
+
+
+async def test_batch_2_tables_no_row_predicate_admin_teacher_student_agree(
+    async_session: AsyncSession, seeded: _Fixture
+) -> None:
+    for table in ("source_material_versions", "question_versions", "quiz_versions"):
+        results = {
+            role: {
+                row["id"]
+                for row in await _run_scoped(
+                    async_session,
+                    sql=f"SELECT id FROM {table}",
+                    user_id=seeded.teacher_user_id,
+                    role=role,
+                    institution_id=seeded.institution_id,
+                )
+            }
+            for role in ("admin", "teacher", "student")
+        }
+        assert results["admin"] == results["teacher"] == results["student"], table
+
+
 # --- Item 5: institution isolation, admin included ------------------------------------
 
 
@@ -1023,6 +1451,60 @@ async def test_student_self_reference_also_resolves_through_full_graph(
     assert result["query_result"] == [{"email": "stu-a-math@ars-integration.school"}]
     assert str(seeded.student_a_math_user_id) in result["validated_sql"]
     assert "__CURRENT_USER_ID__" not in result["validated_sql"]
+
+
+# --- Fix (Row 28): identity mismatch, through the full compiled graph -----------------
+
+
+async def test_row_28_identity_mismatch_routes_to_honest_refusal_without_leaking_internals(
+    monkeypatch: pytest.MonkeyPatch, seeded: _Fixture
+) -> None:
+    async def _fake_generate_sql(state: TextToSQLState) -> TextToSQLState:
+        # The exact row-28 shape: a teacher's sentinel bound against student_360's
+        # student-identity column, structurally guaranteed to match nothing.
+        return {
+            **state,
+            "generated_sql": (
+                "SELECT AVG(mastery_percent) AS average_score FROM student_360 "
+                "WHERE student_id = '__CURRENT_USER_ID__'"
+            ),
+            "error": None,
+        }
+
+    monkeypatch.setattr(graph_module, "generate_sql", _fake_generate_sql)
+    graph = build_text_to_sql_graph()
+    initial: TextToSQLState = {
+        "question": "what is the average score across all 3 subjects?",
+        "user_id": str(seeded.teacher_user_id),
+        "user_role": "teacher",
+        "institution_id": str(seeded.institution_id),
+        "schema_context": "",
+        "generated_sql": None,
+        "validated_sql": None,
+        "retry_count": 0,
+        "query_result": None,
+        "result_row_count": None,
+        "natural_answer": None,
+        "confidence": None,
+        "provenance": None,
+        "error": None,
+        "audit_entry": None,
+    }
+    result = await graph.ainvoke(initial, config={"recursion_limit": 15})
+
+    assert error_category(result["error"]) == ROLE_VIOLATION
+    assert result["validated_sql"] is None
+    # Never silently executed: no query ran, so no confidently-empty answer was produced.
+    assert result["result_row_count"] is None
+    # Did not loop back into generate_sql's retry path -- same "policy rejection, not a
+    # correctness one" routing every other apply_role_scope rejection already takes.
+    assert result["retry_count"] == 0
+    # honest_refusal's fixed, category-keyed message -- never the raw column/table names
+    # or the real teacher_user_id, same no-leak discipline as every other refusal path.
+    assert result["natural_answer"] == "That question touches data you don't have access to."
+    assert "student_360" not in result["natural_answer"]
+    assert "student_id" not in result["natural_answer"]
+    assert str(seeded.teacher_user_id) not in result["natural_answer"]
 
 
 # --- Graph-level: ROLE_VIOLATION routes to honest_refusal, not the retry loop ----------
