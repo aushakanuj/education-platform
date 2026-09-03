@@ -2,16 +2,37 @@
 
 Happy path:
 
-    load_schema -> generate_sql -> validate_sql -> apply_role_scope -> execute_sql
-        -> sanity_check -> compose_answer -> audit_log -> END
+    injection_guard -> load_schema -> link_schema -> generate_sql -> validate_sql
+        -> apply_role_scope -> execute_sql -> sanity_check -> compose_answer
+        -> audit_log -> END
 
-honest_refusal is reached from four independent failure branches, none of which loop back
-into generate_sql's retry path: load_schema's "error", validate_sql's "refuse" once
-retries are exhausted, apply_role_scope's ROLE_VIOLATION, and execute_sql's
-EXECUTION_ERROR. Only validate_sql's own "retry" edge goes back to generate_sql, and only
-while retry_count < MAX_RETRIES — see `_route_after_validate` and `MAX_RETRIES`.
-honest_refusal itself then also feeds into audit_log, same as compose_answer, so refusals
-get logged too.
+`injection_guard` is the entry point, ahead of `load_schema`: a cost/UX check (skip the
+LLM call, give a distinct audit signal for an unambiguous prompt-injection attempt), never
+the security boundary — that's still `apply_role_scope`, unconditionally, on every path
+that reaches it, regardless of what this node did or didn't catch. See that module's own
+docstring for why it's placed first rather than anywhere else: an intent-routing stage
+(hybrid templates, not built yet) will eventually sit right after it, so every future
+branch benefits from the same early, cheap check rather than needing its own copy.
+
+`link_schema` sits between `load_schema` and `generate_sql`, not merged into either:
+`load_schema` caches its filtered catalog once, independent of the question (see that
+module's own "not on every call" caching discipline), while `link_schema` narrows that
+cached catalog *per question* — mixing the two would mean load_schema's cache could no
+longer just be "the filtered catalog," it would have to vary per question too, defeating
+the point of caching it at all. `link_schema` has no error path of its own (a narrowing
+bug is a worse-prompt problem for generate_sql, never a correctness/authorization one —
+see that module's own docstring for why) and no conditional edge, unlike every other
+stage here — it always proceeds straight to generate_sql.
+
+honest_refusal is reached from five independent failure branches, none of which loop back
+into generate_sql's retry path: injection_guard's INJECTION_BLOCKED, load_schema's
+"error", validate_sql's "refuse" once retries are exhausted, apply_role_scope's
+ROLE_VIOLATION, and execute_sql's EXECUTION_ERROR. Only validate_sql's own "retry" edge
+goes back to generate_sql (not to
+link_schema — a retry reuses the same narrowed schema_context from the first pass rather
+than re-narrowing), and only while retry_count < MAX_RETRIES — see `_route_after_validate`
+and `MAX_RETRIES`. honest_refusal itself then also feeds into audit_log, same as
+compose_answer, so refusals get logged too.
 
 Most nodes in `modules/text_to_sql/nodes/` are still pass-through placeholders (see that
 package's docstring); `load_schema`, `generate_sql`, `validate_sql`, `apply_role_scope`,
@@ -24,9 +45,9 @@ Note on `honest_refusal` and `audit_log`: `audit_log`'s own fail-closed path (Ta
 `AUDIT_ERROR`) does not route back through `honest_refusal` — `audit_log` runs strictly
 after it on every path (see the edges below: `honest_refusal -> audit_log -> END`,
 unconditional), so it produces its own refusal text directly rather than looping back.
-`honest_refusal` still formats a message for `AUDIT_ERROR` as one of its five categories,
-for defensive completeness and direct-invocation testing, but that branch is not
-reachable through the compiled graph today.
+`honest_refusal` still formats a message for `AUDIT_ERROR` as one of its seven
+categories, for defensive completeness and direct-invocation testing, but that branch is
+not reachable through the compiled graph today.
 """
 
 from __future__ import annotations
@@ -43,11 +64,20 @@ from education_platform.modules.text_to_sql.nodes import (
     execute_sql,
     generate_sql,
     honest_refusal,
+    injection_guard,
+    link_schema,
     load_schema,
     sanity_check,
     validate_sql,
 )
 from education_platform.modules.text_to_sql.state import MAX_RETRIES, TextToSQLState
+
+
+def _route_after_injection_guard(state: TextToSQLState) -> Literal["ok", "blocked"]:
+    # injection_guard sets state["error"] (INJECTION_BLOCKED) when the heuristic regex
+    # or the LLM classifier judged the question itself a prompt-injection attempt —
+    # straight to honest_refusal, never into load_schema/generate_sql at all.
+    return "blocked" if state.get("error") else "ok"
 
 
 def _route_after_load_schema(state: TextToSQLState) -> Literal["ok", "error"]:
@@ -95,7 +125,9 @@ def _route_after_sanity_check(state: TextToSQLState) -> Literal["suspicious", "n
 def build_text_to_sql_graph() -> CompiledStateGraph[TextToSQLState, None, TextToSQLState]:
     graph: StateGraph[TextToSQLState] = StateGraph(TextToSQLState)
 
+    graph.add_node("injection_guard", injection_guard)
     graph.add_node("load_schema", load_schema)
+    graph.add_node("link_schema", link_schema)
     graph.add_node("generate_sql", generate_sql)
     graph.add_node("validate_sql", validate_sql)
     graph.add_node("apply_role_scope", apply_role_scope)
@@ -105,15 +137,24 @@ def build_text_to_sql_graph() -> CompiledStateGraph[TextToSQLState, None, TextTo
     graph.add_node("audit_log", audit_log)
     graph.add_node("honest_refusal", honest_refusal)
 
-    graph.set_entry_point("load_schema")
+    graph.set_entry_point("injection_guard")
+    graph.add_conditional_edges(
+        "injection_guard",
+        _route_after_injection_guard,
+        {
+            "ok": "load_schema",
+            "blocked": "honest_refusal",
+        },
+    )
     graph.add_conditional_edges(
         "load_schema",
         _route_after_load_schema,
         {
-            "ok": "generate_sql",
+            "ok": "link_schema",
             "error": "honest_refusal",
         },
     )
+    graph.add_edge("link_schema", "generate_sql")
     graph.add_edge("generate_sql", "validate_sql")
 
     graph.add_conditional_edges(

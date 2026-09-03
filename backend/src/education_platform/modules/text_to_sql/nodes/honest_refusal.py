@@ -1,8 +1,8 @@
 """Turns a failure already decided upstream into state["natural_answer"] — phrasing
 only, no routing decisions. Reached from every failure branch in graph.py:
-load_schema's SCHEMA_ERROR, validate_sql's "refuse" edge (retries exhausted),
-apply_role_scope's ROLE_VIOLATION, execute_sql's EXECUTION_ERROR, and audit_log's own
-fail-closed AUDIT_ERROR path.
+injection_guard's INJECTION_BLOCKED, load_schema's SCHEMA_ERROR, validate_sql's "refuse"
+edge (retries exhausted), apply_role_scope's ROLE_VIOLATION, execute_sql's
+EXECUTION_ERROR, and audit_log's own fail-closed AUDIT_ERROR path.
 
 **Message per category**, honest about *what kind* of failure occurred without exposing
 *how*: `LLM_ERROR` (the AI service itself failed — try again) and `VALIDATION_ERROR`
@@ -10,7 +10,15 @@ fail-closed AUDIT_ERROR path.
 because they suggest different next actions to the user. `ROLE_VIOLATION` gets its own
 message too ("touches data you don't have access to") — deliberately not phrased the same
 as the infrastructure failures below it, since "you're not allowed to see this" and "our
-system broke" are different facts a user should be able to tell apart. `SCHEMA_ERROR`,
+system broke" are different facts a user should be able to tell apart. `INJECTION_BLOCKED`
+also gets its own distinct wording ("ask a concrete question...") rather than reusing
+`ROLE_VIOLATION`'s, for the same reason in reverse: this question was never evaluated
+against real data at all, so "you don't have access to this" would be a false claim about
+something that was never checked — one fixed message regardless of which of
+injection_guard's three internal reasons (heuristic match, classifier match, classifier
+unavailable) produced it, matching every other category's "no internals in the
+user-facing text" rule; the specific reason still reaches the audit trail via
+`state["error"]`'s full detail text, just not this message. `SCHEMA_ERROR`,
 `EXECUTION_ERROR`, and `AUDIT_ERROR` share one generic message: all three are
 infrastructure failures, not anything the user did wrong, and none is a case where "try
 rephrasing" would help — `EXECUTION_ERROR`/`AUDIT_ERROR` because the query was already
@@ -60,6 +68,7 @@ from typing import Final
 from education_platform.modules.text_to_sql.state import (
     AUDIT_ERROR,
     EXECUTION_ERROR,
+    INJECTION_BLOCKED,
     LLM_ERROR,
     ROLE_VIOLATION,
     SCHEMA_ERROR,
@@ -83,6 +92,10 @@ _MESSAGES: Final[dict[str, str]] = {
     ROLE_VIOLATION: "That question touches data you don't have access to.",
     EXECUTION_ERROR: _GENERIC_MESSAGE,
     AUDIT_ERROR: _GENERIC_MESSAGE,
+    INJECTION_BLOCKED: (
+        "I can't process that request. Please ask a concrete question about your "
+        "students, classes, or school data."
+    ),
 }
 
 _FAILURE_CONFIDENCE: Final[str] = "low"

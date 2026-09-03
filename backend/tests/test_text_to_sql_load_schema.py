@@ -57,6 +57,36 @@ _MODULE = cast(
 )
 
 
+class _InjectionGuardModule(Protocol):
+    async def chat_completion_json(
+        self, messages: list[dict[str, str]], *, settings: object, temperature: float = 0.0
+    ) -> dict[str, object]: ...
+
+
+_INJECTION_GUARD_MODULE = cast(
+    _InjectionGuardModule,
+    sys.modules["education_platform.modules.text_to_sql.nodes.injection_guard"],
+)
+
+
+@pytest.fixture(autouse=True)
+def _pass_injection_guard(monkeypatch: pytest.MonkeyPatch) -> None:
+    """injection_guard is now the graph's entry node, ahead of load_schema, and makes its
+    own live OpenRouter classifier call for any question its heuristic regex doesn't
+    already catch -- including the one full-graph test in this file, which would
+    otherwise reach a real, unmocked API before load_schema ever gets a chance to fail.
+    Default every question here to "not an injection" so it doesn't depend on network
+    availability to pass.
+    """
+
+    async def _fake(
+        messages: list[dict[str, str]], *, settings: object, temperature: float = 0.0
+    ) -> dict[str, object]:
+        return {"injection": False}
+
+    monkeypatch.setattr(_INJECTION_GUARD_MODULE, "chat_completion_json", _fake)
+
+
 @pytest.fixture()
 def seeded_admin_user(clean_db: str) -> Iterator[tuple[UUID, UUID]]:
     """(institution_id, user_id) real rows -- needed only by the one full-graph test in

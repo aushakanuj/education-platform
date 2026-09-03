@@ -50,6 +50,31 @@ _MODULE = cast(
 )
 
 
+class _InjectionGuardModule(Protocol):
+    chat_completion_json: AsyncMock
+
+
+_INJECTION_GUARD_MODULE = cast(
+    _InjectionGuardModule,
+    sys.modules["education_platform.modules.text_to_sql.nodes.injection_guard"],
+)
+
+
+@pytest.fixture(autouse=True)
+def _pass_injection_guard(monkeypatch: pytest.MonkeyPatch) -> None:
+    """injection_guard is the graph's real entry node now, ahead of load_schema, and
+    makes its own live OpenRouter classifier call for any question its heuristic regex
+    doesn't already catch. Every test in this file is about routing/auth/scoping, not
+    injection_guard itself -- default every question here to "not an injection" so these
+    HTTP-level tests don't silently make a real, unmocked API call per request.
+    """
+    monkeypatch.setattr(
+        _INJECTION_GUARD_MODULE,
+        "chat_completion_json",
+        AsyncMock(return_value={"injection": False}),
+    )
+
+
 @pytest.fixture()
 def api(client: TestClient, clean_db: str) -> Iterator[TestClient]:
     """The real app, backed by a generated school."""

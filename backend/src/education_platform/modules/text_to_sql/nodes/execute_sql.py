@@ -12,8 +12,26 @@ if either of those has an undiscovered bug, a query that reaches this node still
 read a column or table it wasn't granted, or write anything at all, regardless of what SQL
 text made it this far.
 
-Two more layers enforced here, at the database connection itself rather than in Python:
+Three more layers enforced here, at the database connection itself rather than in Python:
 
+* **Row-Level Security identity propagation** (migration `e1f2a3b4c5d6`) — the 5th
+  defense-in-depth layer, and the one that still holds if `apply_role_scope` (Task 6) has
+  a bug nobody's found yet: RLS policies on every scoped table re-derive the same row-
+  visibility rule that node already computed, enforced inside Postgres itself regardless
+  of what SQL text arrives. Those policies read three session variables —
+  `app.current_user_id`/`app.current_user_role`/`app.current_institution_id` — that only
+  this node sets, via `set_config(..., true)` (the parameterized equivalent of
+  `SET LOCAL`, chosen over string-interpolating a `SET LOCAL` statement so these values
+  go through the driver's normal bind-parameter path like any other untrusted-shaped
+  string, even though they're already sourced from the same verified `state["user_id"]`/
+  `state["user_role"]`/`state["institution_id"]` fields every other node in this pipeline
+  trusts — never from the question or LLM output). The `true` third argument is what
+  makes each `set_config` call transaction-scoped, identical to `SET LOCAL`: it can never
+  leak onto a pooled connection some other session picks up next. If this node were ever
+  skipped or reached with these fields unset, every RLS policy's `current_setting(name,
+  true)` read comes back NULL, which satisfies no equality check — the policies deny by
+  default (zero rows), not "fall back to unscoped," so a bug here fails toward less
+  access, not more.
 * **Statement timeout** (`STATEMENT_TIMEOUT_MS`) — set via `SET LOCAL` inside the same
   transaction as the query, so a malformed or unexpectedly expensive query (a bad join
   fan-out, a missing index) is cancelled by Postgres itself rather than hanging this node,
@@ -91,6 +109,23 @@ async def execute_sql(state: TextToSQLState) -> TextToSQLState:
     session_factory = get_text_to_sql_session_factory()
     try:
         async with session_factory() as session:
+            # Must run before the query itself: RLS policies read these on every table
+            # access, so they need to already be set by the time `sql` executes, in the
+            # same transaction (SQLAlchemy's async session keeps one transaction open
+            # across these statements by default, same as the existing statement_timeout
+            # call below).
+            await session.execute(
+                text(
+                    "SELECT set_config('app.current_user_id', :user_id, true), "
+                    "set_config('app.current_user_role', :user_role, true), "
+                    "set_config('app.current_institution_id', :institution_id, true)"
+                ),
+                {
+                    "user_id": state["user_id"],
+                    "user_role": state["user_role"],
+                    "institution_id": state["institution_id"],
+                },
+            )
             await session.execute(text(f"SET LOCAL statement_timeout = {STATEMENT_TIMEOUT_MS}"))
             result = await session.execute(text(sql))
             rows: list[dict[str, Any]] = [dict(row) for row in result.mappings().all()]

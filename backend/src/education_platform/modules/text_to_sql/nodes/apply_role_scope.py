@@ -41,7 +41,18 @@ unconditionally rather than only for student-facing queries). `password_hash`/`t
 are checked by column name alone, without resolving which table/alias they belong to —
 cheaper than full alias resolution, and safe here specifically because the schema catalog
 confirms both names are unique to their one table across the whole schema, so any
-occurrence, from any alias, is unambiguous and always worth rejecting.
+occurrence, from any alias, is unambiguous and always worth rejecting. A bare `SELECT *`/
+`alias.*` produces no `exp.Column` node named `password_hash`/`token_hash` for the check
+above to catch by name, so `_find_blocklist_violation` separately refuses a star against
+`users`/`refresh_sessions` specifically (`_BLOCKED_COLUMN_TABLES`) — the same gap
+`_find_redacted_column_misuse` closes for `_REDACTED_IDENTITY_COLUMNS` tables below, found
+while building that mechanism and fixed here too rather than left as a known gap: confirmed
+live that the `text_to_sql_reader` DB role already denies `SELECT * FROM users`/
+`refresh_sessions` outright at the Postgres grant level (a real, independent backstop —
+see migration `c9d0e1f2a3b4`), but this application-layer check shouldn't depend on that
+second layer being the only thing holding the line. `validate_sql`'s own column allowlist
+check has the analogous gap (it also walks `exp.Column` nodes only) but is out of scope
+here — noted so it isn't lost, not fixed in this pass.
 
 Table coverage (fail-closed allowlist, not a blocklist): a live investigation found that a
 question routed entirely through `student_subject_enrollments`/`grade_subject_offerings`/
@@ -76,32 +87,43 @@ curriculum is the eventual design intent per the module README, but today each
 institution's `grade_subject_offerings` hangs its own `topics`, so the two seeded
 institutions have disjoint topic/question sets), but each one's institution path is a
 multi-hop join chain distinct per table and reviewing all of them was real, separate work.
-That work is now done — every one of the 15 is classified into `INSTITUTION_SCOPED_TABLES`
-below (none of them has any column that reaches student or teacher identity, confirmed by
-tracing every FK against the ORM models, so none needed `STUDENT_SCOPED_TABLES`). None was
-a genuinely fresh multi-join predicate: each table's institution path runs entirely through
-*other tables on this same list*, so scoped in dependency order (topics -> subtopics ->
-{learning_outcomes, source_materials, questions, common_mastery_quizzes} -> {source_material
-_versions, question_versions, quiz_versions} -> {source_chunks, question_options,
+That work is done now — every one of the 15 is classified into `INSTITUTION_SCOPED_TABLES`
+below (none of them has a bare student/teacher self-identity column that reaches
+`STUDENT_SCOPED_TABLES`-style row narrowing; `quiz_releases` is the one exception, and it's
+a narrower, column-level case — see below). None was a genuinely fresh multi-join
+predicate: each table's institution path runs entirely through *other tables on this same
+list*, so scoped in dependency order (topics -> subtopics -> {learning_outcomes,
+source_materials, questions, common_mastery_quizzes} -> {source_material_versions,
+question_versions, quiz_versions} -> {source_chunks, question_options,
 question_outcome_tags, quiz_items, quiz_material_bindings, quiz_releases}), every predicate
-is exactly one hop from an already-scoped, already-tested parent. `_institution_scoped_subquery`
-below composes that one hop by calling back into `_institution_predicate_sql` for the
-parent rather than hand-inlining the parent's own join chain again — a chain N levels deep
-becomes N independently-reviewable one-hop wrappers instead of one hand-assembled N-join
-expression someone could mistranscribe. Landed and verified in three dependency-ordered
-batches, each batch's tests run and confirmed green against a live database before the
-next batch's predicates (which lean on the previous batch's) were written — a bug in an
-earlier batch's predicate would otherwise propagate silently into every table stacked on
-top of it. Three tables (`question_outcome_tags`, `quiz_items`, `quiz_material_bindings`)
-have two non-nullable FKs into two different already-scoped tables; both are checked
-(ANDed), not just one, even though the application layer already enforces both sides share
-an institution at creation time (`authoring/service.py`) — trusting only the layer above is
-exactly the single-point-of-trust posture this project's four-layer defense-in-depth model
-exists to avoid (see Finding 4). `common_mastery_quizzes` has two *nullable* FKs
-(`subtopic_id` xor `topic_id`, CHECK-enforced), so its predicate is a genuine `OR` of two
-conditional branches rather than a plain `IN` — structured so that if neither were ever set
-(unreachable given the CHECK constraint, but not relied upon), both branches evaluate
-false and the row is denied, not silently passed through.
+is exactly one hop from an already-scoped, already-tested parent (`question_outcome_tags`
+is the one case where "one hop" means one hop from a *Batch 1* table on one FK side, not
+Batch 2 on both — see its own case in `_institution_predicate_sql` for why that doesn't
+matter structurally). `_institution_scoped_subquery` below composes that one hop by
+calling back into `_institution_predicate_sql` for the parent rather than hand-inlining the
+parent's own join chain again — a chain N levels deep becomes N independently-reviewable
+one-hop wrappers instead of one hand-assembled N-join expression someone could
+mistranscribe. Landed and verified in three dependency-ordered batches, each batch's tests
+run and confirmed green against a live database before the next batch's predicates (which
+lean on the previous batch's) were written — a bug in an earlier batch's predicate would
+otherwise propagate silently into every table stacked on top of it. Three tables
+(`question_outcome_tags`, `quiz_items`, `quiz_material_bindings`) have two non-nullable FKs
+into two different already-scoped tables; both are checked (ANDed), not just one, even
+though the application layer already enforces both sides share an institution at creation
+time (`authoring/service.py`) — trusting only the layer above is exactly the
+single-point-of-trust posture this project's four-layer defense-in-depth model exists to
+avoid (see Finding 4). `common_mastery_quizzes` has two *nullable* FKs (`subtopic_id` xor
+`topic_id`, CHECK-enforced), so its predicate is a genuine `OR` of two conditional branches
+rather than a plain `IN` — structured so that if neither were ever set (unreachable given
+the CHECK constraint, but not relied upon), both branches evaluate false and the row is
+denied, not silently passed through. `quiz_releases` also has two FKs, but the second
+(`released_by_user_id`, nullable, -> `users`) is an identity column, not a second
+curriculum-scoping path — its row gets the ordinary single-hop institution pin (via
+`quiz_version_id` only), and the identity column itself is handled separately (see
+`_REDACTED_IDENTITY_COLUMNS` below): unlike `teaching_assignments`/`user_roles`/
+`refresh_sessions`, hiding the whole row would also hide release status for quizzes a
+teacher/student has every reason to see, just because someone else released them, so only
+the one column's *value* is redacted to NULL for a non-self reader, not the row.
 
 `query_source` branch (Step 4): a value of `"template"` skips the AST rewrite entirely (a
 template's SQL already has the scoping logic — row *and* institution — hand-written into it
@@ -115,12 +137,22 @@ by the template's own author, not this node.
 
 Self-reference sentinel (`'__CURRENT_USER_ID__'`): `STUDENT_SCOPED_TABLES` never needs
 this — apply_role_scope already narrows those to the asking user's own rows silently, so
-the model never has to write a self-filter for them at all. But `INSTITUTION_SCOPED_TABLES`
-only gets the institution pin (deliberately — see that constant's own docstring), so a
-question like "what subject do I teach" (teaching_assignments) or "what's my email"
-(users) genuinely needs a `<owner column> = <the asking user>` filter that only the model
-can write, and generate_sql never gives it a real identity value to use. Left
-unaddressed, the model either fabricates a placeholder that matches nothing (the observed
+the model never has to write a self-filter for them at all. `teaching_assignments` used to
+need it too (see `_apply_row_scoping`'s docstring for why that changed: a teacher's
+"show all teaching assignments" question, with no self-filter to resolve, returned the
+whole school's staff roster) — it's now narrowed the same silent way as
+`STUDENT_SCOPED_TABLES`, despite still being classified under `INSTITUTION_SCOPED_TABLES`
+for the fail-closed table-coverage check. `user_roles`/`refresh_sessions` followed the
+same path shortly after — found by the drift-guard extension
+(`test_institution_scoped_identity_columns_are_deliberately_reviewed`) rather than
+another live leak, and now silently self-narrowed via `_SELF_USER_ID_SCOPED_TABLES`
+(both teacher and student, unlike teaching_assignments' teacher-only narrowing, since
+both roles have a legitimate "what's my own role/session" reading here). The rest of
+`INSTITUTION_SCOPED_TABLES` still only gets the institution pin (deliberately — see that
+constant's own docstring), so a question like "what's my email" (users) genuinely needs a
+`<owner column> = <the asking user>` filter that only the model can write, and
+generate_sql never gives it a real identity value to use. Left unaddressed, the model
+either fabricates a placeholder that matches nothing (the observed
 failure: a literal like `'Your Name Here'`) or drops the self-filter entirely, over-
 returning institution-wide data. generate_sql's prompt instead teaches one fixed, literal
 token; `_resolve_current_user_sentinel` finds and replaces it with the real
@@ -225,6 +257,16 @@ INSTITUTION_SCOPED_TABLES: Final[frozenset[str]] = frozenset(
         "source_material_versions",
         "question_versions",
         "quiz_versions",
+        # Batch 3 (final batch): each is one hop from a Batch-2 table, except
+        # question_outcome_tags, whose second FK lands on a Batch-1 table
+        # (learning_outcomes) instead -- see that table's case in
+        # _institution_predicate_sql for why this doesn't matter structurally.
+        "source_chunks",
+        "question_options",
+        "question_outcome_tags",
+        "quiz_items",
+        "quiz_material_bindings",
+        "quiz_releases",
     }
 )
 
@@ -234,6 +276,22 @@ INSTITUTION_SCOPED_TABLES: Final[frozenset[str]] = frozenset(
 # schema, so an unqualified name match is unambiguous.
 _BLOCKED_COLUMN_NAMES: Final[frozenset[str]] = frozenset({"password_hash", "token_hash"})
 _BLOCKED_TABLE_NAMES: Final[frozenset[str]] = frozenset({"question_answer_keys"})
+
+# Which table each `_BLOCKED_COLUMN_NAMES` entry actually lives on -- needed only for the
+# `SELECT *`/`alias.*` case below, where there is no explicit `exp.Column` node to check
+# by name and the table a star belongs to has to be resolved instead. Confirmed live
+# (2026-09-03): the `text_to_sql_reader` DB role (migration c9d0e1f2a3b4) already denies
+# `SELECT * FROM users`/`SELECT * FROM refresh_sessions` outright at the Postgres grant
+# level (`InsufficientPrivilege`, the whole statement fails, not a partial leak of the
+# non-blocked columns) -- a real, independent backstop that already holds today even
+# though this application-layer check didn't yet exist. This closes the gap at this layer
+# too, so the DB grant stops being the *only* thing standing in the way, matching this
+# node's own "two independent layers, never just one" posture (see Finding 4) rather than
+# leaving `_find_blocklist_violation` itself dependent on a layer it doesn't control.
+_BLOCKED_COLUMN_TABLES: Final[dict[str, str]] = {
+    "password_hash": "users",
+    "token_hash": "refresh_sessions",
+}
 
 # Alias prefix used for identifiers this node injects inside its own correlated
 # subqueries. Kept maximally distinctive (unlikely to be naturally generated, and never
@@ -454,6 +512,36 @@ def _find_blocklist_violation(tree: exp.Expr) -> str | None:
             return (
                 f"column `{qualifier}{col.name}` may never be referenced by a text-to-SQL query"
             )
+    # `SELECT *`/`alias.*` produces no explicit `exp.Column` node for the check above to
+    # catch by name, even though it would still expand to include a blocked column at
+    # execution -- were it not for the independent `text_to_sql_reader` DB-grant backstop
+    # (see `_BLOCKED_COLUMN_TABLES`'s own comment). Deliberately narrow, not a blanket
+    # star ban: only `users`/`refresh_sessions` (the two tables that actually carry a
+    # blocked column) are refused this way, matching this file's consistent
+    # narrow-exception-list posture elsewhere (`_ROLE_FORBIDDEN_TABLES`,
+    # `_SELF_USER_ID_SCOPED_TABLES`, `_REDACTED_IDENTITY_COLUMNS`) rather than
+    # restricting every table's legitimate `SELECT *` usage (e.g. `subjects`, which
+    # carries no sensitive column at all) for a risk that only exists on two tables.
+    blocked_tables = set(_BLOCKED_COLUMN_TABLES.values())
+    for select_node in tree.find_all(exp.Select):
+        star_aliases = {
+            table_node.alias or table_node.name
+            for table_node in _direct_tables(select_node)
+            if table_node.name.lower() in blocked_tables
+        }
+        if not star_aliases:
+            continue
+        for expr in select_node.expressions:
+            is_bare_star = isinstance(expr, exp.Star)
+            is_qualified_star = isinstance(expr, exp.Column) and isinstance(expr.this, exp.Star)
+            if not (is_bare_star or is_qualified_star):
+                continue
+            if is_bare_star or expr.table in star_aliases:
+                return (
+                    f"`{expr.table + '.' if is_qualified_star else ''}*` cannot be "
+                    "scoped safely against a table with a blocked column and cannot be "
+                    "queried by the text-to-SQL assistant"
+                )
     return None
 
 
@@ -537,6 +625,212 @@ def _find_unscopable_table_reference(tree: exp.Expr, excluded_aliases: set[str])
                 f"table `{table_node.name}` is not yet reviewed for role-based scoping "
                 "and cannot be queried by the text-to-SQL assistant"
             )
+    return None
+
+
+# Tables where a specific role has no legitimate reading at all — not a row predicate
+# that happens to always evaluate to zero rows for that role (which would read, in the
+# audit trail and to sanity_check, as an ordinary benign empty answer — see
+# sanity_check.py's zero_rows trigger, which can't tell "no rows currently match" apart
+# from "this role should never have been let near this table"), but a table that role's
+# data model has no concept of at all. `teaching_assignments` for `student` is the one
+# entry: a student has no legitimate reading of "my teaching assignment" — see
+# `_apply_row_scoping`'s own teaching_assignments case for the incident that surfaced
+# this (a teacher's "show all teaching assignments" question returning the whole staff
+# roster, because self-filtering had been left to the model). Checked via
+# `_find_role_forbidden_table_reference` and refused outright, before execution, so
+# honest_refusal produces a real, distinguishable "not something I can answer for your
+# role" — same fail-closed shape and same "refuse for the right reason" standard
+# `_find_unscopable_table_reference`/`_find_identity_mismatch` already apply, not a new
+# heuristic. A role not listed here is unaffected; this is a narrow, explicit,
+# individually-reviewed exception list, same posture as everything else in this file.
+_ROLE_FORBIDDEN_TABLES: Final[dict[str, frozenset[str]]] = {
+    "student": frozenset({"teaching_assignments"}),
+}
+
+# INSTITUTION_SCOPED_TABLES tables that ALSO get a bare "user_id = me" self-restriction
+# for both teacher and student (unlike teaching_assignments, which restricts only
+# teacher and forbids student outright): `user_roles`/`refresh_sessions` have a
+# legitimate "what's my own role"/"my own sessions" reading for every role, so there's
+# no "no legitimate reading at all" case here to route through
+# `_ROLE_FORBIDDEN_TABLES` — both roles are narrowed to their own row instead. Found by
+# `test_institution_scoped_identity_columns_are_deliberately_reviewed` (the drift-guard
+# extension written after the teaching_assignments incident) rather than by another
+# live leak — same identity-column signature (a bare `user_id` column), caught this
+# time before it repeated. Applied in `_apply_row_scoping`.
+_SELF_USER_ID_SCOPED_TABLES: Final[frozenset[str]] = frozenset({"user_roles", "refresh_sessions"})
+
+# INSTITUTION_SCOPED_TABLES tables where one column -- not the whole row -- needs
+# hiding from a non-self reader, mapped to that column's name. Different shape from
+# both _ROLE_FORBIDDEN_TABLES (no legitimate reading at all) and
+# _SELF_USER_ID_SCOPED_TABLES (the whole row is self-restricted): `quiz_releases`'s
+# core content (a release window/status for an already institution-scoped quiz) has
+# the same institution-wide legitimate readership as every other curriculum table --
+# hiding the whole row the way user_roles/refresh_sessions do would also hide release
+# status for quizzes a teacher/student has every reason to see, just because someone
+# else released it. Only `released_by_user_id` -- incidental audit metadata about
+# who performed the release, not the row's core meaning -- needs protecting, so it's
+# redacted to NULL for a non-self reader instead of the row being filtered out. Found
+# via the same real ORM introspection as _REVIEWED_IDENTITY_COLUMNS below, during
+# Batch 3 review, not a live leak. Applied in `_apply_row_scoping`; `_direct_tables`-
+# scoped misuse (WHERE/HAVING/GROUP BY/ORDER BY/JOIN..ON, and `SELECT *`) is refused
+# outright by `_find_redacted_column_misuse` below rather than redacted, since a
+# filter/sort on the real (pre-redaction) value can still leak the answer through
+# which rows come back at all -- redaction alone can't close that oracle channel.
+_REDACTED_IDENTITY_COLUMNS: Final[dict[str, str]] = {"quiz_releases": "released_by_user_id"}
+
+
+def _find_redacted_column_misuse(
+    tree: exp.Expr, excluded_aliases: set[str], role: str
+) -> str | None:
+    """A `_REDACTED_IDENTITY_COLUMNS` column referenced somewhere in a select scope
+    other than its own SELECT projection list, or a `SELECT *`/`alias.*` that would
+    expand to include one, for a role that column is redacted for (teacher/student;
+    admin is never restricted here). `_redact_identity_columns` (called from
+    `_apply_row_scoping`) only rewrites the *displayed* value in the projection list --
+    it cannot stop a `WHERE released_by_user_id = '<uuid>'` filter from still matching
+    against the real, unredacted value underneath and leaking the answer through which
+    rows come back at all, the classic oracle side-channel a display-only fix can't
+    close. A star is refused for a related but distinct reason: it expands to real
+    columns in the database, after this node has already finished rewriting the AST,
+    so there is no explicit `exp.Column` node here for `_redact_identity_columns` to
+    find and rewrite -- letting it through would silently resurrect the exact
+    unredacted-column leak this whole mechanism exists to prevent.
+
+    Column-table resolution here deliberately does NOT follow
+    `_find_identity_mismatch`'s "can't confidently resolve -> skip" convention: skipping
+    there just means a missed *detection* (the row-scoping predicates elsewhere still
+    apply regardless), but skipping here would mean leaving a security-sensitive column
+    unchecked and exposed. So an unqualified reference to a `_REDACTED_IDENTITY_COLUMNS`
+    column NAME is treated as a match whenever this select scope touches a table that
+    column belongs to, even if some other, unrelated table elsewhere could coincidentally
+    share that column name -- over-refusing a coincidental name clash is an acceptable
+    cost for a column name this distinctive; silently letting a real one through is not.
+    Scoped to each select's own direct clauses (not a tree-wide walk), same reasoning as
+    `_direct_tables`: a nested subquery's own references are visited separately when the
+    caller walks every `exp.Select` in the tree.
+    """
+    if role not in ("teacher", "student"):
+        return None
+    for select_node in tree.find_all(exp.Select):
+        redacted_aliases = {
+            table_node.alias or table_node.name: _REDACTED_IDENTITY_COLUMNS[table_node.name.lower()]
+            for table_node in _direct_tables(select_node)
+            if table_node.name.lower() not in excluded_aliases
+            and table_node.name.lower() in _REDACTED_IDENTITY_COLUMNS
+        }
+        if not redacted_aliases:
+            continue
+        redacted_names = set(redacted_aliases.values())
+        for expr in select_node.expressions:
+            # Bare `*` is an `exp.Star` directly; `alias.*` is an `exp.Column` whose
+            # `this` is an `exp.Star` -- both must be caught here, since neither has an
+            # explicit `released_by_user_id` column node for `_redact_identity_columns`
+            # to find and rewrite.
+            is_bare_star = isinstance(expr, exp.Star)
+            is_qualified_star = isinstance(expr, exp.Column) and isinstance(expr.this, exp.Star)
+            if not (is_bare_star or is_qualified_star):
+                continue
+            if is_bare_star or expr.table in redacted_aliases:
+                return (
+                    f"`{expr.table + '.' if is_qualified_star else ''}*` cannot be "
+                    f"scoped safely against a table with a redacted column for role "
+                    f"{role!r} and cannot be queried by the text-to-SQL assistant"
+                )
+        projected = {
+            id(col) for proj in select_node.expressions for col in proj.find_all(exp.Column)
+        }
+        clause_roots = [
+            select_node.args.get("where"),
+            select_node.args.get("group"),
+            select_node.args.get("having"),
+            select_node.args.get("order"),
+            *(join.args.get("on") for join in select_node.args.get("joins") or []),
+        ]
+        for root in clause_roots:
+            if root is None:
+                continue
+            for col in root.find_all(exp.Column):
+                if isinstance(col.this, exp.Star):
+                    if not col.table or col.table in redacted_aliases:
+                        return (
+                            f"`{col.table or '*'}.*` cannot be scoped safely against a "
+                            f"redacted column for role {role!r} and cannot be queried "
+                            "by the text-to-SQL assistant"
+                        )
+                    continue
+                if id(col) in projected:
+                    continue
+                if col.table and col.table not in redacted_aliases:
+                    continue  # confidently a different, non-redacted table
+                if col.name.lower() not in redacted_names:
+                    continue
+                return (
+                    f"column `{col.table or next(iter(redacted_aliases))}.{col.name}` "
+                    f"may only appear in the result list for role {role!r}, not in a "
+                    "filter/sort/group clause"
+                )
+    return None
+
+
+def _redact_identity_columns(
+    select_node: exp.Select, *, alias: str, column_name: str, user_id_literal: str
+) -> None:
+    """Rewrites any projection in `select_node`'s own SELECT list that reads
+    `column_name` on `alias` -- qualified (`alias.column_name`) or, since this table is
+    the only one `_find_redacted_column_misuse` would have let reach here unqualified
+    without refusing first, unqualified too -- into a CASE that reveals the real value
+    only when it matches the asking user, else NULL. Only ever narrows a *value* within
+    a row that's already visible (the institution pin already ran, unrelated to this) --
+    never which rows are visible, and never touched outside the projection list, since
+    `_find_redacted_column_misuse` already refused any WHERE/GROUP BY/HAVING/ORDER
+    BY/JOIN..ON use before this runs.
+
+    A bare `alias.column_name` projection (no explicit `AS`) is re-aliased to its
+    original column name after the rewrite -- an unaliased `CASE ... END` would
+    otherwise come back from Postgres under an auto-generated name (`case`), silently
+    renaming the result column a caller (execute_sql, or a human reading the answer)
+    would still expect to find by its real name.
+    """
+    for proj in list(select_node.expressions):
+        for col in list(proj.find_all(exp.Column)):
+            if col.name.lower() != column_name:
+                continue
+            if col.table and col.table != alias:
+                continue
+            replacement = exp.maybe_parse(
+                f"CASE WHEN {alias}.{column_name} = {user_id_literal} "
+                f"THEN {alias}.{column_name} ELSE NULL END",
+                dialect="postgres",
+            )
+            if col is proj:
+                replacement = exp.alias_(replacement, col.name, quoted=False)
+            col.replace(replacement)
+
+
+def _find_role_forbidden_table_reference(
+    tree: exp.Expr, excluded_aliases: set[str], role: str
+) -> str | None:
+    """A table this query directly references (outer scope or any nested subquery —
+    walks every `exp.Select` in the tree, same traversal as
+    `_find_unscopable_table_reference`) that `role` has no legitimate reading of at all,
+    per `_ROLE_FORBIDDEN_TABLES`. Runs before `_apply_row_scoping`, so the forbidden
+    table is never even reached to compute a (structurally always-empty) row predicate
+    for it.
+    """
+    forbidden = _ROLE_FORBIDDEN_TABLES.get(role, frozenset())
+    if not forbidden:
+        return None
+    for select_node in tree.find_all(exp.Select):
+        for table_node in _direct_tables(select_node):
+            name = table_node.name.lower()
+            if name in excluded_aliases:
+                continue
+            if name in forbidden:
+                return (
+                    f"table `{table_node.name}` has no meaning for role {role!r} and "
+                    "cannot be queried by the text-to-SQL assistant"
+                )
     return None
 
 
@@ -783,6 +1077,59 @@ def _institution_predicate_sql(table: str, alias: str, institution_id_literal: s
             f"{alias}.quiz_id IN "
             f"{_institution_scoped_subquery('common_mastery_quizzes', institution_id_literal)}"
         )
+    if table == "source_chunks":
+        return (
+            f"{alias}.source_material_version_id IN "
+            f"{_institution_scoped_subquery('source_material_versions', institution_id_literal)}"
+        )
+    if table == "question_options":
+        return (
+            f"{alias}.question_version_id IN "
+            f"{_institution_scoped_subquery('question_versions', institution_id_literal)}"
+        )
+    if table == "quiz_items":
+        # Two non-nullable FKs into two different already-scoped Batch-2 tables; both
+        # are checked (ANDed), not just one, even though the application layer already
+        # enforces both sides share an institution at creation time
+        # (authoring/service.py) -- trusting only that layer is exactly the
+        # single-point-of-trust posture this project's four-layer defense-in-depth
+        # model exists to avoid (see Finding 4).
+        return (
+            f"{alias}.quiz_version_id IN "
+            f"{_institution_scoped_subquery('quiz_versions', institution_id_literal)} "
+            f"AND {alias}.question_version_id IN "
+            f"{_institution_scoped_subquery('question_versions', institution_id_literal)}"
+        )
+    if table == "quiz_material_bindings":
+        # Same both-sides-ANDed reasoning as quiz_items above.
+        return (
+            f"{alias}.quiz_version_id IN "
+            f"{_institution_scoped_subquery('quiz_versions', institution_id_literal)} "
+            f"AND {alias}.source_material_version_id IN "
+            f"{_institution_scoped_subquery('source_material_versions', institution_id_literal)}"
+        )
+    if table == "question_outcome_tags":
+        # Same both-sides-ANDed reasoning as quiz_items/quiz_material_bindings above,
+        # but its second FK (learning_outcome_id) lands on a Batch 1 table
+        # (learning_outcomes), not a Batch 2 one like the other two dual-FK tables --
+        # _institution_scoped_subquery doesn't care which batch introduced a parent's
+        # predicate, only that one already exists, so the composition is identical.
+        return (
+            f"{alias}.question_version_id IN "
+            f"{_institution_scoped_subquery('question_versions', institution_id_literal)} "
+            f"AND {alias}.learning_outcome_id IN "
+            f"{_institution_scoped_subquery('learning_outcomes', institution_id_literal)}"
+        )
+    if table == "quiz_releases":
+        # released_by_user_id is a second FK (-> users) but it's an identity column,
+        # not a second curriculum-scoping path -- see _REDACTED_IDENTITY_COLUMNS and
+        # _apply_row_scoping's redaction branch for how its *value* is handled. This
+        # predicate only pins the row via the one FK that's actually about curriculum
+        # scoping.
+        return (
+            f"{alias}.quiz_version_id IN "
+            f"{_institution_scoped_subquery('quiz_versions', institution_id_literal)}"
+        )
     raise AssertionError(f"unhandled scoped table {table!r}")
 
 
@@ -833,6 +1180,65 @@ def _apply_row_scoping(
             # only narrow what the query already asks for, never replace or OR into it.
             institution_sql = _institution_predicate_sql(table, alias, institution_id_literal)
             select_node.where(institution_sql, copy=False, dialect="postgres")
+            if table == "teaching_assignments":
+                # Narrow exception to the "INSTITUTION_SCOPED_TABLES gets the institution
+                # pin only" rule below: observed live, a teacher's "show all teaching
+                # assignments" question returned the whole school's staff roster (every
+                # teacher's own assignments), not just theirs, because this table's
+                # self-filtering had been left to the model writing the
+                # '__CURRENT_USER_ID__' sentinel itself (see the module docstring's
+                # "Self-reference sentinel" section) rather than enforced here — and a
+                # question that never asks "what do I teach" has no reason to write one.
+                # "Who teaches what" is staff-roster data, not individual-student data, so
+                # this still isn't promoted to STUDENT_SCOPED_TABLES (that set's own
+                # self/taught machinery is about reaching a teacher's *students*, not a
+                # teacher's own row) — instead, structurally enforced here, same posture as
+                # every other row predicate in this file: a teacher sees only their own
+                # assignment rows, and admin stays unrestricted beyond the institution
+                # pin, mirroring Scope.unrestricted. The student branch below is a
+                # defense-in-depth backstop, not the primary mechanism: a student query
+                # is refused outright by `_find_role_forbidden_table_reference` before
+                # this function ever runs, specifically so the audit trail shows a real
+                # ROLE_VIOLATION refusal rather than an indistinguishable-from-benign
+                # empty result — this FALSE only matters if that upfront check is ever
+                # bypassed or a future bug reaches here anyway.
+                if role == "teacher":
+                    select_node.where(
+                        f"{alias}.teacher_user_id = {user_id_literal}",
+                        copy=False,
+                        dialect="postgres",
+                    )
+                elif role == "student":
+                    select_node.where("FALSE", copy=False, dialect="postgres")
+                continue
+            if table in _SELF_USER_ID_SCOPED_TABLES:
+                # Same identity-column signature as teaching_assignments above, caught
+                # by the drift-guard extension this time (test_institution_scoped_
+                # identity_columns_are_deliberately_reviewed) rather than by another
+                # live leak. Unlike teaching_assignments, both teacher and student have
+                # a legitimate self-reading here ("what's my role", "my own sessions"),
+                # so both get self-restricted rather than one being forbidden outright
+                # — there's no "no legitimate reading at all" case to route through
+                # _ROLE_FORBIDDEN_TABLES for either role. Admin stays unrestricted
+                # beyond the institution pin, same as everywhere else in this file.
+                if role in ("teacher", "student"):
+                    select_node.where(
+                        f"{alias}.user_id = {user_id_literal}", copy=False, dialect="postgres"
+                    )
+                continue
+            if table in _REDACTED_IDENTITY_COLUMNS and role in ("teacher", "student"):
+                # Column-level, not row-level: the institution predicate already
+                # applied above still governs which rows are visible at all; this only
+                # narrows the one identity-shaped column's *value* within those rows.
+                # No `continue` -- falls through to the ordinary INSTITUTION_SCOPED_
+                # TABLES handling below, which adds no further row predicate for a
+                # table that isn't in STUDENT_SCOPED_TABLES, exactly as intended.
+                _redact_identity_columns(
+                    select_node,
+                    alias=alias,
+                    column_name=_REDACTED_IDENTITY_COLUMNS[table],
+                    user_id_literal=user_id_literal,
+                )
             if table not in STUDENT_SCOPED_TABLES:
                 continue  # INSTITUTION_SCOPED_TABLES gets the institution pin only
             if role == "admin":
@@ -894,6 +1300,29 @@ async def apply_role_scope(state: TextToSQLState) -> TextToSQLState:
             **state,
             "validated_sql": None,
             "error": format_error(ROLE_VIOLATION, unscopable),
+        }
+
+    # Same "refuse for the right reason" ordering as the unscopable-table check above:
+    # a table this role's data model has no concept of at all (_ROLE_FORBIDDEN_TABLES)
+    # should be refused *for that*, not for a coincidentally-also-true identity mismatch.
+    role_forbidden = _find_role_forbidden_table_reference(tree, excluded_aliases, role)
+    if role_forbidden is not None:
+        return {
+            **state,
+            "validated_sql": None,
+            "error": format_error(ROLE_VIOLATION, role_forbidden),
+        }
+
+    # Same "refuse for the right reason" ordering as the two checks above: a
+    # WHERE/GROUP BY/HAVING/ORDER BY/JOIN..ON use of a redacted column (or a star that
+    # would expand to include one) should be refused *for that* -- the display-only
+    # redaction below can't close that oracle channel, so this must run first.
+    redacted_misuse = _find_redacted_column_misuse(tree, excluded_aliases, role)
+    if redacted_misuse is not None:
+        return {
+            **state,
+            "validated_sql": None,
+            "error": format_error(ROLE_VIOLATION, redacted_misuse),
         }
 
     # Must run before _resolve_current_user_sentinel: once the sentinel is substituted

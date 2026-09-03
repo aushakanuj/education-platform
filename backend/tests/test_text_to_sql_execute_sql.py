@@ -49,6 +49,35 @@ _MODULE = cast(
 )
 
 
+class _InjectionGuardModule(Protocol):
+    async def chat_completion_json(
+        self, messages: list[dict[str, str]], *, settings: object, temperature: float = 0.0
+    ) -> dict[str, object]: ...
+
+
+_INJECTION_GUARD_MODULE = cast(
+    _InjectionGuardModule,
+    sys.modules["education_platform.modules.text_to_sql.nodes.injection_guard"],
+)
+
+
+@pytest.fixture(autouse=True)
+def _pass_injection_guard(monkeypatch: pytest.MonkeyPatch) -> None:
+    """injection_guard (the graph's entry node, ahead of load_schema) makes its own live
+    OpenRouter classifier call for any question its heuristic regex doesn't already
+    catch. This file is about execute_sql's own behavior, not injection_guard's --
+    default every question here to "not an injection" so these tests don't silently make
+    a real, unmocked API call and don't depend on network availability to pass.
+    """
+
+    async def _fake(
+        messages: list[dict[str, str]], *, settings: object, temperature: float = 0.0
+    ) -> dict[str, object]:
+        return {"injection": False}
+
+    monkeypatch.setattr(_INJECTION_GUARD_MODULE, "chat_completion_json", _fake)
+
+
 @pytest.fixture()
 def seeded_institution(clean_db: str) -> Iterator[UUID]:
     engine = create_engine(to_sync_url(clean_db), pool_pre_ping=True)
@@ -94,14 +123,37 @@ def _state(sql: str | None, **overrides: object) -> TextToSQLState:
     return state
 
 
+def _admin_state(
+    sql: str | None, *, institution_id: UUID, user_id: UUID, **overrides: object
+) -> TextToSQLState:
+    """`_state()` plus the identity fields execute_sql now requires unconditionally (RLS
+    policies read them via the SET LOCAL/set_config calls added for migration
+    e1f2a3b4c5d6 -- a KeyError here means a real graph-invariant violation, not something
+    to default away). Admin, not teacher/student: these tests exercise execute_sql's own
+    mechanics (timeouts, row caps, error handling), not role-specific row scoping, so the
+    least-restrictive real role keeps them focused on what they're actually testing.
+    """
+    return _state(
+        sql,
+        user_id=str(user_id),
+        user_role="admin",
+        institution_id=str(institution_id),
+        **overrides,
+    )
+
+
 # --- Success path ----------------------------------------------------------------------
 
 
 async def test_valid_sql_populates_query_result_and_row_count(
-    seeded_institution: UUID,
+    seeded_institution: UUID, seeded_admin_user_id: UUID
 ) -> None:
     result = await execute_sql(
-        _state(f"SELECT id, name FROM institutions WHERE id = '{seeded_institution}'")
+        _admin_state(
+            f"SELECT id, name FROM institutions WHERE id = '{seeded_institution}'",
+            institution_id=seeded_institution,
+            user_id=seeded_admin_user_id,
+        )
     )
 
     assert result["error"] is None
@@ -112,8 +164,16 @@ async def test_valid_sql_populates_query_result_and_row_count(
     assert rows[0]["name"] == "Execute-SQL Test School"
 
 
-async def test_zero_row_result_is_not_an_error(seeded_institution: UUID) -> None:
-    result = await execute_sql(_state("SELECT id FROM institutions WHERE name = 'no such school'"))
+async def test_zero_row_result_is_not_an_error(
+    seeded_institution: UUID, seeded_admin_user_id: UUID
+) -> None:
+    result = await execute_sql(
+        _admin_state(
+            "SELECT id FROM institutions WHERE name = 'no such school'",
+            institution_id=seeded_institution,
+            user_id=seeded_admin_user_id,
+        )
+    )
 
     assert result["error"] is None
     assert result["query_result"] == []
@@ -124,12 +184,16 @@ async def test_zero_row_result_is_not_an_error(seeded_institution: UUID) -> None
 
 
 async def test_slow_query_is_cancelled_by_statement_timeout(
-    monkeypatch: pytest.MonkeyPatch, seeded_institution: UUID
+    monkeypatch: pytest.MonkeyPatch, seeded_institution: UUID, seeded_admin_user_id: UUID
 ) -> None:
     # A tiny timeout, not the real 5s default, so this test doesn't itself take 5+ seconds.
     monkeypatch.setattr(_MODULE, "STATEMENT_TIMEOUT_MS", 200)
 
-    result = await execute_sql(_state("SELECT pg_sleep(5)"))
+    result = await execute_sql(
+        _admin_state(
+            "SELECT pg_sleep(5)", institution_id=seeded_institution, user_id=seeded_admin_user_id
+        )
+    )
 
     assert error_category(result["error"]) == EXECUTION_ERROR
     assert result["query_result"] is None
@@ -140,13 +204,19 @@ async def test_slow_query_is_cancelled_by_statement_timeout(
 
 
 async def test_row_cap_truncates_if_more_rows_than_expected_come_back(
-    monkeypatch: pytest.MonkeyPatch, seeded_institution: UUID
+    monkeypatch: pytest.MonkeyPatch, seeded_institution: UUID, seeded_admin_user_id: UUID
 ) -> None:
     # generate_series stands in for "somehow more rows came back than ROW_CAP expects" —
     # this node must not blindly trust validate_sql's own LIMIT injection.
     monkeypatch.setattr(_MODULE, "ROW_CAP", 10)
 
-    result = await execute_sql(_state("SELECT generate_series(1, 25) AS n"))
+    result = await execute_sql(
+        _admin_state(
+            "SELECT generate_series(1, 25) AS n",
+            institution_id=seeded_institution,
+            user_id=seeded_admin_user_id,
+        )
+    )
 
     assert result["error"] is None
     assert result["result_row_count"] == 10
@@ -171,9 +241,11 @@ def test_row_cap_is_imported_from_validate_sql_not_a_second_literal() -> None:
 
 
 async def test_db_level_failure_produces_execution_error_not_a_crash(
-    seeded_institution: UUID,
+    seeded_institution: UUID, seeded_admin_user_id: UUID
 ) -> None:
-    result = await execute_sql(_state("SELECT 1 / 0"))
+    result = await execute_sql(
+        _admin_state("SELECT 1 / 0", institution_id=seeded_institution, user_id=seeded_admin_user_id)
+    )
 
     assert error_category(result["error"]) == EXECUTION_ERROR
     assert result["query_result"] is None
@@ -181,9 +253,11 @@ async def test_db_level_failure_produces_execution_error_not_a_crash(
 
 
 async def test_raw_postgres_error_text_not_leaked_into_user_facing_error(
-    seeded_institution: UUID,
+    seeded_institution: UUID, seeded_admin_user_id: UUID
 ) -> None:
-    result = await execute_sql(_state("SELECT 1 / 0"))
+    result = await execute_sql(
+        _admin_state("SELECT 1 / 0", institution_id=seeded_institution, user_id=seeded_admin_user_id)
+    )
 
     error = result["error"]
     assert error is not None
@@ -242,11 +316,25 @@ async def _expect_permission_denied(sql: str) -> None:
             await session.execute(text(sql))
 
 
-async def test_reader_role_can_read_a_granted_table(seeded_institution: UUID) -> None:
+async def test_reader_role_can_read_a_granted_table(
+    seeded_institution: UUID, seeded_admin_user_id: UUID
+) -> None:
     # Positive control: proves the negative tests below fail for the *right* reason
-    # (a real REVOKE), not because the role/connection itself is broken.
+    # (a real REVOKE), not because the role/connection itself is broken. Now that RLS
+    # (migration e1f2a3b4c5d6) is live on `institutions`, this also needs the identity
+    # session variables set -- without them the row would be invisible for a *different*
+    # reason (RLS's own fail-closed default), which would defeat this test's actual
+    # purpose of isolating the grant check.
     session_factory = get_text_to_sql_session_factory()
     async with session_factory() as session:
+        await session.execute(
+            text(
+                "SELECT set_config('app.current_user_id', :user_id, true), "
+                "set_config('app.current_user_role', 'admin', true), "
+                "set_config('app.current_institution_id', :institution_id, true)"
+            ),
+            {"user_id": str(seeded_admin_user_id), "institution_id": str(seeded_institution)},
+        )
         rows = (await session.execute(text("SELECT id FROM institutions"))).all()
     assert len(rows) == 1
 

@@ -23,10 +23,11 @@ Two things this file establishes that the AST-only tests can't:
 
 from __future__ import annotations
 
+import sys
 from collections.abc import AsyncIterator, Iterator
 from dataclasses import dataclass
 from datetime import date
-from typing import Any
+from typing import Any, Protocol, cast
 from uuid import UUID
 
 import pytest
@@ -58,20 +59,31 @@ from education_platform.modules.assessments.models import (
     AttemptAnswer,
     CommonMasteryQuiz,
     Question,
+    QuestionOption,
+    QuestionOutcomeTag,
     QuestionType,
     QuestionVersion,
     QuestionVersionStatus,
     QuizAttempt,
     QuizAttemptStatus,
+    QuizItem,
+    QuizMaterialBinding,
+    QuizRelease,
+    QuizReleaseStatus,
     QuizResultReleaseMode,
     QuizScope,
     QuizVersion,
     QuizVersionStatus,
 )
 from education_platform.modules.attendance.models import AttendanceRecord, AttendanceStatus
-from education_platform.modules.materials.models import SourceMaterial, SourceMaterialVersion
+from education_platform.modules.materials.models import (
+    SourceChunk,
+    SourceMaterial,
+    SourceMaterialVersion,
+)
 from education_platform.modules.auth.models import (
     Institution,
+    RefreshSession,
     RoleName,
     StudentProfile,
     User,
@@ -88,6 +100,37 @@ from education_platform.modules.text_to_sql.state import (
     TextToSQLState,
     error_category,
 )
+
+
+class _InjectionGuardModule(Protocol):
+    async def chat_completion_json(
+        self, messages: list[dict[str, str]], *, settings: object, temperature: float = 0.0
+    ) -> dict[str, object]: ...
+
+
+_INJECTION_GUARD_MODULE = cast(
+    _InjectionGuardModule,
+    sys.modules["education_platform.modules.text_to_sql.nodes.injection_guard"],
+)
+
+
+@pytest.fixture(autouse=True)
+def _pass_injection_guard(monkeypatch: pytest.MonkeyPatch) -> None:
+    """injection_guard is the graph's entry node, ahead of load_schema, and makes its own
+    live OpenRouter classifier call for any question its heuristic regex doesn't already
+    catch. Most tests in this file call apply_role_scope directly (`_run_scoped`), never
+    touching injection_guard at all -- but the handful that build and run the full
+    compiled graph would otherwise make a real, unmocked API call per test. Default every
+    question here to "not an injection" so nothing in this file depends on network
+    availability to pass.
+    """
+
+    async def _fake(
+        messages: list[dict[str, str]], *, settings: object, temperature: float = 0.0
+    ) -> dict[str, object]:
+        return {"injection": False}
+
+    monkeypatch.setattr(_INJECTION_GUARD_MODULE, "chat_completion_json", _fake)
 
 
 @dataclass(frozen=True)
@@ -168,6 +211,29 @@ class _Fixture:
     other_source_material_version_id: UUID
     other_question_version_id: UUID
     other_quiz_version_id: UUID
+
+    # Batch 3 (final batch): one hop from each Batch-2 table above, except
+    # question_outcome_tag (whose second FK lands on Batch 1's learning_outcome_id
+    # instead). Plus one "mismatched pair" row per dual-FK table -- one FK's parent
+    # inside institution_id, the other's inside other_institution_id -- proving the
+    # both-sides-ANDed predicate actually excludes it, not just a single-side pin.
+    source_chunk_id: UUID
+    question_option_id: UUID
+    question_outcome_tag_id: UUID
+    quiz_item_id: UUID
+    quiz_material_binding_id: UUID
+    quiz_release_id: UUID  # released_by_user_id = teacher_user_id, for redaction tests
+
+    other_source_chunk_id: UUID
+    other_question_option_id: UUID
+    other_question_outcome_tag_id: UUID
+    other_quiz_item_id: UUID
+    other_quiz_material_binding_id: UUID
+    other_quiz_release_id: UUID
+
+    mismatched_quiz_item_id: UUID
+    mismatched_quiz_material_binding_id: UUID
+    mismatched_question_outcome_tag_id: UUID
 
 
 def _seed(session: Session) -> _Fixture:
@@ -515,6 +581,97 @@ def _seed(session: Session) -> _Fixture:
     session.add(other_quiz_version)
     session.flush()
 
+    # Batch 3 (final batch): one hop from each Batch-2 row above, both institutions.
+    source_chunk = SourceChunk(
+        source_material_version_id=source_material_version.id,
+        ordinal=1,
+        text="A linear equation has the form ax + b = c.",
+        content_hash="hash-inst1-chunk1",
+    )
+    session.add(source_chunk)
+    other_source_chunk = SourceChunk(
+        source_material_version_id=other_source_material_version.id,
+        ordinal=1,
+        text="A linear equation has the form ax + b = c.",
+        content_hash="hash-inst2-chunk1",
+    )
+    session.add(other_source_chunk)
+
+    question_option = QuestionOption(
+        question_version_id=question_version.id, label="A", text="1", sequence=1
+    )
+    session.add(question_option)
+    other_question_option = QuestionOption(
+        question_version_id=other_question_version.id, label="A", text="1", sequence=1
+    )
+    session.add(other_question_option)
+
+    question_outcome_tag = QuestionOutcomeTag(
+        question_version_id=question_version.id, learning_outcome_id=learning_outcome.id
+    )
+    session.add(question_outcome_tag)
+    other_question_outcome_tag = QuestionOutcomeTag(
+        question_version_id=other_question_version.id,
+        learning_outcome_id=other_learning_outcome.id,
+    )
+    session.add(other_question_outcome_tag)
+
+    quiz_item = QuizItem(
+        quiz_version_id=quiz_version.id, question_version_id=question_version.id, sequence=1
+    )
+    session.add(quiz_item)
+    other_quiz_item = QuizItem(
+        quiz_version_id=other_quiz_version.id,
+        question_version_id=other_question_version.id,
+        sequence=1,
+    )
+    session.add(other_quiz_item)
+
+    quiz_material_binding = QuizMaterialBinding(
+        quiz_version_id=quiz_version.id, source_material_version_id=source_material_version.id
+    )
+    session.add(quiz_material_binding)
+    other_quiz_material_binding = QuizMaterialBinding(
+        quiz_version_id=other_quiz_version.id,
+        source_material_version_id=other_source_material_version.id,
+    )
+    session.add(other_quiz_material_binding)
+
+    quiz_release = QuizRelease(
+        quiz_version_id=quiz_version.id,
+        released_by_user_id=teacher.id,
+        status=QuizReleaseStatus.OPEN,
+    )
+    session.add(quiz_release)
+    other_quiz_release = QuizRelease(
+        quiz_version_id=other_quiz_version.id, released_by_user_id=None, status=QuizReleaseStatus.OPEN
+    )
+    session.add(other_quiz_release)
+    session.flush()
+
+    # Mismatched-pair rows -- one FK's parent inside institution 1, the other's inside
+    # institution 2 -- the exact shape both-sides-ANDed exists to catch. A single-side
+    # "pin via owning side" predicate (the original, corrected proposal) would have let
+    # these through for institution 1; the both-sides predicate must exclude them from
+    # BOTH institutions' results, since neither institution's own subquery contains the
+    # cross-institution FK's value.
+    mismatched_quiz_item = QuizItem(
+        quiz_version_id=quiz_version.id,
+        question_version_id=other_question_version.id,
+        sequence=2,
+    )
+    session.add(mismatched_quiz_item)
+    mismatched_quiz_material_binding = QuizMaterialBinding(
+        quiz_version_id=quiz_version.id,
+        source_material_version_id=other_source_material_version.id,
+    )
+    session.add(mismatched_quiz_material_binding)
+    mismatched_question_outcome_tag = QuestionOutcomeTag(
+        question_version_id=question_version.id, learning_outcome_id=other_learning_outcome.id
+    )
+    session.add(mismatched_question_outcome_tag)
+    session.flush()
+
     assert student_a_math.user_id is not None
     return _Fixture(
         institution_id=inst1.id,
@@ -555,6 +712,21 @@ def _seed(session: Session) -> _Fixture:
         other_source_material_version_id=other_source_material_version.id,
         other_question_version_id=other_question_version.id,
         other_quiz_version_id=other_quiz_version.id,
+        source_chunk_id=source_chunk.id,
+        question_option_id=question_option.id,
+        question_outcome_tag_id=question_outcome_tag.id,
+        quiz_item_id=quiz_item.id,
+        quiz_material_binding_id=quiz_material_binding.id,
+        quiz_release_id=quiz_release.id,
+        other_source_chunk_id=other_source_chunk.id,
+        other_question_option_id=other_question_option.id,
+        other_question_outcome_tag_id=other_question_outcome_tag.id,
+        other_quiz_item_id=other_quiz_item.id,
+        other_quiz_material_binding_id=other_quiz_material_binding.id,
+        other_quiz_release_id=other_quiz_release.id,
+        mismatched_quiz_item_id=mismatched_quiz_item.id,
+        mismatched_quiz_material_binding_id=mismatched_quiz_material_binding.id,
+        mismatched_question_outcome_tag_id=mismatched_question_outcome_tag.id,
     )
 
 
@@ -953,12 +1125,13 @@ async def test_subjects_and_grades_pinned_to_institution_for_every_role(
         assert "Mathematics" in names
 
 
-async def test_teaching_assignments_institution_pin_not_self_only(
+async def test_teaching_assignments_teacher_sees_only_own_rows_real_data(
     async_session: AsyncSession, seeded: _Fixture
 ) -> None:
-    # Deliberate scope of this pass: teaching_assignments gets the institution pin, not a
-    # self-only row predicate -- teacher 1 sees teacher 2's assignment rows too, just not
-    # another institution's.
+    # Reversed after a live incident: a teacher's "show all teaching assignments"
+    # question, with no self-filter to resolve, returned the whole school's staff
+    # roster. Now structurally self-restricted -- teacher 1 must see only their own two
+    # rows (Math/8A, Science/all-sections), never teacher 2's Math/all-sections row.
     rows = await _run_scoped(
         async_session,
         sql="SELECT teacher_user_id FROM teaching_assignments",
@@ -967,8 +1140,169 @@ async def test_teaching_assignments_institution_pin_not_self_only(
         institution_id=seeded.institution_id,
     )
     teacher_ids = {row["teacher_user_id"] for row in rows}
-    assert seeded.teacher_user_id in teacher_ids
-    assert seeded.teacher2_user_id in teacher_ids
+    assert teacher_ids == {seeded.teacher_user_id}
+    assert len(rows) == 2
+
+
+async def test_teaching_assignments_teacher2_sees_only_their_own_row_real_data(
+    async_session: AsyncSession, seeded: _Fixture
+) -> None:
+    # The other side of the same fixture: teacher 2's Math/all-sections grant is a
+    # single row, and asking as teacher 2 must not surface teacher 1's two rows either.
+    rows = await _run_scoped(
+        async_session,
+        sql="SELECT teacher_user_id FROM teaching_assignments",
+        user_id=seeded.teacher2_user_id,
+        role="teacher",
+        institution_id=seeded.institution_id,
+    )
+    teacher_ids = {row["teacher_user_id"] for row in rows}
+    assert teacher_ids == {seeded.teacher2_user_id}
+    assert len(rows) == 1
+
+
+async def test_teaching_assignments_student_gets_a_real_refusal_real_data(
+    async_session: AsyncSession, seeded: _Fixture
+) -> None:
+    # Not run through _run_scoped: that helper asserts success (result["error"] is
+    # None), but a student querying teaching_assignments is now refused outright
+    # (ROLE_VIOLATION), before execute_sql/sanity_check ever run -- proving that against
+    # a live database matters here specifically because the whole point of this fix is
+    # that the refusal must be a real, distinguishable code path, not an empty result
+    # that happened to execute successfully against real data.
+    _ = async_session  # dependency only: ensures the fixture's DB rows exist first
+    state: TextToSQLState = {
+        "question": "irrelevant to this node",
+        "user_id": str(seeded.student_a_math_user_id),
+        "user_role": "student",
+        "institution_id": str(seeded.institution_id),
+        "validated_sql": "SELECT teacher_user_id FROM teaching_assignments",
+        "error": None,
+        "retry_count": 0,
+        "audit_entry": None,
+    }
+    result = await apply_role_scope(state)
+    assert result["validated_sql"] is None
+    assert result["error"] is not None
+    assert error_category(result["error"]) == ROLE_VIOLATION
+    assert "teaching_assignments" in result["error"]
+    assert "has no meaning for role" in result["error"]
+
+
+async def test_teaching_assignments_admin_sees_all_teachers_within_institution_real_data(
+    async_session: AsyncSession, seeded: _Fixture
+) -> None:
+    # Admin stays unrestricted beyond the institution pin -- this is the one role that
+    # still legitimately sees the whole staff roster.
+    rows = await _run_scoped(
+        async_session,
+        sql="SELECT teacher_user_id FROM teaching_assignments",
+        user_id=seeded.admin_user_id,
+        role="admin",
+        institution_id=seeded.institution_id,
+    )
+    teacher_ids = {row["teacher_user_id"] for row in rows}
+    assert teacher_ids == {seeded.teacher_user_id, seeded.teacher2_user_id}
+
+
+# --- Fix: drift-guard-surfaced self-restriction on user_roles/refresh_sessions --------
+# Found via test_institution_scoped_identity_columns_are_deliberately_reviewed, not
+# another live leak. `_seed` already creates one UserRole row per user (teacher,
+# teacher2, admin all exist in the shared fixture), giving real cross-user data to
+# prove narrowing against without further fixture changes.
+
+
+async def test_user_roles_teacher_sees_only_own_role_real_data(
+    async_session: AsyncSession, seeded: _Fixture
+) -> None:
+    rows = await _run_scoped(
+        async_session,
+        sql="SELECT user_id, role FROM user_roles",
+        user_id=seeded.teacher_user_id,
+        role="teacher",
+        institution_id=seeded.institution_id,
+    )
+    assert {row["user_id"] for row in rows} == {seeded.teacher_user_id}
+    assert rows[0]["role"] == "teacher"
+
+
+async def test_user_roles_admin_sees_every_users_role_within_institution_real_data(
+    async_session: AsyncSession, seeded: _Fixture
+) -> None:
+    rows = await _run_scoped(
+        async_session,
+        sql="SELECT user_id FROM user_roles",
+        user_id=seeded.admin_user_id,
+        role="admin",
+        institution_id=seeded.institution_id,
+    )
+    user_ids = {row["user_id"] for row in rows}
+    assert {seeded.teacher_user_id, seeded.teacher2_user_id, seeded.admin_user_id} <= user_ids
+
+
+async def test_refresh_sessions_teacher_sees_only_own_sessions_real_data(
+    async_session: AsyncSession, seeded: _Fixture
+) -> None:
+    # Not seeded by _seed (no login flow simulated there) -- insert two real sessions
+    # directly, one per teacher, so there's genuine cross-user data to prove narrowing
+    # against, same reasoning as reusing _seed's own per-user UserRole rows above.
+    from datetime import UTC, datetime, timedelta
+
+    now = datetime.now(UTC)
+    session_1 = RefreshSession(
+        user_id=seeded.teacher_user_id,
+        token_hash="hash-teacher-1",
+        expires_at=now + timedelta(days=14),
+    )
+    session_2 = RefreshSession(
+        user_id=seeded.teacher2_user_id,
+        token_hash="hash-teacher-2",
+        expires_at=now + timedelta(days=14),
+    )
+    async_session.add_all([session_1, session_2])
+    await async_session.flush()
+
+    rows = await _run_scoped(
+        async_session,
+        sql="SELECT user_id, expires_at FROM refresh_sessions",
+        user_id=seeded.teacher_user_id,
+        role="teacher",
+        institution_id=seeded.institution_id,
+    )
+    assert {row["user_id"] for row in rows} == {seeded.teacher_user_id}
+
+
+async def test_refresh_sessions_admin_sees_every_users_sessions_within_institution_real_data(
+    async_session: AsyncSession, seeded: _Fixture
+) -> None:
+    from datetime import UTC, datetime, timedelta
+
+    now = datetime.now(UTC)
+    async_session.add_all(
+        [
+            RefreshSession(
+                user_id=seeded.teacher_user_id,
+                token_hash="hash-admin-view-1",
+                expires_at=now + timedelta(days=14),
+            ),
+            RefreshSession(
+                user_id=seeded.teacher2_user_id,
+                token_hash="hash-admin-view-2",
+                expires_at=now + timedelta(days=14),
+            ),
+        ]
+    )
+    await async_session.flush()
+
+    rows = await _run_scoped(
+        async_session,
+        sql="SELECT user_id FROM refresh_sessions",
+        user_id=seeded.admin_user_id,
+        role="admin",
+        institution_id=seeded.institution_id,
+    )
+    user_ids = {row["user_id"] for row in rows}
+    assert {seeded.teacher_user_id, seeded.teacher2_user_id} <= user_ids
 
 
 # --- Batch 1: deferred-curriculum-table scoping project (topics/subtopics/
@@ -1245,6 +1579,199 @@ async def test_batch_2_tables_no_row_predicate_admin_teacher_student_agree(
         assert results["admin"] == results["teacher"] == results["student"], table
 
 
+# --- Batch 3 (final batch): one hop from each Batch-2 table, both institutions --------
+
+
+async def test_source_chunks_institution_isolation(
+    async_session: AsyncSession, seeded: _Fixture
+) -> None:
+    rows = await _run_scoped(
+        async_session,
+        sql="SELECT id FROM source_chunks",
+        user_id=seeded.teacher_user_id,
+        role="teacher",
+        institution_id=seeded.institution_id,
+    )
+    ids = {row["id"] for row in rows}
+    assert seeded.source_chunk_id in ids
+    assert seeded.other_source_chunk_id not in ids
+
+
+async def test_question_options_institution_isolation(
+    async_session: AsyncSession, seeded: _Fixture
+) -> None:
+    rows = await _run_scoped(
+        async_session,
+        sql="SELECT id FROM question_options",
+        user_id=seeded.teacher_user_id,
+        role="teacher",
+        institution_id=seeded.institution_id,
+    )
+    ids = {row["id"] for row in rows}
+    assert seeded.question_option_id in ids
+    assert seeded.other_question_option_id not in ids
+
+
+async def test_question_outcome_tags_institution_isolation(
+    async_session: AsyncSession, seeded: _Fixture
+) -> None:
+    rows = await _run_scoped(
+        async_session,
+        sql="SELECT id FROM question_outcome_tags",
+        user_id=seeded.teacher_user_id,
+        role="teacher",
+        institution_id=seeded.institution_id,
+    )
+    ids = {row["id"] for row in rows}
+    assert seeded.question_outcome_tag_id in ids
+    assert seeded.other_question_outcome_tag_id not in ids
+
+
+async def test_quiz_items_institution_isolation(
+    async_session: AsyncSession, seeded: _Fixture
+) -> None:
+    rows = await _run_scoped(
+        async_session,
+        sql="SELECT id FROM quiz_items",
+        user_id=seeded.teacher_user_id,
+        role="teacher",
+        institution_id=seeded.institution_id,
+    )
+    ids = {row["id"] for row in rows}
+    assert seeded.quiz_item_id in ids
+    assert seeded.other_quiz_item_id not in ids
+
+
+async def test_quiz_material_bindings_institution_isolation(
+    async_session: AsyncSession, seeded: _Fixture
+) -> None:
+    rows = await _run_scoped(
+        async_session,
+        sql="SELECT id FROM quiz_material_bindings",
+        user_id=seeded.teacher_user_id,
+        role="teacher",
+        institution_id=seeded.institution_id,
+    )
+    ids = {row["id"] for row in rows}
+    assert seeded.quiz_material_binding_id in ids
+    assert seeded.other_quiz_material_binding_id not in ids
+
+
+async def test_quiz_releases_institution_isolation(
+    async_session: AsyncSession, seeded: _Fixture
+) -> None:
+    rows = await _run_scoped(
+        async_session,
+        sql="SELECT id FROM quiz_releases",
+        user_id=seeded.teacher_user_id,
+        role="teacher",
+        institution_id=seeded.institution_id,
+    )
+    ids = {row["id"] for row in rows}
+    assert seeded.quiz_release_id in ids
+    assert seeded.other_quiz_release_id not in ids
+
+
+async def test_batch_3_dual_fk_tables_exclude_mismatched_pair_real_data(
+    async_session: AsyncSession, seeded: _Fixture
+) -> None:
+    # The real proof the both-sides-ANDed predicate exists for: a row whose two FKs
+    # point at *different* institutions' parents. A single-side "pin via owning side"
+    # predicate would have let this through for whichever institution owns the side
+    # that was checked; the both-sides predicate must exclude it from BOTH.
+    cases = (
+        ("quiz_items", seeded.mismatched_quiz_item_id),
+        ("quiz_material_bindings", seeded.mismatched_quiz_material_binding_id),
+        ("question_outcome_tags", seeded.mismatched_question_outcome_tag_id),
+    )
+    for table, mismatched_id in cases:
+        for institution_id in (seeded.institution_id, seeded.other_institution_id):
+            rows = await _run_scoped(
+                async_session,
+                sql=f"SELECT id FROM {table}",
+                user_id=seeded.teacher_user_id,
+                role="teacher",
+                institution_id=institution_id,
+            )
+            ids = {row["id"] for row in rows}
+            assert mismatched_id not in ids, f"{table} leaked a mismatched-pair row"
+
+
+async def test_batch_3_non_redacted_tables_admin_teacher_student_agree(
+    async_session: AsyncSession, seeded: _Fixture
+) -> None:
+    for table in (
+        "source_chunks",
+        "question_options",
+        "question_outcome_tags",
+        "quiz_items",
+        "quiz_material_bindings",
+    ):
+        results = {
+            role: {
+                row["id"]
+                for row in await _run_scoped(
+                    async_session,
+                    sql=f"SELECT id FROM {table}",
+                    user_id=seeded.teacher_user_id,
+                    role=role,
+                    institution_id=seeded.institution_id,
+                )
+            }
+            for role in ("admin", "teacher", "student")
+        }
+        assert results["admin"] == results["teacher"] == results["student"], table
+
+
+async def test_quiz_releases_released_by_user_id_redacted_for_non_self_real_data(
+    async_session: AsyncSession, seeded: _Fixture
+) -> None:
+    # quiz_release_id's released_by_user_id is teacher_user_id (seeded above) --
+    # teacher2 asking the same question must see the row (institution-wide visibility,
+    # same as every other curriculum table) but not who released it.
+    rows = await _run_scoped(
+        async_session,
+        sql="SELECT id, released_by_user_id FROM quiz_releases WHERE id = "
+        f"'{seeded.quiz_release_id}'",
+        user_id=seeded.teacher2_user_id,
+        role="teacher",
+        institution_id=seeded.institution_id,
+    )
+    assert len(rows) == 1
+    assert rows[0]["id"] == seeded.quiz_release_id
+    assert rows[0]["released_by_user_id"] is None
+
+
+async def test_quiz_releases_released_by_user_id_visible_for_self_real_data(
+    async_session: AsyncSession, seeded: _Fixture
+) -> None:
+    rows = await _run_scoped(
+        async_session,
+        sql="SELECT id, released_by_user_id FROM quiz_releases WHERE id = "
+        f"'{seeded.quiz_release_id}'",
+        user_id=seeded.teacher_user_id,
+        role="teacher",
+        institution_id=seeded.institution_id,
+    )
+    assert len(rows) == 1
+    assert rows[0]["released_by_user_id"] == seeded.teacher_user_id
+
+
+async def test_quiz_releases_admin_sees_released_by_user_id_unredacted_real_data(
+    async_session: AsyncSession, seeded: _Fixture
+) -> None:
+    rows = await _run_scoped(
+        async_session,
+        sql="SELECT id, released_by_user_id FROM quiz_releases WHERE id = "
+        f"'{seeded.quiz_release_id}'",
+        user_id=seeded.admin_user_id,
+        role="admin",
+        institution_id=seeded.institution_id,
+    )
+    assert len(rows) == 1
+    assert rows[0]["released_by_user_id"] == seeded.teacher_user_id
+
+
 # --- Item 5: institution isolation, admin included ------------------------------------
 
 
@@ -1323,11 +1850,17 @@ async def test_what_subject_do_i_teach_returns_real_answer_through_full_graph(
     monkeypatch: pytest.MonkeyPatch, seeded: _Fixture
 ) -> None:
     """The exact observed defect: "what subject do I teach" resolves through
-    teaching_assignments (INSTITUTION_SCOPED_TABLES -- institution pin only, no
-    self-narrowing), so the model needs a genuine self-reference filter it has no real
+    teaching_assignments, which at the time only got the institution pin, no
+    self-narrowing, so the model needed a genuine self-reference filter it had no real
     value for. Before this fix it fabricated a placeholder that matched nothing; now the
     prompt's fixed sentinel gets resolved to the real teacher_user_id and the query
-    returns real data -- the seeded teacher genuinely teaches Math and Science.
+    returns real data -- the seeded teacher genuinely teaches Math and Science. Still
+    exercises the sentinel-resolution path faithfully even though teaching_assignments
+    later gained its own structural self-narrowing too (see
+    test_teaching_assignments_teacher_restricted_to_own_rows in the unit test file): the
+    model-written filter and apply_role_scope's own predicate both narrow to the same
+    rows, so this stays a real, non-redundant proof that generated_sql's sentinel gets
+    resolved correctly, not just that the answer happens to come out right.
     """
     sentinel_sql = (
         "SELECT DISTINCT s.name AS subject_name FROM teaching_assignments ta "

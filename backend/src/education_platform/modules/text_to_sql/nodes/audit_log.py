@@ -26,8 +26,14 @@ so they go in `payload`); `user_id`/`institution_id` go in `AuditEvent`'s own ty
 `actor_user_id`/`institution_id` columns, not duplicated into `payload`; `generated_sql`
 and `validated_sql` in full — this is the one place in the whole pipeline raw SQL is
 allowed to be persisted (it must never reach `compose_answer`'s output or any user-facing
-field, but an auditor needs the real query); `result_row_count`, `confidence`, the full
-`sanity_check_triggers` list, `retry_count`, and `outcome` ("answered"/"refused") plus, if
+field, but an auditor needs the real query); the full `schema_linking_tables_selected`
+list link_schema chose for this question (or `null` if it fell back to the full,
+unnarrowed catalog — either because no table matched lexically, or because this node ran
+before link_schema existed on a given code path) — retrieval-trace logging, the same
+practice a RAG pipeline's context-selection step would get, since it's the direct answer
+to "why did/didn't the model know about table X for this question" that neither
+`generated_sql` nor `validated_sql` alone can show; `result_row_count`, `confidence`, the
+full `sanity_check_triggers` list, `retry_count`, and `outcome` ("answered"/"refused") plus, if
 refused, both the formatted error *category* (`error_category(error)`) and the raw error
 text (`error_detail`) — every node in this pipeline now formats `state["error"]` via
 `format_error()` (load_schema's SCHEMA_ERROR closed the last gap, where its own
@@ -126,6 +132,11 @@ def _build_payload(state: TextToSQLState) -> dict[str, Any]:
         "query_source": state.get("query_source"),
         "generated_sql": state.get("generated_sql"),
         "validated_sql": state.get("validated_sql"),
+        # None here is itself meaningful (link_schema fell back to the full, unnarrowed
+        # catalog) and deliberately not defaulted to []/some other stand-in the way
+        # sanity_check_triggers is below -- see link_schema.py's own fail-safe docstring
+        # section for why None means "nothing excluded," not "unknown."
+        "schema_linking_tables_selected": audit_entry.get("schema_linking_tables_selected"),
         "result_row_count": state.get("result_row_count"),
         "confidence": state.get("confidence"),
         "sanity_check_triggers": audit_entry.get("sanity_check_triggers", []),

@@ -63,6 +63,21 @@ ROLE_VIOLATION: Final[str] = "ROLE_VIOLATION"
 user_role isn't allowed to run or see it — a policy rejection, not a correctness one.
 Raised by apply_role_scope."""
 
+INJECTION_BLOCKED: Final[str] = "INJECTION_BLOCKED"
+"""The *question itself* was refused before any SQL was even attempted — a heuristic
+regex match, or an LLM classifier call, judged it a prompt-injection/jailbreak attempt
+("ignore previous instructions", "you are now an admin", ...). Deliberately not
+ROLE_VIOLATION: that category means real SQL existed and was rejected on authorization
+grounds; this one means generation was never attempted at all, the same "refuse for the
+right reason" distinction this pipeline already draws everywhere else (see
+apply_role_scope's own ordering of its checks). This is a cost/UX layer, not a security
+boundary — apply_role_scope's identity-only row scoping is what actually keeps a
+successfully-generated adversarial query safe regardless of whether this category ever
+fires; skipping this check entirely (this classifier being unavailable, or a phrasing it
+doesn't recognize) degrades to today's behavior, not to an unsafe one. Raised by
+injection_guard, and only by injection_guard — the first node in the graph, before
+load_schema."""
+
 EXECUTION_ERROR: Final[str] = "EXECUTION_ERROR"
 """The SQL was valid (Task 5) and authorized (Task 6), but the database itself failed to
 run it — a timeout, a connection failure, a constraint violation the earlier checks
@@ -84,7 +99,15 @@ protect in the first place, this one means an answer existed and was deliberatel
 withheld anyway."""
 
 _ERROR_CATEGORIES: Final[frozenset[str]] = frozenset(
-    {SCHEMA_ERROR, LLM_ERROR, VALIDATION_ERROR, ROLE_VIOLATION, EXECUTION_ERROR, AUDIT_ERROR}
+    {
+        SCHEMA_ERROR,
+        LLM_ERROR,
+        VALIDATION_ERROR,
+        ROLE_VIOLATION,
+        EXECUTION_ERROR,
+        AUDIT_ERROR,
+        INJECTION_BLOCKED,
+    }
 )
 
 

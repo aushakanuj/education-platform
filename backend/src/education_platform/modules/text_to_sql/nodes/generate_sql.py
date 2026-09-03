@@ -26,16 +26,22 @@ graph.py/validate_sql.py change (a separate signal the routing checks), which is
 of this node's scope.
 
 Self-reference sentinel (`'__CURRENT_USER_ID__'`): for the tables apply_role_scope
-scopes down to *exactly* the asking user's own rows (student_360, quiz_attempts, etc.),
-the model never needs to write a self-filter at all — apply_role_scope adds it silently.
-But for a table it only institution-pins (teaching_assignments, users, ...), a question
-like "what subject do I teach" genuinely needs a `teacher_user_id = <me>` filter that
-only the model can write, and this node never gives the model any real identity value to
-use (no user_id, no name, no email — by design, matching the rest of this pipeline's
-identity-sourcing discipline). Observed failure mode without this: the model fabricates
-a placeholder literal (e.g. `'Your Name Here'`) that matches nothing, producing a
-confidently-wrong empty answer for a real, answerable question. The system prompt below
-teaches one fixed, literal token instead (never a name/guess/subquery); apply_role_scope
+scopes down to *exactly* the asking user's own rows (student_360, quiz_attempts,
+teaching_assignments, etc.), the model never needs to write a self-filter at all —
+apply_role_scope adds it silently (teaching_assignments joined that list after a live
+incident: a teacher's "show all teaching assignments" question, with no self-filter for
+the model to write, returned the whole school's staff roster — see apply_role_scope's own
+docstring). But for a table it only institution-pins (users, ...), a question like "what's
+my email" genuinely needs a `<owner column> = <me>` filter that only the model can write,
+and this node never gives the model any real identity value to use (no user_id, no name,
+no email — by design, matching the rest of this pipeline's identity-sourcing discipline).
+Observed failure mode without this: the model fabricates a placeholder literal (e.g.
+`'Your Name Here'`) that matches nothing, producing a confidently-wrong empty answer for a
+real, answerable question. The system prompt below still teaches the one fixed, literal
+token for every table, teaching_assignments included — writing it there now is harmless
+and redundant (apply_role_scope's own predicate is authoritative regardless) rather than
+required, and keeping the example gives the model one consistent rule instead of a
+per-table exception to remember. The token is never a name/guess/subquery; apply_role_scope
 resolves it to the real `state["user_id"]` before execution — the same node, and the
 same "identity only ever comes from state, never from the model" discipline, that
 already builds every other identity-keyed predicate in this pipeline.
@@ -63,7 +69,41 @@ questions elsewhere in the same run answered successfully via a simpler path (`s
 directly, or `quiz_attempts` alone). A real, recurring pattern (not a one-off), not a
 security concern (the refusal is safe), but an avoidable one: the system prompt below
 asks the model to prefer the simplest join path and reserve the curriculum tables for
-when the question genuinely can't be answered without them.
+when the question genuinely can't be answered without them. That gate has since been
+narrowed (Batches 1-2 of the deferred-curriculum-table scoping project) to only the
+remaining, genuinely still-deferred tables — this guidance stays accurate as written,
+just against a shorter list.
+
+Multi-hop FK chains, don't skip the intermediate table: re-running eval rows 3/45/46
+after Batches 1-2 unblocked topics/subtopics/questions/common_mastery_quizzes/
+quiz_versions surfaced a bug those tables' fail-closed refusal had been hiding —
+`generate_sql` collapsed a real two-hop foreign-key chain into a single, structurally
+wrong join by comparing two columns that are related only *transitively*, never
+directly. Two confirmed live: `JOIN grades g ON g.id = gso.period_grade_id` (a grade's
+id compared against a period_grade's id — the schema catalog's own Column Reference
+correctly lists `grade_subject_offerings.period_grade_id references period_grades.id`
+and separately `period_grades.grade_id references grades.id`; there is no direct
+`grade_subject_offerings -> grades` edge at all) and `JOIN grade_subject_offerings gso
+ON cmq.subtopic_id = gso.id` (a subtopic's id compared against an offering's id, same
+shape — the real chain is `common_mastery_quizzes.subtopic_id -> subtopics.id ->
+subtopics.topic_id -> topics.id -> topics.grade_subject_offering_id ->
+grade_subject_offerings.id`). Both queries executed without error — comparing two UUID
+columns from unrelated tables is syntactically valid SQL, just structurally never true
+— so this fails silently as a confidently-wrong empty answer, not a rejection. Having
+the individual FK facts right (as the schema catalog already did in both cases) isn't
+enough on its own to keep the model from shortcutting a chain it hasn't been told not
+to shortcut; the system prompt below states the rule explicitly, with both confirmed
+failures as worked examples, rather than trusting the flat FK list to make it obvious.
+
+Topic vs. subtopic granularity: eval row 46 asked about "the Mathematics topic
+'Fractions'" and the model filtered `topics.name = 'Fractions'` — but in this schema
+`topics` are broad, top-level groupings (e.g. "Mathematics Core") and `subtopics` are
+the specific, nameable concepts underneath them (e.g. "Fractions", "Linear Equations")
+— confirmed against real seeded data: no topic named "Fractions" exists anywhere, but a
+"Fractions" subtopic does. The word "topic" in a question is a natural-language term,
+not a promise that the schema's `topics` table is the right one to filter by name; the
+system prompt below tells the model to check `subtopics.name` first for a specific,
+nameable concept.
 """
 
 from __future__ import annotations
@@ -115,14 +155,32 @@ that one row — add `DISTINCT` to your outer SELECT, or reformulate the join as
 `EXISTS (...)` subquery. Otherwise the same student can appear more than once in your \
 result, once per matching row, even though the answer should count or list them once.
 - Prefer the simplest join path that actually answers the question. Only join through \
-`topics`, `subtopics`, `questions`, `question_versions`, `common_mastery_quizzes`, or \
-`quiz_versions` when the question genuinely needs curriculum-specific data (a topic \
-name, a specific quiz's identity, a question bank count) that has no simpler \
+curriculum-content tables when the question genuinely needs curriculum-specific data (a \
+topic name, a specific quiz's identity, a question bank count) that has no simpler \
 equivalent — for example, filtering by *subject* only needs the `subjects` table \
 (never `topics`), and filtering by whether a quiz was passed only needs \
-`quiz_attempts.passed` (never `quiz_versions`). These curriculum tables are currently \
-refused outright by a later step regardless of role, so routing through one \
-unnecessarily turns an answerable question into a refusal.
+`quiz_attempts.passed` (never `quiz_versions`). Some curriculum tables are still \
+refused outright by a later step regardless of role — check the schema catalog for \
+which ones — so routing through one unnecessarily can turn an answerable question into \
+a refusal even where it wouldn't be structurally wrong.
+- Never join two tables by comparing columns that are only *transitively* related \
+through the schema catalog's Column Reference, not directly by a real foreign key — \
+this is syntactically valid SQL that silently returns nothing, not an error. Trace the \
+actual reference chain one hop at a time and include every intermediate table. Two \
+confirmed mistakes to avoid specifically: (1) `grade_subject_offerings.period_grade_id` \
+references `period_grades.id`, and separately `period_grades.grade_id` references \
+`grades.id` — there is no direct edge from a subject offering to a grade, so filtering \
+by grade name needs `JOIN period_grades pg ON pg.id = gso.period_grade_id JOIN grades g \
+ON g.id = pg.grade_id`, never `JOIN grades g ON g.id = gso.period_grade_id`. \
+(2) `common_mastery_quizzes.subtopic_id` references `subtopics.id`, and reaching a \
+subject offering from there needs the full chain — \
+`JOIN subtopics st ON st.id = cmq.subtopic_id JOIN topics t ON t.id = st.topic_id JOIN \
+grade_subject_offerings gso ON gso.id = t.grade_subject_offering_id` — never \
+`JOIN grade_subject_offerings gso ON gso.id = cmq.subtopic_id`.
+- `topics` are broad, top-level groupings (e.g. "Mathematics Core"); `subtopics` are \
+the specific, nameable concepts underneath them (e.g. "Fractions", "Linear Equations"). \
+When a question names a specific concept to filter or count by, check `subtopics.name` \
+first — `topics.name` is very unlikely to match a specific concept name at all.
 - Return ONLY the SQL query, in a single ```sql fenced code block, with no other \
 commentary before or after it."""
 

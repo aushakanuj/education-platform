@@ -9,7 +9,9 @@ graph-level test.
 
 from __future__ import annotations
 
+import sys
 from collections.abc import Iterator
+from typing import Protocol, cast
 from uuid import UUID
 
 import pytest
@@ -25,6 +27,7 @@ from education_platform.modules.text_to_sql.nodes.honest_refusal import honest_r
 from education_platform.modules.text_to_sql.state import (
     AUDIT_ERROR,
     EXECUTION_ERROR,
+    INJECTION_BLOCKED,
     LLM_ERROR,
     ROLE_VIOLATION,
     SCHEMA_ERROR,
@@ -40,7 +43,37 @@ ALL_CATEGORIES = (
     ROLE_VIOLATION,
     EXECUTION_ERROR,
     AUDIT_ERROR,
+    INJECTION_BLOCKED,
 )
+
+
+class _InjectionGuardModule(Protocol):
+    async def chat_completion_json(
+        self, messages: list[dict[str, str]], *, settings: object, temperature: float = 0.0
+    ) -> dict[str, object]: ...
+
+
+_INJECTION_GUARD_MODULE = cast(
+    _InjectionGuardModule,
+    sys.modules["education_platform.modules.text_to_sql.nodes.injection_guard"],
+)
+
+
+@pytest.fixture(autouse=True)
+def _pass_injection_guard(monkeypatch: pytest.MonkeyPatch) -> None:
+    """injection_guard is now the graph's entry node, ahead of load_schema, and makes its
+    own live OpenRouter classifier call for any question its heuristic regex doesn't
+    already catch -- including the one full-graph test in this file. Default every
+    question here to "not an injection" so it doesn't depend on network availability to
+    pass.
+    """
+
+    async def _fake(
+        messages: list[dict[str, str]], *, settings: object, temperature: float = 0.0
+    ) -> dict[str, object]:
+        return {"injection": False}
+
+    monkeypatch.setattr(_INJECTION_GUARD_MODULE, "chat_completion_json", _fake)
 
 # Distinctive markers that must never survive into natural_answer, standing in for the
 # kinds of internals a real error/SQL string would carry.

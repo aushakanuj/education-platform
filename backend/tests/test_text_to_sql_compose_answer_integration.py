@@ -49,6 +49,35 @@ _MODULE = cast(
 )
 
 
+class _InjectionGuardModule(Protocol):
+    async def chat_completion_json(
+        self, messages: list[dict[str, str]], *, settings: object, temperature: float = 0.0
+    ) -> dict[str, object]: ...
+
+
+_INJECTION_GUARD_MODULE = cast(
+    _InjectionGuardModule,
+    sys.modules["education_platform.modules.text_to_sql.nodes.injection_guard"],
+)
+
+
+@pytest.fixture(autouse=True)
+def _pass_injection_guard(monkeypatch: pytest.MonkeyPatch) -> None:
+    """injection_guard (the graph's entry node, ahead of load_schema) makes its own live
+    OpenRouter classifier call for any question its heuristic regex doesn't already
+    catch. This file is about compose_answer's own behavior, not injection_guard's --
+    default every question here to "not an injection" so these tests don't silently make
+    a real, unmocked API call and don't depend on network availability to pass.
+    """
+
+    async def _fake(
+        messages: list[dict[str, str]], *, settings: object, temperature: float = 0.0
+    ) -> dict[str, object]:
+        return {"injection": False}
+
+    monkeypatch.setattr(_INJECTION_GUARD_MODULE, "chat_completion_json", _fake)
+
+
 @pytest.fixture()
 def seeded_institution(clean_db: str) -> Iterator[UUID]:
     engine = create_engine(to_sync_url(clean_db), pool_pre_ping=True)
@@ -92,6 +121,12 @@ async def test_row_cap_disclosure_chains_from_a_real_execute_sql_truncation(
 
     exec_state: TextToSQLState = {
         "validated_sql": "SELECT generate_series(1, 50) AS n",
+        # execute_sql now sets these unconditionally for RLS (migration e1f2a3b4c5d6) --
+        # arbitrary but present is enough here since generate_series touches no
+        # RLS-protected table at all; a real seeded fixture isn't needed for this query.
+        "user_id": "00000000-0000-0000-0000-000000000001",
+        "user_role": "admin",
+        "institution_id": "00000000-0000-0000-0000-000000000002",
         "error": None,
         "retry_count": 0,
         "audit_entry": None,

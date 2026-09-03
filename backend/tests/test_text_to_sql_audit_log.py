@@ -51,6 +51,35 @@ _LOAD_SCHEMA_MODULE = cast(
 )
 
 
+class _InjectionGuardModule(Protocol):
+    async def chat_completion_json(
+        self, messages: list[dict[str, str]], *, settings: object, temperature: float = 0.0
+    ) -> dict[str, object]: ...
+
+
+_INJECTION_GUARD_MODULE = cast(
+    _InjectionGuardModule,
+    sys.modules["education_platform.modules.text_to_sql.nodes.injection_guard"],
+)
+
+
+@pytest.fixture(autouse=True)
+def _pass_injection_guard(monkeypatch: pytest.MonkeyPatch) -> None:
+    """injection_guard (the graph's entry node, ahead of load_schema) makes its own live
+    OpenRouter classifier call for any question its heuristic regex doesn't already
+    catch. This file is about audit_log's own behavior, not injection_guard's — default
+    every question here to "not an injection" so these tests don't silently make a real,
+    unmocked API call and don't depend on network availability to pass.
+    """
+
+    async def _fake(
+        messages: list[dict[str, str]], *, settings: object, temperature: float = 0.0
+    ) -> dict[str, object]:
+        return {"injection": False}
+
+    monkeypatch.setattr(_INJECTION_GUARD_MODULE, "chat_completion_json", _fake)
+
+
 @dataclass(frozen=True)
 class _Seeded:
     institution_id: UUID
@@ -173,6 +202,10 @@ async def test_successful_run_produces_a_complete_audit_record(
     assert payload["retry_count"] == 0
     assert payload["outcome"] == "answered"
     assert payload["error_category"] is None
+    # link_schema ran for real here (only generate_sql is faked above) -- confirms its
+    # selection reaches the audit trail, not just state passed within the graph run.
+    assert payload["schema_linking_tables_selected"] is not None
+    assert "institutions" in payload["schema_linking_tables_selected"]
 
 
 # --- Refused run: audit coverage must not silently drop refusals -----------------------
