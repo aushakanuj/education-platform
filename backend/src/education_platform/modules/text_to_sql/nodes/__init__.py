@@ -1,9 +1,9 @@
 """Text-to-SQL pipeline nodes. Each module holds one graph node; see graph.py for wiring.
 
-All eleven nodes (injection guarding, schema loading, per-question schema narrowing, SQL
-generation/validation, role scoping, execution, sanity checking, answer composition,
-honest refusal, and audit logging) are implemented; see each module's own docstring for
-its specific behavior and design decisions.
+All twelve nodes (injection guarding, off-topic question validation, schema loading,
+per-question schema narrowing, SQL generation/validation, role scoping, execution, sanity
+checking, answer composition, honest refusal, and audit logging) are implemented; see each
+module's own docstring for its specific behavior and design decisions.
 """
 
 from education_platform.modules.text_to_sql.nodes.apply_role_scope import (
@@ -23,6 +23,9 @@ from education_platform.modules.text_to_sql.nodes.injection_guard import (
 )
 from education_platform.modules.text_to_sql.nodes.link_schema import link_schema as link_schema
 from education_platform.modules.text_to_sql.nodes.load_schema import load_schema as load_schema
+from education_platform.modules.text_to_sql.nodes.question_validator import (
+    question_validator as question_validator,
+)
 from education_platform.modules.text_to_sql.nodes.sanity_check import (
     sanity_check as sanity_check,
 )
@@ -40,6 +43,7 @@ __all__ = [
     "injection_guard",
     "link_schema",
     "load_schema",
+    "question_validator",
     "sanity_check",
     "validate_sql",
 ]

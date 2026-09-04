@@ -75,6 +75,31 @@ def _pass_injection_guard(monkeypatch: pytest.MonkeyPatch) -> None:
     )
 
 
+class _QuestionValidatorModule(Protocol):
+    chat_completion_json: AsyncMock
+
+
+_QUESTION_VALIDATOR_MODULE = cast(
+    _QuestionValidatorModule,
+    sys.modules["education_platform.modules.text_to_sql.nodes.question_validator"],
+)
+
+
+@pytest.fixture(autouse=True)
+def _pass_question_validator(monkeypatch: pytest.MonkeyPatch) -> None:
+    """question_validator is the node right after injection_guard, and makes its own live
+    OpenRouter classifier call for every question that reaches it. Every test in this file
+    is about routing/auth/scoping, not question_validator itself -- default every question
+    here to "not off-topic" so these HTTP-level tests don't silently make a real, unmocked
+    API call per request.
+    """
+    monkeypatch.setattr(
+        _QUESTION_VALIDATOR_MODULE,
+        "chat_completion_json",
+        AsyncMock(return_value={"off_topic": False}),
+    )
+
+
 @pytest.fixture()
 def api(client: TestClient, clean_db: str) -> Iterator[TestClient]:
     """The real app, backed by a generated school."""

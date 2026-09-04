@@ -1,8 +1,9 @@
 """Turns a failure already decided upstream into state["natural_answer"] — phrasing
 only, no routing decisions. Reached from every failure branch in graph.py:
-injection_guard's INJECTION_BLOCKED and OFF_TOPIC_REJECTED, load_schema's SCHEMA_ERROR,
-validate_sql's "refuse" edge (retries exhausted), apply_role_scope's ROLE_VIOLATION,
-execute_sql's EXECUTION_ERROR, and audit_log's own fail-closed AUDIT_ERROR path.
+injection_guard's INJECTION_BLOCKED, question_validator's OFF_TOPIC_REJECTED,
+load_schema's SCHEMA_ERROR, validate_sql's "refuse" edge (retries exhausted),
+apply_role_scope's ROLE_VIOLATION, execute_sql's EXECUTION_ERROR, and audit_log's own
+fail-closed AUDIT_ERROR path.
 
 **Message per category**, honest about *what kind* of failure occurred without exposing
 *how*: `LLM_ERROR` (the AI service itself failed — try again) and `VALIDATION_ERROR`

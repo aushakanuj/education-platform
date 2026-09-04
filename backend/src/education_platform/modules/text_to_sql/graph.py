@@ -2,17 +2,21 @@
 
 Happy path:
 
-    injection_guard -> load_schema -> link_schema -> generate_sql -> validate_sql
-        -> apply_role_scope -> execute_sql -> sanity_check -> compose_answer
-        -> audit_log -> END
+    injection_guard -> question_validator -> load_schema -> link_schema -> generate_sql
+        -> validate_sql -> apply_role_scope -> execute_sql -> sanity_check
+        -> compose_answer -> audit_log -> END
 
-`injection_guard` is the entry point, ahead of `load_schema`: a cost/UX check (skip the
+`injection_guard` is the entry point, ahead of everything else: a cost/UX check (skip the
 LLM call, give a distinct audit signal for an unambiguous prompt-injection attempt), never
 the security boundary — that's still `apply_role_scope`, unconditionally, on every path
-that reaches it, regardless of what this node did or didn't catch. See that module's own
-docstring for why it's placed first rather than anywhere else: an intent-routing stage
-(hybrid templates, not built yet) will eventually sit right after it, so every future
-branch benefits from the same early, cheap check rather than needing its own copy.
+that reaches it, regardless of what this node did or didn't catch. `question_validator`
+sits right after it, ahead of `load_schema`: the same "before any SQL generation is
+attempted" placement, for a question that's benign but off-topic rather than adversarial
+(see that module's own docstring for why this is a separate node with its own classifier
+call rather than folded into injection_guard's — that was tried, measured, and reverted).
+An intent-routing stage (hybrid templates, not built yet) will eventually sit after both of
+these, so every future branch still benefits from the same early, cheap checks rather than
+needing its own copy.
 
 `link_schema` sits between `load_schema` and `generate_sql`, not merged into either:
 `load_schema` caches its filtered catalog once, independent of the question (see that
@@ -24,10 +28,9 @@ bug is a worse-prompt problem for generate_sql, never a correctness/authorizatio
 see that module's own docstring for why) and no conditional edge, unlike every other
 stage here — it always proceeds straight to generate_sql.
 
-honest_refusal is reached from five independent failure branches, none of which loop back
-into generate_sql's retry path: injection_guard's INJECTION_BLOCKED/OFF_TOPIC_REJECTED
-(one edge, two categories — see injection_guard.py's own docstring for why its classifier
-call produces both), load_schema's "error", validate_sql's "refuse" once retries are
+honest_refusal is reached from six independent failure branches, none of which loop back
+into generate_sql's retry path: injection_guard's INJECTION_BLOCKED, question_validator's
+OFF_TOPIC_REJECTED, load_schema's "error", validate_sql's "refuse" once retries are
 exhausted, apply_role_scope's ROLE_VIOLATION, and execute_sql's EXECUTION_ERROR. Only
 validate_sql's own "retry" edge
 goes back to generate_sql (not to
@@ -69,6 +72,7 @@ from education_platform.modules.text_to_sql.nodes import (
     injection_guard,
     link_schema,
     load_schema,
+    question_validator,
     sanity_check,
     validate_sql,
 )
@@ -78,7 +82,14 @@ from education_platform.modules.text_to_sql.state import MAX_RETRIES, TextToSQLS
 def _route_after_injection_guard(state: TextToSQLState) -> Literal["ok", "blocked"]:
     # injection_guard sets state["error"] (INJECTION_BLOCKED) when the heuristic regex
     # or the LLM classifier judged the question itself a prompt-injection attempt —
-    # straight to honest_refusal, never into load_schema/generate_sql at all.
+    # straight to honest_refusal, never into question_validator/load_schema/generate_sql.
+    return "blocked" if state.get("error") else "ok"
+
+
+def _route_after_question_validator(state: TextToSQLState) -> Literal["ok", "blocked"]:
+    # question_validator sets state["error"] (OFF_TOPIC_REJECTED) when its classifier
+    # judged the question unrelated to school data entirely — straight to honest_refusal,
+    # never into load_schema/generate_sql.
     return "blocked" if state.get("error") else "ok"
 
 
@@ -128,6 +139,7 @@ def build_text_to_sql_graph() -> CompiledStateGraph[TextToSQLState, None, TextTo
     graph: StateGraph[TextToSQLState] = StateGraph(TextToSQLState)
 
     graph.add_node("injection_guard", injection_guard)
+    graph.add_node("question_validator", question_validator)
     graph.add_node("load_schema", load_schema)
     graph.add_node("link_schema", link_schema)
     graph.add_node("generate_sql", generate_sql)
@@ -143,6 +155,14 @@ def build_text_to_sql_graph() -> CompiledStateGraph[TextToSQLState, None, TextTo
     graph.add_conditional_edges(
         "injection_guard",
         _route_after_injection_guard,
+        {
+            "ok": "question_validator",
+            "blocked": "honest_refusal",
+        },
+    )
+    graph.add_conditional_edges(
+        "question_validator",
+        _route_after_question_validator,
         {
             "ok": "load_schema",
             "blocked": "honest_refusal",

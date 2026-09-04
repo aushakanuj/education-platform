@@ -84,15 +84,16 @@ has nothing to do with a school's students, grades, attendance, or curriculum da
 ("what's the weather", "write me a poem"). Distinct from `INJECTION_BLOCKED` for the same
 reason that category is distinct from `ROLE_VIOLATION`: a different fact about *why*
 generation was never attempted, worth a different audit signal rather than lumping every
-pre-generation refusal into one bucket. Raised by injection_guard's own classifier call —
-not a separate node or a separate OpenRouter round-trip: the classifier prompt was
-deliberately extended to return both `injection` and `off_topic` from the one call already
-being made, trading a small amount of node-boundary purity (one node now produces two
-distinct categories) for not doubling this pipeline's per-question LLM cost. See
-injection_guard.py's own docstring for the full reasoning. Like `INJECTION_BLOCKED`, this
-is a cost/UX layer, not a security boundary — `apply_role_scope` doesn't care whether a
-question was ever "about" school data; it only ever restricts a query that was actually
-generated. Raised by injection_guard, and only by injection_guard."""
+pre-generation refusal into one bucket. Raised by `question_validator`, and only by
+`question_validator` — the node right after `injection_guard`. This was briefly folded
+into injection_guard's own classifier call instead (one combined prompt returning both
+`injection` and `off_topic`, to save a second OpenRouter round-trip), then measured and
+reverted: the combined call produced a 100%-reproducible false positive on an ordinary
+question ("What subject do I teach?") that a separate, off-topic-only call got right every
+time — see question_validator.py's own docstring for the full comparison and numbers. Like
+`INJECTION_BLOCKED`, this is a cost/UX layer, not a security boundary — `apply_role_scope`
+doesn't care whether a question was ever "about" school data; it only ever restricts a
+query that was actually generated."""
 
 EXECUTION_ERROR: Final[str] = "EXECUTION_ERROR"
 """The SQL was valid (Task 5) and authorized (Task 6), but the database itself failed to

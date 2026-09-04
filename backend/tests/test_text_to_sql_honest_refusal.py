@@ -77,6 +77,34 @@ def _pass_injection_guard(monkeypatch: pytest.MonkeyPatch) -> None:
 
     monkeypatch.setattr(_INJECTION_GUARD_MODULE, "chat_completion_json", _fake)
 
+
+class _QuestionValidatorModule(Protocol):
+    async def chat_completion_json(
+        self, messages: list[dict[str, str]], *, settings: object, temperature: float = 0.0
+    ) -> dict[str, object]: ...
+
+
+_QUESTION_VALIDATOR_MODULE = cast(
+    _QuestionValidatorModule,
+    sys.modules["education_platform.modules.text_to_sql.nodes.question_validator"],
+)
+
+
+@pytest.fixture(autouse=True)
+def _pass_question_validator(monkeypatch: pytest.MonkeyPatch) -> None:
+    """question_validator is the node right after injection_guard and makes its own live
+    OpenRouter classifier call for every question that reaches it, including the one
+    full-graph test in this file. Default every question here to "not off-topic" so it
+    doesn't depend on network availability to pass.
+    """
+
+    async def _fake_ot(
+        messages: list[dict[str, str]], *, settings: object, temperature: float = 0.0
+    ) -> dict[str, object]:
+        return {"off_topic": False}
+
+    monkeypatch.setattr(_QUESTION_VALIDATOR_MODULE, "chat_completion_json", _fake_ot)
+
 # Distinctive markers that must never survive into natural_answer, standing in for the
 # kinds of internals a real error/SQL string would carry.
 _SECRET_SQL = "SELECT password_hash FROM users WHERE id = 'Marker-Row-9F2E'"
