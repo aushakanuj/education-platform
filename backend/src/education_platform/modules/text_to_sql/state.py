@@ -78,6 +78,22 @@ doesn't recognize) degrades to today's behavior, not to an unsafe one. Raised by
 injection_guard, and only by injection_guard — the first node in the graph, before
 load_schema."""
 
+OFF_TOPIC_REJECTED: Final[str] = "OFF_TOPIC_REJECTED"
+"""The question wasn't malicious — `INJECTION_BLOCKED` is the category for that — it just
+has nothing to do with a school's students, grades, attendance, or curriculum data at all
+("what's the weather", "write me a poem"). Distinct from `INJECTION_BLOCKED` for the same
+reason that category is distinct from `ROLE_VIOLATION`: a different fact about *why*
+generation was never attempted, worth a different audit signal rather than lumping every
+pre-generation refusal into one bucket. Raised by injection_guard's own classifier call —
+not a separate node or a separate OpenRouter round-trip: the classifier prompt was
+deliberately extended to return both `injection` and `off_topic` from the one call already
+being made, trading a small amount of node-boundary purity (one node now produces two
+distinct categories) for not doubling this pipeline's per-question LLM cost. See
+injection_guard.py's own docstring for the full reasoning. Like `INJECTION_BLOCKED`, this
+is a cost/UX layer, not a security boundary — `apply_role_scope` doesn't care whether a
+question was ever "about" school data; it only ever restricts a query that was actually
+generated. Raised by injection_guard, and only by injection_guard."""
+
 EXECUTION_ERROR: Final[str] = "EXECUTION_ERROR"
 """The SQL was valid (Task 5) and authorized (Task 6), but the database itself failed to
 run it — a timeout, a connection failure, a constraint violation the earlier checks
@@ -107,6 +123,7 @@ _ERROR_CATEGORIES: Final[frozenset[str]] = frozenset(
         EXECUTION_ERROR,
         AUDIT_ERROR,
         INJECTION_BLOCKED,
+        OFF_TOPIC_REJECTED,
     }
 )
 

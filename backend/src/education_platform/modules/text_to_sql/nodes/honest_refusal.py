@@ -1,8 +1,8 @@
 """Turns a failure already decided upstream into state["natural_answer"] — phrasing
 only, no routing decisions. Reached from every failure branch in graph.py:
-injection_guard's INJECTION_BLOCKED, load_schema's SCHEMA_ERROR, validate_sql's "refuse"
-edge (retries exhausted), apply_role_scope's ROLE_VIOLATION, execute_sql's
-EXECUTION_ERROR, and audit_log's own fail-closed AUDIT_ERROR path.
+injection_guard's INJECTION_BLOCKED and OFF_TOPIC_REJECTED, load_schema's SCHEMA_ERROR,
+validate_sql's "refuse" edge (retries exhausted), apply_role_scope's ROLE_VIOLATION,
+execute_sql's EXECUTION_ERROR, and audit_log's own fail-closed AUDIT_ERROR path.
 
 **Message per category**, honest about *what kind* of failure occurred without exposing
 *how*: `LLM_ERROR` (the AI service itself failed — try again) and `VALIDATION_ERROR`
@@ -18,7 +18,12 @@ something that was never checked — one fixed message regardless of which of
 injection_guard's three internal reasons (heuristic match, classifier match, classifier
 unavailable) produced it, matching every other category's "no internals in the
 user-facing text" rule; the specific reason still reaches the audit trail via
-`state["error"]`'s full detail text, just not this message. `SCHEMA_ERROR`,
+`state["error"]`'s full detail text, just not this message. `OFF_TOPIC_REJECTED` gets its
+own message too, distinct from `INJECTION_BLOCKED`'s — "ask something in scope" reads as
+neutral guidance, not an accusation, which matters here specifically because this category
+fires for entirely benign questions ("what's the weather") that were never any kind of
+attack; reusing `INJECTION_BLOCKED`'s wording would misrepresent a scope mismatch as a
+security refusal. `SCHEMA_ERROR`,
 `EXECUTION_ERROR`, and `AUDIT_ERROR` share one generic message: all three are
 infrastructure failures, not anything the user did wrong, and none is a case where "try
 rephrasing" would help — `EXECUTION_ERROR`/`AUDIT_ERROR` because the query was already
@@ -70,6 +75,7 @@ from education_platform.modules.text_to_sql.state import (
     EXECUTION_ERROR,
     INJECTION_BLOCKED,
     LLM_ERROR,
+    OFF_TOPIC_REJECTED,
     ROLE_VIOLATION,
     SCHEMA_ERROR,
     VALIDATION_ERROR,
@@ -95,6 +101,10 @@ _MESSAGES: Final[dict[str, str]] = {
     INJECTION_BLOCKED: (
         "I can't process that request. Please ask a concrete question about your "
         "students, classes, or school data."
+    ),
+    OFF_TOPIC_REJECTED: (
+        "I can only help with questions about your school's students, classes, "
+        "attendance, or curriculum data. Try asking something in that scope."
     ),
 }
 

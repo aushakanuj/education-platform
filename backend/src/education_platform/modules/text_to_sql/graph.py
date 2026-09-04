@@ -25,9 +25,11 @@ see that module's own docstring for why) and no conditional edge, unlike every o
 stage here — it always proceeds straight to generate_sql.
 
 honest_refusal is reached from five independent failure branches, none of which loop back
-into generate_sql's retry path: injection_guard's INJECTION_BLOCKED, load_schema's
-"error", validate_sql's "refuse" once retries are exhausted, apply_role_scope's
-ROLE_VIOLATION, and execute_sql's EXECUTION_ERROR. Only validate_sql's own "retry" edge
+into generate_sql's retry path: injection_guard's INJECTION_BLOCKED/OFF_TOPIC_REJECTED
+(one edge, two categories — see injection_guard.py's own docstring for why its classifier
+call produces both), load_schema's "error", validate_sql's "refuse" once retries are
+exhausted, apply_role_scope's ROLE_VIOLATION, and execute_sql's EXECUTION_ERROR. Only
+validate_sql's own "retry" edge
 goes back to generate_sql (not to
 link_schema — a retry reuses the same narrowed schema_context from the first pass rather
 than re-narrowing), and only while retry_count < MAX_RETRIES — see `_route_after_validate`

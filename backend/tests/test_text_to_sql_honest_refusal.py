@@ -29,6 +29,7 @@ from education_platform.modules.text_to_sql.state import (
     EXECUTION_ERROR,
     INJECTION_BLOCKED,
     LLM_ERROR,
+    OFF_TOPIC_REJECTED,
     ROLE_VIOLATION,
     SCHEMA_ERROR,
     VALIDATION_ERROR,
@@ -44,6 +45,7 @@ ALL_CATEGORIES = (
     EXECUTION_ERROR,
     AUDIT_ERROR,
     INJECTION_BLOCKED,
+    OFF_TOPIC_REJECTED,
 )
 
 
@@ -138,6 +140,25 @@ async def test_audit_error_message() -> None:
     result = await honest_refusal(_state(error=format_error(AUDIT_ERROR, _SECRET_DETAIL)))
     answer = _answer(result).lower()
     assert "our end" in answer or "went wrong" in answer
+
+
+async def test_off_topic_rejected_message() -> None:
+    result = await honest_refusal(_state(error=format_error(OFF_TOPIC_REJECTED, _SECRET_DETAIL)))
+    answer = _answer(result).lower()
+    assert "school" in answer or "in scope" in answer
+
+
+async def test_off_topic_rejected_and_injection_blocked_read_differently() -> None:
+    # OFF_TOPIC_REJECTED fires for entirely benign questions ("what's the weather") --
+    # reusing INJECTION_BLOCKED's wording would misrepresent a scope mismatch as an
+    # accusation of attempting an attack.
+    off_topic = _answer(
+        await honest_refusal(_state(error=format_error(OFF_TOPIC_REJECTED, _SECRET_DETAIL)))
+    )
+    injection_blocked = _answer(
+        await honest_refusal(_state(error=format_error(INJECTION_BLOCKED, _SECRET_DETAIL)))
+    )
+    assert off_topic != injection_blocked
 
 
 async def test_role_violation_and_execution_error_read_differently() -> None:
