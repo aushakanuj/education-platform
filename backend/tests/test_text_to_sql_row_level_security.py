@@ -20,6 +20,7 @@ for: RLS is an independent mirror of the same rule, not a coincidentally-similar
 
 from __future__ import annotations
 
+from collections.abc import Iterator
 from typing import Any
 from uuid import UUID
 
@@ -27,7 +28,7 @@ import pytest
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from education_platform.db.session import get_text_to_sql_session_factory
+from education_platform.db.session import get_text_to_sql_session_factory, reset_engine
 from education_platform.modules.text_to_sql.nodes.apply_role_scope import (
     INSTITUTION_SCOPED_TABLES,
     STUDENT_SCOPED_TABLES,
@@ -45,6 +46,26 @@ from tests.test_text_to_sql_apply_role_scope_integration import (  # noqa: F401 
 )
 
 _ALL_SCOPED_TABLES: frozenset[str] = STUDENT_SCOPED_TABLES | INSTITUTION_SCOPED_TABLES
+
+
+@pytest.fixture(autouse=True)
+def _fresh_text_to_sql_engine_per_test() -> Iterator[None]:
+    """`clean_db` (used by the `seeded`/`async_session`-based tests below) calls
+    `reset_engine()` as a side effect of truncating tables, but several tests in this
+    file call `_raw_rls_query`/`execute_sql` directly against the cached, process-wide
+    `_text_to_sql_engine` (db.session.get_text_to_sql_engine) with no `clean_db`
+    involved at all. pytest-asyncio hands each async test its own event loop; a pooled
+    asyncpg connection created on one test's loop cannot be reused once that loop closes.
+    Confirmed live: two such tests back to back with no intervening `clean_db` test
+    crashed the second one with "RuntimeError: Event loop is closed" -- the cached
+    engine's pool still held a connection from the first test's already-closed loop.
+    Resetting unconditionally before and after every test here (redundant, and harmless,
+    on the tests that also go through `clean_db`) guarantees a fresh engine bound to
+    whichever loop is about to use it.
+    """
+    reset_engine()
+    yield
+    reset_engine()
 
 
 def _id_column(table: str) -> str:

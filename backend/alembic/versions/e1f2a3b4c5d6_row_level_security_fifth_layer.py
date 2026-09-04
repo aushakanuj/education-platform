@@ -66,6 +66,34 @@ multi-join expression — this is a structural difference from the Python code, 
 different (weaker) rule. The parent table's own policy is what supplies the institution
 boundary; nesting it again here would be redundant, not more correct.
 
+**Composability's limit: it only holds when the parent's own policy is pure institution
+membership, with no role predicate.** `topics IN (SELECT id FROM grade_subject_offerings)`
+is safe because `grade_subject_offerings`' policy is institution-only — every row a query
+could see there is exactly the institution boundary this line wants, nothing more. That
+stops being true the moment the parent's *own* policy is role-dependent, which
+`student_profiles`/`student_subject_enrollments`/`quiz_attempts` all are (self/taught/admin
+branches, not just institution). Six policies below were originally written as the same
+one-hop `IN (SELECT id FROM <parent>)` pattern against one of those three role-dependent
+parents (`quiz_attempts`, `attendance_records`, `student_material_progress`,
+`student_subject_enrollments`, `student_grade_enrollments`, `attempt_answers`) — found live,
+via this migration's own cross-check test suite, to silently over-restrict:
+`student_grade_enrollments` excluded a real row for a teacher that `apply_role_scope.py`
+correctly included, because the inner `SELECT id FROM student_profiles` was already narrowed
+to `app_teaches_student()`'s specific shape (an active subject enrollment matching a teaching
+assignment) before this table's own, independently-correct EXISTS predicate (matching on
+`period_grade_id`/`section_id` instead) ever ran — two conditions that are each right on their
+own terms but not identical, so ANDing the parent's narrowed set on top silently loses rows
+the app layer keeps. This is the opposite failure direction from the recursion bug above
+(that one crashed; this one is RLS being *stricter* than the layer it's supposed to mirror,
+found only because the test suite compares row-for-row rather than checking "some restriction
+happened"). Fixed the same way as the recursion bug: `app_student_institution_id`/
+`app_enrollment_institution_id`/`app_attempt_institution_id` (`SECURITY DEFINER`, see below)
+read institution membership directly off the base table, bypassing that table's own RLS
+entirely, so these six policies' institution-pin line is pure institution membership again —
+matching what `apply_role_scope.py`'s own institution-pin logic actually checks — with the
+role predicate carried entirely by each policy's own, separate `AND (...)` clause, exactly as
+before.
+
 **Where this necessarily diverges from `apply_role_scope.py`, and why.** `teaching_assignments`
 in `_apply_row_scoping` special-cases only `role == "teacher"` (self-restrict) and
 `role == "student"` (deny outright); any other role value — admin, or a hypothetical
@@ -192,6 +220,50 @@ LANGUAGE sql SECURITY DEFINER STABLE AS $$
             AND (ta.section_id IS NULL OR ta.section_id = sge.section_id)
     )
 $$;
+
+-- SECURITY DEFINER raw institution lookups -- fixes a composability bug found via this
+-- migration's own cross-check test suite (test_rls_matches_apply_role_scope_for_every_table,
+-- student_grade_enrollments/teacher_user_id): a policy's "institution pin" line written as
+-- `student_id IN (SELECT id FROM student_profiles)` does not just check institution
+-- membership the way it reads -- student_profiles has its OWN role-dependent policy (admin:
+-- all in institution, student: self only, teacher: only app_teaches_student() rows), so that
+-- subquery is silently filtered down to whatever the CURRENT role/identity can already see
+-- in student_profiles, before this table's own, separately-computed role predicate even runs.
+-- For a teacher, app_teaches_student() (any active subject enrollment matching any teaching
+-- assignment) and a table's own more specific EXISTS predicate (e.g.
+-- student_grade_enrollments' period_grade_id/section_id match) are two independently-correct
+-- but not-identical conditions -- a real row can satisfy the table's own EXISTS while failing
+-- app_teaches_student()'s narrower shape, and the naive pin then excludes it even though
+-- apply_role_scope.py (which has no such nested-RLS side effect -- Python subqueries don't
+-- get re-filtered) correctly includes it. This is the opposite failure mode from the
+-- infinite-recursion bug above: that one crashed; this one silently over-restricts, an RLS
+-- policy being *stricter* than the app layer it's supposed to mirror. These three functions
+-- read institution_id directly, bypassing student_profiles'/student_subject_enrollments'/
+-- quiz_attempts' own RLS entirely (SECURITY DEFINER, same mechanism as app_teaches_student
+-- above), so a policy's institution-pin line can be pure institution membership -- exactly
+-- what apply_role_scope.py's own institution-pin logic checks -- with zero role-predicate
+-- leakage from the parent table's policy.
+CREATE FUNCTION app_student_institution_id(p_student_id uuid) RETURNS uuid
+LANGUAGE sql SECURITY DEFINER STABLE AS $$
+    SELECT institution_id FROM student_profiles WHERE id = p_student_id
+$$;
+
+CREATE FUNCTION app_enrollment_institution_id(p_enrollment_id uuid) RETURNS uuid
+LANGUAGE sql SECURITY DEFINER STABLE AS $$
+    SELECT sp.institution_id
+    FROM student_subject_enrollments sse
+    JOIN student_profiles sp ON sp.id = sse.student_id
+    WHERE sse.id = p_enrollment_id
+$$;
+
+CREATE FUNCTION app_attempt_institution_id(p_attempt_id uuid) RETURNS uuid
+LANGUAGE sql SECURITY DEFINER STABLE AS $$
+    SELECT sp.institution_id
+    FROM quiz_attempts qa
+    JOIN student_subject_enrollments sse ON sse.id = qa.student_subject_enrollment_id
+    JOIN student_profiles sp ON sp.id = sse.student_id
+    WHERE qa.id = p_attempt_id
+$$;
 """
 
 _DROP_HELPER_FUNCTIONS_SQL = """
@@ -199,6 +271,9 @@ DROP FUNCTION IF EXISTS app_current_user_id();
 DROP FUNCTION IF EXISTS app_current_user_role();
 DROP FUNCTION IF EXISTS app_current_institution_id();
 DROP FUNCTION IF EXISTS app_teaches_student(uuid);
+DROP FUNCTION IF EXISTS app_student_institution_id(uuid);
+DROP FUNCTION IF EXISTS app_enrollment_institution_id(uuid);
+DROP FUNCTION IF EXISTS app_attempt_institution_id(uuid);
 """
 
 # (table, USING expression) -- one policy per table, FOR SELECT only (text_to_sql_reader
@@ -226,7 +301,7 @@ _POLICIES: list[tuple[str, str]] = [
     (
         "quiz_attempts",
         """
-        student_id IN (SELECT id FROM student_profiles)
+        app_student_institution_id(student_id) = app_current_institution_id()
         AND (
             app_current_user_role() = 'admin'
             OR (
@@ -253,7 +328,7 @@ _POLICIES: list[tuple[str, str]] = [
     (
         "attendance_records",
         """
-        student_id IN (SELECT id FROM student_profiles)
+        app_student_institution_id(student_id) = app_current_institution_id()
         AND (
             app_current_user_role() = 'admin'
             OR (
@@ -276,7 +351,7 @@ _POLICIES: list[tuple[str, str]] = [
     (
         "student_material_progress",
         """
-        student_subject_enrollment_id IN (SELECT id FROM student_subject_enrollments)
+        app_enrollment_institution_id(student_subject_enrollment_id) = app_current_institution_id()
         AND (
             app_current_user_role() = 'admin'
             OR (
@@ -307,7 +382,7 @@ _POLICIES: list[tuple[str, str]] = [
     (
         "student_subject_enrollments",
         """
-        student_id IN (SELECT id FROM student_profiles)
+        app_student_institution_id(student_id) = app_current_institution_id()
         AND (
             app_current_user_role() = 'admin'
             OR (
@@ -332,7 +407,7 @@ _POLICIES: list[tuple[str, str]] = [
     (
         "student_grade_enrollments",
         """
-        student_id IN (SELECT id FROM student_profiles)
+        app_student_institution_id(student_id) = app_current_institution_id()
         AND (
             app_current_user_role() = 'admin'
             OR (
@@ -357,7 +432,7 @@ _POLICIES: list[tuple[str, str]] = [
     (
         "attempt_answers",
         """
-        attempt_id IN (SELECT id FROM quiz_attempts)
+        app_attempt_institution_id(attempt_id) = app_current_institution_id()
         AND (
             app_current_user_role() = 'admin'
             OR (
