@@ -425,6 +425,14 @@ async def _quiz_summary(
 
 
 async def get_subtopic_by_slug(session: AsyncSession, topic_id: str, *, scope: Scope) -> Subtopic:
+    """Resolve a curriculum slug inside the caller's scope.
+
+    Slugs are unique only per topic (`uq_subtopics_topic_slug`). English and Arabic both
+    use ``grammar`` / ``poetry`` in the synthetic school, and the same Math names repeat
+    across grades. Returning the first match silently served the wrong lesson or quiz.
+    Ambiguous hits therefore 404 — same answer as missing — so callers must use a
+    subtopic id when the slug is not unique in their world.
+    """
     stmt = (
         select(Subtopic)
         .join(Topic, Topic.id == Subtopic.topic_id)
@@ -438,7 +446,7 @@ async def get_subtopic_by_slug(session: AsyncSession, topic_id: str, *, scope: S
             Subtopic.slug == topic_id,
             AcademicPeriod.institution_id == scope.institution_id,
         )
-        .order_by(Subtopic.sequence)
+        .order_by(Subtopic.sequence, Subtopic.id)
     )
     if not scope.unrestricted:
         if not scope.offering_ids:
@@ -447,13 +455,13 @@ async def get_subtopic_by_slug(session: AsyncSession, topic_id: str, *, scope: S
                 detail=f"Topic '{topic_id}' not found",
             )
         stmt = stmt.where(GradeSubjectOffering.id.in_(scope.offering_ids))
-    subtopic = await session.scalar(stmt)
-    if subtopic is None:
+    matches = list(await session.scalars(stmt))
+    if len(matches) != 1:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Topic '{topic_id}' not found",
         )
-    return subtopic
+    return matches[0]
 
 
 async def _covered_subtopic_node(
@@ -513,9 +521,14 @@ async def get_subtopic_lesson(
 async def get_quiz(session: AsyncSession, scope: Scope, topic_id: str) -> QuizMaterial:
     """Return quiz questions without joining question_answer_keys."""
     subtopic = await get_subtopic_by_slug(session, topic_id, scope=scope)
-    await _covered_subtopic_node(session, scope, subtopic.id)
+    return await get_subtopic_quiz(session, scope, subtopic.id)
+
+
+async def get_subtopic_quiz(session: AsyncSession, scope: Scope, subtopic_id: UUID) -> QuizMaterial:
+    """Released subtopic quiz by id — unambiguous even when slugs collide across offerings."""
+    await _covered_subtopic_node(session, scope, subtopic_id)
     released = await _released_quiz(
-        session, quiz_scope=QuizScope.SUBTOPIC_MASTERY, target_id=subtopic.id
+        session, quiz_scope=QuizScope.SUBTOPIC_MASTERY, target_id=subtopic_id
     )
     if released is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Quiz not found")
@@ -525,7 +538,7 @@ async def get_quiz(session: AsyncSession, scope: Scope, topic_id: str) -> QuizMa
     if not questions:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Quiz for '{topic_id}' has no questions",
+            detail=f"Quiz for subtopic '{subtopic_id}' has no questions",
         )
     return QuizMaterial(
         id=quiz.id,

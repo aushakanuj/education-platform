@@ -38,6 +38,7 @@ status matrix.
 7. [Analytics and comparison insights](./06-analytics-and-comparison-insights.md)
 8. [Relational data model](./07-relational-data-model.md) —
    [interactive HTML schema browser](./relational-schema.html)
+9. [At-risk early warning](./08-at-risk-early-warning.md)
 
 ## Future scope
 
