@@ -22,7 +22,7 @@ import { AdminMaterialsSubjectsPage } from "./pages/admin/AdminMaterialsSubjects
 import { AdminMaterialsTopicDetailPage } from "./pages/admin/AdminMaterialsTopicDetailPage";
 import { AdminMaterialsTopicsPage } from "./pages/admin/AdminMaterialsTopicsPage";
 import { PolicyChatPage } from "./pages/admin/PolicyChatPage";
-import { AssistantStubPage } from "./pages/teacher/AssistantStubPage";
+import { AssistantPage } from "./pages/teacher/AssistantPage";
 import { QuestionBankPage } from "./pages/teacher/QuestionBankPage";
 import { ClassesPage } from "./pages/teacher/ClassesPage";
 import { RosterPage } from "./pages/teacher/RosterPage";
@@ -79,7 +79,7 @@ export function App() {
         }
       >
         <Route index element={<ClassesPage />} />
-        <Route path="assistant" element={<AssistantStubPage />} />
+        <Route path="assistant" element={<AssistantPage />} />
         <Route path="questions" element={<QuestionBankPage />} />
         <Route path="classes/:sectionId" element={<SectionPage />} />
         <Route path="classes/:sectionId/students" element={<RosterPage />} />

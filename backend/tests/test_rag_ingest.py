@@ -28,7 +28,6 @@ from education_platform.modules.rag.chunking import (
 from education_platform.modules.rag.models import (
     IngestJob,
     IngestJobStatus,
-    IngestTargetKind,
     KnowledgeChunk,
     KnowledgeDocument,
     KnowledgeDocumentVersion,
@@ -196,7 +195,8 @@ def test_admin_curriculum_upload_enqueues(
 
     job = seeded_db.get(IngestJob, UUID(body["ingest_job_id"]))
     assert job is not None
-    assert job.target_kind == IngestTargetKind.SOURCE_MATERIAL_VERSION
+    assert job.source_material_version_id == version_id
+    assert job.knowledge_document_version_id is None
     assert job.status == IngestJobStatus.QUEUED
 
     status = client.get(
@@ -337,7 +337,7 @@ def test_pgvector_upsert_delete_and_search(clean_db: str) -> None:
                 chunk_id=chunk_id,
                 embedding=embedding,
                 doc_id=uuid4(),
-                doc_kind="knowledge_document",
+                doc_kind="knowledge_document_version",
                 institution_id=institution_id,
                 required_roles=["administrator"],
                 doc_type="policy",
@@ -352,7 +352,7 @@ def test_pgvector_upsert_delete_and_search(clean_db: str) -> None:
         institution_id=institution_id,
         limit=5,
         required_role="administrator",
-        doc_kind="knowledge_document",
+        doc_kind="knowledge_document_version",
         doc_type="policy",
     )
     assert len(hits) == 1
@@ -404,8 +404,7 @@ def test_claim_loop_processes_queued_job(
     seeded_db.add(version)
     seeded_db.flush()
     job = IngestJob(
-        target_kind=IngestTargetKind.SOURCE_MATERIAL_VERSION,
-        target_id=version.id,
+        source_material_version_id=version.id,
         status=IngestJobStatus.QUEUED,
     )
     seeded_db.add(job)
@@ -511,8 +510,7 @@ def test_worker_happy_path_source_material(
     seeded_db.add(version)
     seeded_db.flush()
     job = IngestJob(
-        target_kind=IngestTargetKind.SOURCE_MATERIAL_VERSION,
-        target_id=version.id,
+        source_material_version_id=version.id,
         status=IngestJobStatus.QUEUED,
     )
     seeded_db.add(job)
@@ -580,8 +578,7 @@ def test_worker_happy_path_knowledge_document(
     seeded_db.add(version)
     seeded_db.flush()
     job = IngestJob(
-        target_kind=IngestTargetKind.KNOWLEDGE_DOCUMENT_VERSION,
-        target_id=version.id,
+        knowledge_document_version_id=version.id,
         status=IngestJobStatus.QUEUED,
     )
     seeded_db.add(job)
@@ -645,8 +642,7 @@ def test_worker_failed_parse_marks_failed(
     seeded_db.add(version)
     seeded_db.flush()
     job = IngestJob(
-        target_kind=IngestTargetKind.KNOWLEDGE_DOCUMENT_VERSION,
-        target_id=version.id,
+        knowledge_document_version_id=version.id,
         status=IngestJobStatus.QUEUED,
     )
     seeded_db.add(job)

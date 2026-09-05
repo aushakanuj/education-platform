@@ -19,7 +19,6 @@ from education_platform.modules.rag.contracts import (
     VectorRow,
     parse_required_roles,
 )
-from education_platform.modules.rag.models import IngestTargetKind
 
 
 def test_text_chunk_rejects_blank_and_bad_hash() -> None:
@@ -43,7 +42,7 @@ def test_vector_row_enforces_embedding_dims_and_roles() -> None:
     base = {
         "chunk_id": uuid4(),
         "doc_id": uuid4(),
-        "doc_kind": "knowledge_document",
+        "doc_kind": "knowledge_document_version",
         "institution_id": uuid4(),
         "doc_type": "policy",
         "page_number": 1,
@@ -68,12 +67,21 @@ def test_parse_required_roles_defaults_and_rejects_unknown() -> None:
 def test_ingest_job_claim_from_mapping() -> None:
     job_id = uuid4()
     target_id = uuid4()
-    claim = IngestJobClaim(
-        id=job_id,
-        target_kind=IngestTargetKind.KNOWLEDGE_DOCUMENT_VERSION,
-        target_id=target_id,
-    )
-    assert claim.target_kind == IngestTargetKind.KNOWLEDGE_DOCUMENT_VERSION
+    claim = IngestJobClaim(id=job_id, knowledge_document_version_id=target_id)
+    assert claim.knowledge_document_version_id == target_id
+    assert claim.source_material_version_id is None
+
+
+def test_ingest_job_claim_rejects_zero_or_two_targets() -> None:
+    job_id = uuid4()
+    with pytest.raises(ValidationError):
+        IngestJobClaim(id=job_id)
+    with pytest.raises(ValidationError):
+        IngestJobClaim(
+            id=job_id,
+            source_material_version_id=uuid4(),
+            knowledge_document_version_id=uuid4(),
+        )
 
 
 def test_parsed_question_requires_options_and_unique_labels() -> None:

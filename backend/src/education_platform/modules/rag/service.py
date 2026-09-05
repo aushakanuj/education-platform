@@ -33,7 +33,6 @@ from education_platform.modules.rag.contracts import parse_required_roles
 from education_platform.modules.rag.models import (
     IngestJob,
     IngestJobStatus,
-    IngestTargetKind,
     KnowledgeChunk,
     KnowledgeDocument,
     KnowledgeDocumentStatus,
@@ -164,8 +163,7 @@ async def upload_curriculum_material(
 
     job = IngestJob(
         id=uuid4(),
-        target_kind=IngestTargetKind.SOURCE_MATERIAL_VERSION,
-        target_id=version.id,
+        source_material_version_id=version.id,
         status=IngestJobStatus.QUEUED,
     )
     session.add(job)
@@ -278,8 +276,7 @@ async def upload_knowledge_document(
 
     job = IngestJob(
         id=uuid4(),
-        target_kind=IngestTargetKind.KNOWLEDGE_DOCUMENT_VERSION,
-        target_id=version.id,
+        knowledge_document_version_id=version.id,
         status=IngestJobStatus.QUEUED,
     )
     session.add(job)

@@ -33,7 +33,6 @@ from education_platform.modules.rag.embeddings import embed_texts
 from education_platform.modules.rag.models import (
     IngestJob,
     IngestJobStatus,
-    IngestTargetKind,
     KnowledgeChunk,
     KnowledgeDocument,
     KnowledgeDocumentVersion,
@@ -151,12 +150,12 @@ def process_ingest_job_sync(
         session.commit()
 
         try:
-            if claim.target_kind == IngestTargetKind.SOURCE_MATERIAL_VERSION:
+            if claim.source_material_version_id is not None:
                 _process_source_material(session, job, parse)
-            elif claim.target_kind == IngestTargetKind.KNOWLEDGE_DOCUMENT_VERSION:
+            elif claim.knowledge_document_version_id is not None:
                 _process_knowledge_document(session, job, parse)
             else:
-                _fail_job(session, job, f"Unknown target kind: {claim.target_kind}")
+                _fail_job(session, job, "Ingest job has no target set")
         except Exception as exc:
             logger.exception("Ingest job %s failed", ingest_job_id)
             session.rollback()
@@ -164,12 +163,12 @@ def process_ingest_job_sync(
             if job is None:
                 return
             reason = str(exc)[:2000]
-            if job.target_kind == IngestTargetKind.SOURCE_MATERIAL_VERSION:
-                version = session.get(SourceMaterialVersion, job.target_id)
+            if job.source_material_version_id is not None:
+                version = session.get(SourceMaterialVersion, job.source_material_version_id)
                 if version is not None:
                     _mark_source_failed(session, version, reason)
-            elif job.target_kind == IngestTargetKind.KNOWLEDGE_DOCUMENT_VERSION:
-                version_k = session.get(KnowledgeDocumentVersion, job.target_id)
+            elif job.knowledge_document_version_id is not None:
+                version_k = session.get(KnowledgeDocumentVersion, job.knowledge_document_version_id)
                 if version_k is not None:
                     _mark_knowledge_failed(session, version_k, reason)
             job.status = IngestJobStatus.FAILED
@@ -180,7 +179,7 @@ def process_ingest_job_sync(
 
 
 def _process_source_material(session: Session, job: IngestJob, parse: ParsePdfFn) -> None:
-    version = session.get(SourceMaterialVersion, job.target_id)
+    version = session.get(SourceMaterialVersion, job.source_material_version_id)
     if version is None:
         _fail_job(session, job, "Source material version not found")
         return
@@ -242,7 +241,7 @@ def _process_source_material(session: Session, job: IngestJob, parse: ParsePdfFn
         chunks=chunks,
         version_id=version.id,
         doc_id=material.id,
-        doc_kind="source_material",
+        doc_kind="source_material_version",
         institution_id=institution_id,
         required_roles=["student", "teacher", "administrator"],
         doc_type="curriculum",
@@ -257,7 +256,7 @@ def _process_source_material(session: Session, job: IngestJob, parse: ParsePdfFn
 
 
 def _process_knowledge_document(session: Session, job: IngestJob, parse: ParsePdfFn) -> None:
-    version = session.get(KnowledgeDocumentVersion, job.target_id)
+    version = session.get(KnowledgeDocumentVersion, job.knowledge_document_version_id)
     if version is None:
         _fail_job(session, job, "Knowledge document version not found")
         return
@@ -307,7 +306,7 @@ def _process_knowledge_document(session: Session, job: IngestJob, parse: ParsePd
         chunks=chunks,
         version_id=version.id,
         doc_id=document.id,
-        doc_kind="knowledge_document",
+        doc_kind="knowledge_document_version",
         institution_id=document.institution_id,
         required_roles=roles,
         doc_type=document.doc_type,

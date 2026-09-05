@@ -38,7 +38,7 @@ def _load_chunk_payloads(hits: list[SimilarChunk]) -> list[RetrievedChunk]:
                 label = "Source"
                 excerpt = ""
                 page_number: int | None = None
-                if hit.doc_kind == "knowledge_document":
+                if hit.doc_kind == "knowledge_document_version":
                     knowledge_chunk = session.get(KnowledgeChunk, hit.chunk_id)
                     if knowledge_chunk is None:
                         continue
@@ -49,7 +49,7 @@ def _load_chunk_payloads(hits: list[SimilarChunk]) -> list[RetrievedChunk]:
                         doc = session.get(KnowledgeDocument, knowledge_version.document_id)
                         if doc is not None:
                             label = doc.title
-                elif hit.doc_kind == "source_material":
+                elif hit.doc_kind == "source_material_version":
                     source_chunk = session.get(SourceChunk, hit.chunk_id)
                     if source_chunk is None:
                         continue
