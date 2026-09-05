@@ -39,6 +39,7 @@ export function AdminShell() {
   const onMaterials = location.pathname.startsWith("/admin/materials");
   const onDocuments = location.pathname.startsWith("/admin/documents");
   const onPolicy = location.pathname.startsWith("/admin/policy");
+  const onAtRisk = location.pathname.startsWith("/admin/at-risk");
 
   return (
     <div className="app-frame">
@@ -102,6 +103,16 @@ export function AdminShell() {
               </span>
               <span className="rail__link-label">Policy assistant</span>
             </Link>
+            <Link
+              to="/admin/at-risk"
+              className={`rail__link ${onAtRisk ? "is-active" : ""}`}
+              title="At-risk flags"
+            >
+              <span className="rail__link-short" aria-hidden="true">
+                !
+              </span>
+              <span className="rail__link-label">At-risk flags</span>
+            </Link>
           </nav>
           <div className="rail__user">
             <div className="rail__name">{user?.full_name ?? "Administrator"}</div>
@@ -137,6 +148,9 @@ export function AdminShell() {
               </Link>
               <Link to="/admin/policy" className={`rail__link ${onPolicy ? "is-active" : ""}`}>
                 Policy assistant
+              </Link>
+              <Link to="/admin/at-risk" className={`rail__link ${onAtRisk ? "is-active" : ""}`}>
+                At-risk flags
               </Link>
             </nav>
           </div>

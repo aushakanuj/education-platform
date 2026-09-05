@@ -3760,6 +3760,39 @@ button.teacher-item-list__row:disabled {
   border-bottom: 0;
 }
 
+/* At-risk flags: the "Why" column carries real sentences, not a short value like every
+   other data-table column -- letting it wrap keeps the Dismiss button in the last column
+   reachable without a horizontal scroll. */
+.data-table td.at-risk-why {
+  white-space: normal;
+  max-width: 26rem;
+}
+
+.at-risk-drivers {
+  margin: 0;
+  padding-left: 1.1rem;
+}
+
+.at-risk-drivers li + li {
+  margin-top: 0.25rem;
+}
+
+.at-risk-drivers__detail {
+  color: var(--ink-muted);
+}
+
+/* Two or more independent signals agreeing is the engine's own definition of "urgent" --
+   a colour accent means a teacher scanning a long list does not have to read every badge
+   to find the rows that matter most. */
+.data-table tbody tr.at-risk-row--urgent {
+  background: var(--warning-bg);
+}
+
+.data-table tbody tr.at-risk-row--urgent td:first-child {
+  border-left: 3px solid var(--warning);
+  padding-left: calc(0.7rem - 3px);
+}
+
 /* --- Roster: find and sort --- */
 
 .roster-controls {

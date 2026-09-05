@@ -12,6 +12,7 @@ from education_platform.db.url import to_sync_url
 from education_platform.modules.academics.router import router as academics_router
 from education_platform.modules.assessments.router import router as assessments_router
 from education_platform.modules.assistant.router import router as assistant_router
+from education_platform.modules.at_risk.router import router as at_risk_router
 from education_platform.modules.audit.router import router as audit_router
 from education_platform.modules.auth.router import router as auth_router
 from education_platform.modules.authoring.router import router as authoring_router
@@ -56,6 +57,7 @@ app.include_router(assessments_router, prefix=settings.api_v1_prefix)
 app.include_router(audit_router, prefix=settings.api_v1_prefix)
 app.include_router(insights_router, prefix=settings.api_v1_prefix)
 app.include_router(authoring_router, prefix=settings.api_v1_prefix)
+app.include_router(at_risk_router, prefix=settings.api_v1_prefix)
 
 
 @app.get("/health", tags=["system"])
