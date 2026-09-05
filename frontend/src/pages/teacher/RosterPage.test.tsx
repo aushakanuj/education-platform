@@ -120,11 +120,9 @@ describe("RosterPage", () => {
     expect(link).toHaveAttribute("href", "/teacher/classes/grade-8-8a/students/a");
   });
 
-  it("summarises who needs a look, using the early-warning thresholds", async () => {
+  it("points to the real at-risk engine instead of guessing who needs a look", async () => {
     renderRoster();
-    // Aisha alone is below both 75% attendance and 60% mastery.
-    const banner = await screen.findByText(/Worth a look/);
-    expect(banner.parentElement).toHaveTextContent("1 below 75% attendance");
-    expect(banner.parentElement).toHaveTextContent("1 below 60% mastery");
+    const link = await screen.findByRole("link", { name: /See at-risk flags/ });
+    expect(link).toHaveAttribute("href", "/teacher/at-risk");
   });
 });

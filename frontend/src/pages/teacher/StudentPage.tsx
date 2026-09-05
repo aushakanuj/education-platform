@@ -1,19 +1,16 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 
 import { Crumbs } from "../../components/Crumbs";
-import { fetchStudentDetail, type StudentAttempt, type StudentDetail } from "../../api/insights";
+import { fetchStudentDetail, type StudentDetail } from "../../api/insights";
 
-/** Below this a student is not eligible to sit the exam. Mirrors the roster's rule. */
-const ATTENDANCE_THRESHOLD = 75;
-const MASTERY_CONCERN = 60;
-
-/** How many recent quizzes count as "lately". */
-const TREND_WINDOW = 3;
-/** Fewer than this behind them and there is nothing to compare against. */
-const TREND_EARLIER_MINIMUM = 2;
-/** Below this a move is well inside normal quiz-to-quiz variation. */
-const TREND_MARGIN = 5;
+/**
+ * Below this a student is not eligible to sit the end-of-term exam -- an academic
+ * eligibility rule, unrelated to the at-risk early-warning engine (which has its own,
+ * separately-derived 80% attendance line; see /teacher/at-risk). The two happen to be
+ * different numbers on purpose: this one is a school policy, not a statistical cutoff.
+ */
+const EXAM_ELIGIBILITY_ATTENDANCE = 75;
 
 function formatDay(iso: string | null): string {
   if (!iso) return "—";
@@ -22,50 +19,6 @@ function formatDay(iso: string | null): string {
     month: "short",
     year: "numeric",
   });
-}
-
-type Trend = {
-  direction: "up" | "down";
-  recent: number;
-  earlier: number;
-  /** Both counts, so the banner can state the size of what it compared. */
-  recentCount: number;
-  earlierCount: number;
-} | null;
-
-/**
- * The last few quizzes against everything before them.
- *
- * Deliberately plain arithmetic on what the teacher can already see in the table below,
- * not a risk score: the rules that decide who is at risk are Rahul's task 3.1, and this
- * should be replaced by them rather than quietly become a second opinion. It says nothing
- * unless the move clears `TREND_MARGIN`, because a 2% wobble is not a direction.
- *
- * The earlier group is whatever remains rather than a matching window, and the banner
- * names both counts. A fixed 3-against-3 needed six quizzes, which no student in a term
- * this length has yet -- a comparison nobody ever sees is worse than an uneven one that
- * says how uneven it is.
- */
-export function attemptTrend(attempts: StudentAttempt[]): Trend {
-  const scored = attempts.filter((a) => a.score_percent !== null);
-  if (scored.length < TREND_WINDOW + TREND_EARLIER_MINIMUM) return null;
-
-  // `attempts` arrives newest first.
-  const mean = (window: StudentAttempt[]) =>
-    window.reduce((sum, a) => sum + (a.score_percent ?? 0), 0) / window.length;
-  const recentGroup = scored.slice(0, TREND_WINDOW);
-  const earlierGroup = scored.slice(TREND_WINDOW);
-  const recent = mean(recentGroup);
-  const earlier = mean(earlierGroup);
-
-  if (Math.abs(recent - earlier) < TREND_MARGIN) return null;
-  return {
-    direction: recent > earlier ? "up" : "down",
-    recent,
-    earlier,
-    recentCount: recentGroup.length,
-    earlierCount: earlierGroup.length,
-  };
 }
 
 export function StudentPage() {
@@ -96,8 +49,6 @@ export function StudentPage() {
       cancelled = true;
     };
   }, [studentId]);
-
-  const trend = useMemo(() => attemptTrend(student?.attempts ?? []), [student]);
 
   if (loading) {
     return <div className="banner banner--info">Loading student…</div>;
@@ -155,7 +106,7 @@ export function StudentPage() {
               <div className="student-figure">
                 <span
                   className={
-                    attendance < ATTENDANCE_THRESHOLD
+                    attendance < EXAM_ELIGIBILITY_ATTENDANCE
                       ? "student-figure__value is-concern"
                       : "student-figure__value"
                   }
@@ -166,9 +117,9 @@ export function StudentPage() {
                   {student.days_present} of {student.days_counted} days
                 </span>
               </div>
-              {attendance < ATTENDANCE_THRESHOLD && (
+              {attendance < EXAM_ELIGIBILITY_ATTENDANCE && (
                 <p className="progress-label">
-                  Below the {ATTENDANCE_THRESHOLD}% needed to sit the end-of-term exam.
+                  Below the {EXAM_ELIGIBILITY_ATTENDANCE}% needed to sit the end-of-term exam.
                 </p>
               )}
             </>
@@ -205,12 +156,7 @@ export function StudentPage() {
                   {attempted ? (
                     <>
                       <div className="progress-label">{mastery}% mastery</div>
-                      <div
-                        className={`progress ${
-                          mastery >= MASTERY_CONCERN ? "progress--complete" : "progress--in-progress"
-                        }`}
-                        aria-hidden="true"
-                      >
+                      <div className="progress" aria-hidden="true">
                         <span style={{ width: `${mastery}%` }} />
                       </div>
                       <p className="progress-label">
@@ -240,17 +186,6 @@ export function StudentPage() {
               : `The last ${student.attempts.length} quizzes they finished in your subjects, newest first.`}
           </p>
         </div>
-
-        {trend && (
-          <div
-            className={`banner ${trend.direction === "down" ? "banner--warning" : "banner--info"}`}
-            role="status"
-          >
-            <strong>{trend.direction === "down" ? "Slipping:" : "Improving:"}</strong> last{" "}
-            {trend.recentCount} quizzes averaged {trend.recent.toFixed(0)}%, against{" "}
-            {trend.earlier.toFixed(0)}% over the {trend.earlierCount} before.
-          </div>
-        )}
 
         {student.attempts.length > 0 && (
           <div className="table-scroll">
@@ -300,6 +235,9 @@ export function StudentPage() {
       <div className="meta-row">
         <Link className="badge badge--info" to={`/teacher/classes/${sectionId}/students`}>
           ← Back to the roster
+        </Link>
+        <Link className="badge" to="/teacher/at-risk">
+          See at-risk flags →
         </Link>
       </div>
     </>

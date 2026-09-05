@@ -2,7 +2,7 @@ import { render, screen, within } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import { StudentPage, attemptTrend } from "./StudentPage";
+import { StudentPage } from "./StudentPage";
 import type { StudentAttempt, StudentDetail } from "../../api/insights";
 
 const fetchStudentDetail = vi.fn();
@@ -65,52 +65,6 @@ function renderStudent() {
   );
 }
 
-describe("attemptTrend", () => {
-  const scores = (values: number[]) => values.map((v) => attempt({ score_percent: v }));
-
-  it("says nothing until three recent quizzes have at least two behind them", () => {
-    expect(attemptTrend(scores([30, 40, 50, 90]))).toBeNull();
-  });
-
-  it("ignores a move small enough to be ordinary variation", () => {
-    // Newest first: 70,70,70 against 72,72 — a 2 point drift, not a direction.
-    expect(attemptTrend(scores([70, 70, 70, 72, 72]))).toBeNull();
-  });
-
-  it("reports a fall, comparing the recent three against everything before them", () => {
-    const trend = attemptTrend(scores([40, 45, 50, 80, 85, 90]));
-    expect(trend?.direction).toBe("down");
-    expect(Math.round(trend?.recent ?? 0)).toBe(45);
-    expect(Math.round(trend?.earlier ?? 0)).toBe(85);
-    expect(trend?.recentCount).toBe(3);
-    expect(trend?.earlierCount).toBe(3);
-  });
-
-  it("compares against an uneven earlier group, and reports how uneven", () => {
-    // Aisha's shape in the demo data: five quizzes, sliding.
-    const trend = attemptTrend(scores([38, 47, 56, 65, 74]));
-    expect(trend?.direction).toBe("down");
-    expect(trend?.recentCount).toBe(3);
-    expect(trend?.earlierCount).toBe(2);
-    expect(Math.round(trend?.earlier ?? 0)).toBe(70);
-  });
-
-  it("reports a rise the same way", () => {
-    expect(attemptTrend(scores([90, 85, 80, 45, 40]))?.direction).toBe("up");
-  });
-
-  it("skips attempts that were never marked rather than scoring them zero", () => {
-    const withUnmarked = [
-      ...scores([40, 45, 50]),
-      attempt({ score_percent: null }),
-      ...scores([80, 85]),
-    ];
-    const trend = attemptTrend(withUnmarked);
-    expect(trend?.direction).toBe("down");
-    expect(trend?.earlierCount).toBe(2);
-  });
-});
-
 describe("StudentPage", () => {
   beforeEach(() => {
     fetchStudentDetail.mockReset();
@@ -156,5 +110,11 @@ describe("StudentPage", () => {
     fetchStudentDetail.mockRejectedValue(new Error("No such student"));
     renderStudent();
     expect(await screen.findByRole("alert")).toHaveTextContent("No such student");
+  });
+
+  it("points to the real at-risk engine rather than guessing a trend itself", async () => {
+    renderStudent();
+    const link = await screen.findByRole("link", { name: /See at-risk flags/ });
+    expect(link).toHaveAttribute("href", "/teacher/at-risk");
   });
 });

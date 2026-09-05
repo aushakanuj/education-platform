@@ -9,10 +9,6 @@ import {
   type TeacherClassStudent,
 } from "../../lib/useTeacherClasses";
 
-/** Below this a student is not eligible to sit the exam. Mirrors the early-warning rule. */
-const ATTENDANCE_THRESHOLD = 75;
-const MASTERY_CONCERN = 60;
-
 type SortKey = "name" | "mastery" | "attendance";
 
 /** Nulls last whichever way the column is sorted — "no data" is not a low score. */
@@ -53,19 +49,6 @@ export function RosterPage() {
     return sorted;
   }, [entry, query, sortKey]);
 
-  const needsAttention = useMemo(() => {
-    if (!entry) return { attendance: 0, mastery: 0 };
-    return {
-      attendance: entry.students.filter(
-        (s) => s.attendancePercent !== null && s.attendancePercent < ATTENDANCE_THRESHOLD,
-      ).length,
-      mastery: entry.students.filter((s) => {
-        const m = averageMastery(s);
-        return m !== null && m < MASTERY_CONCERN;
-      }).length,
-    };
-  }, [entry]);
-
   if (loading) {
     return <div className="banner banner--info">Loading roster…</div>;
   }
@@ -102,22 +85,9 @@ export function RosterPage() {
         </p>
       </header>
 
-      {(needsAttention.attendance > 0 || needsAttention.mastery > 0) && (
-        <div className="banner banner--warning" role="status">
-          <strong>Worth a look:</strong>{" "}
-          {needsAttention.attendance > 0 && (
-            <>
-              {needsAttention.attendance} below {ATTENDANCE_THRESHOLD}% attendance
-            </>
-          )}
-          {needsAttention.attendance > 0 && needsAttention.mastery > 0 && " · "}
-          {needsAttention.mastery > 0 && (
-            <>
-              {needsAttention.mastery} below {MASTERY_CONCERN}% mastery
-            </>
-          )}
-        </div>
-      )}
+      <div className="banner banner--info" role="status">
+        Looking for who needs a look? <Link to="/teacher/at-risk">See at-risk flags →</Link>
+      </div>
 
       <div className="roster-controls">
         <div className="field">
@@ -204,22 +174,14 @@ function RosterRow({ student, sectionId }: { student: TeacherClassStudent; secti
         {mastery === null ? (
           <span className="badge">No quizzes yet</span>
         ) : (
-          <span className={mastery < MASTERY_CONCERN ? "badge badge--warn" : "badge badge--ok"}>
-            {mastery.toFixed(0)}%
-          </span>
+          <span className="badge">{mastery.toFixed(0)}%</span>
         )}
       </span>
       <span role="cell">
         {attendance === null ? (
           <span className="badge">Not recorded</span>
         ) : (
-          <span
-            className={
-              attendance < ATTENDANCE_THRESHOLD ? "badge badge--warn" : "badge badge--ok"
-            }
-          >
-            {attendance.toFixed(0)}%
-          </span>
+          <span className="badge">{attendance.toFixed(0)}%</span>
         )}
       </span>
     </div>

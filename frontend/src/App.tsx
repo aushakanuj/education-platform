@@ -16,6 +16,7 @@ import { QuizPage } from "./pages/QuizPage";
 import { ResultPage } from "./pages/ResultPage";
 import { TopicPageRedirect } from "./pages/TopicPageRedirect";
 import { WelcomePage } from "./pages/WelcomePage";
+import { AdminAtRiskPage } from "./pages/admin/AdminAtRiskPage";
 import { AdminDocumentsPage } from "./pages/admin/AdminDocumentsPage";
 import { AdminMaterialsGradesPage } from "./pages/admin/AdminMaterialsGradesPage";
 import { AdminMaterialsSubjectsPage } from "./pages/admin/AdminMaterialsSubjectsPage";
@@ -23,6 +24,7 @@ import { AdminMaterialsTopicDetailPage } from "./pages/admin/AdminMaterialsTopic
 import { AdminMaterialsTopicsPage } from "./pages/admin/AdminMaterialsTopicsPage";
 import { PolicyChatPage } from "./pages/admin/PolicyChatPage";
 import { AssistantStubPage } from "./pages/teacher/AssistantStubPage";
+import { AtRiskPage } from "./pages/teacher/AtRiskPage";
 import { QuestionBankPage } from "./pages/teacher/QuestionBankPage";
 import { ClassesPage } from "./pages/teacher/ClassesPage";
 import { RosterPage } from "./pages/teacher/RosterPage";
@@ -66,6 +68,7 @@ export function App() {
         />
         <Route path="documents" element={<AdminDocumentsPage />} />
         <Route path="policy" element={<PolicyChatPage />} />
+        <Route path="at-risk" element={<AdminAtRiskPage />} />
       </Route>
 
       <Route
@@ -81,6 +84,7 @@ export function App() {
         <Route index element={<ClassesPage />} />
         <Route path="assistant" element={<AssistantStubPage />} />
         <Route path="questions" element={<QuestionBankPage />} />
+        <Route path="at-risk" element={<AtRiskPage />} />
         <Route path="classes/:sectionId" element={<SectionPage />} />
         <Route path="classes/:sectionId/students" element={<RosterPage />} />
         <Route path="classes/:sectionId/students/:studentId" element={<StudentPage />} />
