@@ -168,6 +168,10 @@ class TextToSQLState(TypedDict, total=False):
     # None/unset for the default free-form path (generate_sql's LLM output), which gets
     # the full apply_role_scope rewrite. No template caller exists yet; this is here for
     # a future template-based task.
+    intent_route: str  # "template" or "free_form", selected after question validation
+    intent: str | None
+    intent_confidence: float | None
+    intent_parameters: dict[str, Any]
 
     # --- SQL generation / validation ---
     generated_sql: str | None  # raw SQL produced by generate_sql, before validation

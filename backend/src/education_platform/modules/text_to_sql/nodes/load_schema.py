@@ -63,7 +63,7 @@ from education_platform.modules.text_to_sql.state import (
     format_error,
 )
 
-SCHEMA_CATALOG_PATH = Path(__file__).resolve().parent.parent / "schema_catalog.md"
+SCHEMA_CATALOG_PATH = Path(__file__).resolve().parent.parent / "config" / "schema_catalog.md"
 
 # Tables that must never appear in schema_context, for any role, ever.
 EXCLUDED_TABLES: tuple[str, ...] = (

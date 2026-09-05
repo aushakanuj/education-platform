@@ -104,6 +104,13 @@ the specific, nameable concepts underneath them (e.g. "Fractions", "Linear Equat
 not a promise that the schema's `topics` table is the right one to filter by name; the
 system prompt below tells the model to check `subtopics.name` first for a specific,
 nameable concept.
+
+Quiz scope branch coverage: `common_mastery_quizzes` targets exactly one of
+`subtopic_id` or `topic_id`, enforced by a database check constraint. The subtopic branch
+must use `cmq.subtopic_id -> subtopics.id -> subtopics.topic_id -> topics.id`; the topic
+branch must use `cmq.topic_id -> topics.id` directly. A prompt example for only the first
+branch is insufficient because it teaches the model to assume `subtopic_id` is populated
+even for a `topic_mastery` quiz.
 """
 
 from __future__ import annotations
@@ -177,6 +184,28 @@ subject offering from there needs the full chain — \
 `JOIN subtopics st ON st.id = cmq.subtopic_id JOIN topics t ON t.id = st.topic_id JOIN \
 grade_subject_offerings gso ON gso.id = t.grade_subject_offering_id` — never \
 `JOIN grade_subject_offerings gso ON gso.id = cmq.subtopic_id`.
+- `common_mastery_quizzes` targets exactly one scope: either `subtopic_id` is populated \
+for `quiz_scope = 'subtopic_mastery'` or `topic_id` is populated for \
+`quiz_scope = 'topic_mastery'`; the other column is NULL. Branch on that scope instead \
+of assuming `subtopic_id` is always set. For a subtopic-scoped quiz, use \
+`JOIN subtopics st ON st.id = cmq.subtopic_id JOIN topics t ON t.id = st.topic_id`. \
+For a topic-scoped quiz, use `JOIN topics t ON t.id = cmq.topic_id` directly, then \
+continue from `t` to its subject offering if the question needs the subject. Never join \
+`topics.id` to `cmq.subtopic_id`, and never join a subject offering directly to either \
+quiz target column.
+- Treat the schema catalog's verified foreign keys and canonical paths as authoritative. \
+Never infer a relationship from matching names, UUID types, or an `_id` suffix, and never \
+skip an intermediate table. In particular, `quiz_attempts.student_subject_enrollment_id` \
+references `student_subject_enrollments.id`, not `grade_subject_offerings.id`; to reach a \
+subject from that column use `JOIN student_subject_enrollments sse ON sse.id = \
+qa.student_subject_enrollment_id JOIN grade_subject_offerings gso ON gso.id = \
+sse.grade_subject_offering_id JOIN subjects s ON s.id = gso.subject_id`. Before returning \
+SQL, inspect every JOIN and verify it is a documented FK edge or part of a documented \
+multi-hop path. A query that executes but returns zero rows because of an unrelated-ID \
+join is incorrect. For quiz attempts, use `submitted_at` for "last quiz they took" when \
+the question means submission time, and use `scored_at` only when it asks for the latest \
+scored attempt. Use `DISTINCT`, grouping, or `EXISTS` when repeated assignments or \
+multiple attempts should not duplicate entities.
 - `topics` are broad, top-level groupings (e.g. "Mathematics Core"); `subtopics` are \
 the specific, nameable concepts underneath them (e.g. "Fractions", "Linear Equations"). \
 When a question names a specific concept to filter or count by, check `subtopics.name` \

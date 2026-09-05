@@ -187,6 +187,38 @@ async def test_prompt_includes_question_schema_and_role(monkeypatch: pytest.Monk
     assert "teacher" in user_content
 
 
+async def test_prompt_documents_both_common_mastery_quiz_scope_paths(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fake, captured = _fake_chat_completion("SELECT 1")
+    monkeypatch.setattr(_MODULE, "chat_completion", fake)
+
+    await generate_sql(_base_state())
+
+    system_content = cast(list[dict[str, str]], captured["messages"])[0]["content"]
+    assert "quiz_scope = 'subtopic_mastery'" in system_content
+    assert "quiz_scope = 'topic_mastery'" in system_content
+    assert "JOIN subtopics st ON st.id = cmq.subtopic_id" in system_content
+    assert "JOIN topics t ON t.id = cmq.topic_id" in system_content
+    assert "exactly one scope" in system_content
+
+
+async def test_prompt_documents_verified_join_and_timestamp_rules(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fake, captured = _fake_chat_completion("SELECT 1")
+    monkeypatch.setattr(_MODULE, "chat_completion", fake)
+
+    await generate_sql(_base_state())
+
+    system_content = cast(list[dict[str, str]], captured["messages"])[0]["content"]
+    assert "quiz_attempts.student_subject_enrollment_id" in system_content
+    assert "student_subject_enrollments.id" in system_content
+    assert "submitted_at" in system_content
+    assert "scored_at" in system_content
+    assert "returns zero rows because of an unrelated-ID join is incorrect" in system_content
+
+
 # --- SQL extraction ------------------------------------------------------------
 
 

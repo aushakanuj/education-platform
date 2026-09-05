@@ -1900,7 +1900,24 @@ async def test_what_subject_do_i_teach_returns_real_answer_through_full_graph(
     async def _fake_generate_sql(state: TextToSQLState) -> TextToSQLState:
         return {**state, "generated_sql": sentinel_sql, "error": None}
 
+    async def _fake_intent_router(state: TextToSQLState) -> TextToSQLState:
+        # This test targets generate_sql's sentinel-resolution fix specifically, not
+        # intent_router's routing decision -- "what subject do I teach?" is now a near-
+        # exact positive example for the live my_subjects template, so without this the
+        # router would legitimately claim the question before the generate_sql mock above
+        # ever runs. Forcing free_form here isolates the thing actually under test from
+        # the template catalog's wording, which is otherwise free to change independently.
+        return {
+            **state,
+            "intent_route": "free_form",
+            "intent": None,
+            "intent_confidence": 0.0,
+            "intent_parameters": {},
+            "query_source": None,
+        }
+
     monkeypatch.setattr(graph_module, "generate_sql", _fake_generate_sql)
+    monkeypatch.setattr(graph_module, "intent_router", _fake_intent_router)
     graph = build_text_to_sql_graph()
     initial: TextToSQLState = {
         "question": "what subject do I teach?",
@@ -1947,7 +1964,23 @@ async def test_question_without_self_reference_is_unaffected_through_full_graph(
     async def _fake_generate_sql(state: TextToSQLState) -> TextToSQLState:
         return {**state, "generated_sql": "SELECT name FROM subjects", "error": None}
 
+    async def _fake_intent_router(state: TextToSQLState) -> TextToSQLState:
+        # Same reasoning as test_what_subject_do_i_teach_returns_real_answer_through_full_graph
+        # above: "what subjects exist in the school?" now reads as a close semantic match
+        # to the live list_school_subjects template's own positive examples. This test is
+        # about generate_sql/apply_role_scope, not the router's classification, so pin the
+        # route rather than let it drift with the template catalog's wording.
+        return {
+            **state,
+            "intent_route": "free_form",
+            "intent": None,
+            "intent_confidence": 0.0,
+            "intent_parameters": {},
+            "query_source": None,
+        }
+
     monkeypatch.setattr(graph_module, "generate_sql", _fake_generate_sql)
+    monkeypatch.setattr(graph_module, "intent_router", _fake_intent_router)
     graph = build_text_to_sql_graph()
     initial: TextToSQLState = {
         "question": "what subjects exist in the school?",

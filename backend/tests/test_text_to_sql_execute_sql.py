@@ -208,6 +208,44 @@ async def test_zero_row_result_is_not_an_error(
     assert result["result_row_count"] == 0
 
 
+async def test_current_user_id_bind_uses_authenticated_state_without_intent_parameters(
+    seeded_institution: UUID, seeded_admin_user_id: UUID
+) -> None:
+    result = await execute_sql(
+        _admin_state(
+            "SELECT :current_user_id AS authenticated_user_id",
+            institution_id=seeded_institution,
+            user_id=seeded_admin_user_id,
+            intent_parameters={},
+        )
+    )
+
+    assert result["error"] is None
+    rows = result["query_result"]
+    assert rows is not None
+    assert rows[0]["authenticated_user_id"] == seeded_admin_user_id
+
+
+async def test_current_user_id_and_institution_id_bind_together(
+    seeded_institution: UUID, seeded_admin_user_id: UUID
+) -> None:
+    result = await execute_sql(
+        _admin_state(
+            "SELECT :current_user_id AS authenticated_user_id, "
+            ":current_institution_id AS authenticated_institution_id",
+            institution_id=seeded_institution,
+            user_id=seeded_admin_user_id,
+            intent_parameters={},
+        )
+    )
+
+    assert result["error"] is None
+    rows = result["query_result"]
+    assert rows is not None
+    assert rows[0]["authenticated_user_id"] == seeded_admin_user_id
+    assert rows[0]["authenticated_institution_id"] == seeded_institution
+
+
 # --- Statement timeout -------------------------------------------------------------------
 
 

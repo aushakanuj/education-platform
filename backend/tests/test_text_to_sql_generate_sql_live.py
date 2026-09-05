@@ -90,6 +90,8 @@ _DEFERRED_TABLE_AVOIDANCE_FLOOR = 0.5  # observed 100% (10/10) for the exact pre
 # failing phrasings, 60% (3/5) for a related-but-differently-phrased question -- the
 # floor is set at the *weaker* observed rate, not the stronger one, so this test reflects
 # the real, currently-measured floor rather than the best case.
+_QUIZ_SCOPE_PATH_FLOOR = 0.6  # Initial floor for the new two-branch probe; update only
+# after collecting repeated live measurements, not from a single successful generation.
 
 _DEFERRED_TABLES = (
     "topics",
@@ -215,6 +217,19 @@ def _seed(session: Session) -> _Fixture:
     )
     session.add(quiz_version)
     session.flush()
+    topic_quiz = CommonMasteryQuiz(
+        topic_id=topic.id, quiz_scope=QuizScope.TOPIC_MASTERY, title="Algebra Topic Quiz"
+    )
+    session.add(topic_quiz)
+    session.flush()
+    topic_quiz_version = QuizVersion(
+        quiz_id=topic_quiz.id,
+        version_number=1,
+        lifecycle_status=QuizVersionStatus.RELEASED,
+        result_release_mode=QuizResultReleaseMode.IMMEDIATE,
+    )
+    session.add(topic_quiz_version)
+    session.flush()
 
     def _enroll(identifier: str, section: Section) -> tuple[StudentProfile, StudentSubjectEnrollment]:
         user = User(
@@ -266,6 +281,17 @@ def _seed(session: Session) -> _Fixture:
             attempt_number=1,
             status=QuizAttemptStatus.SCORED,
             score_percent="70.00",
+            passed=True,
+        )
+    )
+    session.add(
+        QuizAttempt(
+            student_id=first_student.id,
+            student_subject_enrollment_id=first_enrollment.id,
+            quiz_version_id=topic_quiz_version.id,
+            attempt_number=1,
+            status=QuizAttemptStatus.SCORED,
+            score_percent="75.00",
             passed=True,
         )
     )
@@ -341,6 +367,26 @@ def _mentions_deferred_table(sql: str | None) -> bool:
         return False
     lowered = sql.lower()
     return any(table in lowered for table in _DEFERRED_TABLES)
+
+
+def _has_quiz_scope_path(sql: str | None, scope: str) -> bool:
+    if not sql:
+        return False
+    lowered = sql.lower()
+    if "cmq.subtopic_id = gso.id" in lowered or "gso.id = cmq.subtopic_id" in lowered:
+        return False
+    if scope == "subtopic":
+        return (
+            "join subtopics" in lowered
+            and (
+                "st.id = cmq.subtopic_id" in lowered
+                or "cmq.subtopic_id = st.id" in lowered
+            )
+            and ("t.id = st.topic_id" in lowered or "st.topic_id = t.id" in lowered)
+        )
+    return "join topics" in lowered and (
+        "t.id = cmq.topic_id" in lowered or "cmq.topic_id = t.id" in lowered
+    )
 
 
 # --- Fix 1: DISTINCT/EXISTS for multi-row-per-entity joins -----------------------------
@@ -428,4 +474,40 @@ async def test_avoids_deferred_tables_for_simple_subject_filtered_questions(
         f"{len(questions)} structurally similar questions -- below the "
         f"{_DEFERRED_TABLE_AVOIDANCE_FLOOR:.0%} floor observed during the investigation "
         "this test encodes (see generate_sql.py's own docstring for the exact numbers)."
+    )
+
+
+# --- Quiz scope branches -------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("question", "scope"),
+    [
+        (
+            "What was the latest score on the Mathematics quiz for the Linear Equations subtopic?",
+            "subtopic",
+        ),
+        (
+            "What was the latest score on the Mathematics Algebra topic mastery quiz?",
+            "topic",
+        ),
+    ],
+)
+async def test_quiz_scope_uses_the_matching_fk_path_across_repeated_runs(
+    seeded: _Fixture,
+    question: str,
+    scope: str,
+) -> None:
+    runs = 5
+    compliant = 0
+    for _ in range(runs):
+        result = await _run(seeded, question)
+        if _has_quiz_scope_path(result.get("generated_sql"), scope):
+            compliant += 1
+
+    rate = compliant / runs
+    assert rate >= _QUIZ_SCOPE_PATH_FLOOR, (
+        f"{scope}-scoped quiz path compliance was {compliant}/{runs} ({rate:.0%}) -- "
+        f"below the {_QUIZ_SCOPE_PATH_FLOOR:.0%} initial floor. Re-measure the prompt "
+        "guidance before changing this threshold."
     )

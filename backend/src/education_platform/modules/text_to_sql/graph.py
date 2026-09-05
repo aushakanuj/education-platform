@@ -14,9 +14,10 @@ sits right after it, ahead of `load_schema`: the same "before any SQL generation
 attempted" placement, for a question that's benign but off-topic rather than adversarial
 (see that module's own docstring for why this is a separate node with its own classifier
 call rather than folded into injection_guard's — that was tried, measured, and reverted).
-An intent-routing stage (hybrid templates, not built yet) will eventually sit after both of
-these, so every future branch still benefits from the same early, cheap checks rather than
-needing its own copy.
+The intent-routing stage sits after both of these, so every branch benefits from the same
+early checks rather than needing its own copy. Template matches proceed directly to the
+existing validation and authorization path; free-form questions continue through schema
+loading and generation.
 
 `link_schema` sits between `load_schema` and `generate_sql`, not merged into either:
 `load_schema` caches its filtered catalog once, independent of the question (see that
@@ -70,6 +71,7 @@ from education_platform.modules.text_to_sql.nodes import (
     generate_sql,
     honest_refusal,
     injection_guard,
+    intent_router,
     link_schema,
     load_schema,
     question_validator,
@@ -91,6 +93,10 @@ def _route_after_question_validator(state: TextToSQLState) -> Literal["ok", "blo
     # judged the question unrelated to school data entirely — straight to honest_refusal,
     # never into load_schema/generate_sql.
     return "blocked" if state.get("error") else "ok"
+
+
+def _route_after_intent_router(state: TextToSQLState) -> Literal["template", "free_form"]:
+    return "template" if state.get("intent_route") == "template" else "free_form"
 
 
 def _route_after_load_schema(state: TextToSQLState) -> Literal["ok", "error"]:
@@ -140,6 +146,7 @@ def build_text_to_sql_graph() -> CompiledStateGraph[TextToSQLState, None, TextTo
 
     graph.add_node("injection_guard", injection_guard)
     graph.add_node("question_validator", question_validator)
+    graph.add_node("intent_router", intent_router)
     graph.add_node("load_schema", load_schema)
     graph.add_node("link_schema", link_schema)
     graph.add_node("generate_sql", generate_sql)
@@ -164,8 +171,16 @@ def build_text_to_sql_graph() -> CompiledStateGraph[TextToSQLState, None, TextTo
         "question_validator",
         _route_after_question_validator,
         {
-            "ok": "load_schema",
+            "ok": "intent_router",
             "blocked": "honest_refusal",
+        },
+    )
+    graph.add_conditional_edges(
+        "intent_router",
+        _route_after_intent_router,
+        {
+            "template": "validate_sql",
+            "free_form": "load_schema",
         },
     )
     graph.add_conditional_edges(

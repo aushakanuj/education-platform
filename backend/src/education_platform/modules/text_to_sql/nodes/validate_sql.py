@@ -58,6 +58,7 @@ the model was explicitly told was in scope.
 
 from __future__ import annotations
 
+import re
 from typing import Final
 
 import sqlglot
@@ -120,6 +121,12 @@ def _build_scoped_tables() -> dict[str, Table]:
 
 
 SCOPED_TABLES: Final[dict[str, Table]] = _build_scoped_tables()
+
+
+def _sql_with_named_parameters(tree: exp.Select) -> str:
+    """Serialize validated SQL while retaining SQLAlchemy's ``:name`` bind syntax."""
+    rendered = tree.sql(dialect="postgres")
+    return re.sub(r"%\(([A-Za-z_]\w*)\)s", r":\1", rendered)
 
 
 def _is_quoted(identifier: exp.Expression | None) -> bool:
@@ -275,4 +282,4 @@ async def validate_sql(state: TextToSQLState) -> TextToSQLState:
     if tree.args.get("limit") is None:
         tree = tree.limit(DEFAULT_ROW_LIMIT)
 
-    return {**state, "validated_sql": tree.sql(dialect="postgres"), "error": None}
+    return {**state, "validated_sql": _sql_with_named_parameters(tree), "error": None}

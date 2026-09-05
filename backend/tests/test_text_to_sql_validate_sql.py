@@ -61,6 +61,16 @@ async def _rejected(sql: str) -> str:
     return error
 
 
+async def test_validated_sql_retains_sqlalchemy_named_bind_syntax() -> None:
+    validated = await _validated(
+        "SELECT id FROM institutions WHERE id = :current_user_id"
+    )
+
+    assert ":current_user_id" in validated
+    assert "%(current_user_id)s" not in validated
+    assert "'current_user_id'" not in validated
+
+
 # --- Scope: SCOPED_TABLES matches load_schema's REQUIRED_TABLES exactly ------------
 
 

@@ -1,6 +1,6 @@
 """Text-to-SQL pipeline nodes. Each module holds one graph node; see graph.py for wiring.
 
-All twelve nodes (injection guarding, off-topic question validation, schema loading,
+All thirteen nodes (injection guarding, off-topic question validation, intent routing, schema loading,
 per-question schema narrowing, SQL generation/validation, role scoping, execution, sanity
 checking, answer composition, honest refusal, and audit logging) are implemented; see each
 module's own docstring for its specific behavior and design decisions.
@@ -21,6 +21,7 @@ from education_platform.modules.text_to_sql.nodes.honest_refusal import (
 from education_platform.modules.text_to_sql.nodes.injection_guard import (
     injection_guard as injection_guard,
 )
+from education_platform.modules.text_to_sql.nodes.intent_router import intent_router as intent_router
 from education_platform.modules.text_to_sql.nodes.link_schema import link_schema as link_schema
 from education_platform.modules.text_to_sql.nodes.load_schema import load_schema as load_schema
 from education_platform.modules.text_to_sql.nodes.question_validator import (
@@ -41,6 +42,7 @@ __all__ = [
     "generate_sql",
     "honest_refusal",
     "injection_guard",
+    "intent_router",
     "link_schema",
     "load_schema",
     "question_validator",

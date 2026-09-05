@@ -66,7 +66,7 @@ from __future__ import annotations
 import logging
 from typing import Any, Final
 
-from sqlalchemy import text
+from sqlalchemy import Uuid, bindparam, text
 from sqlalchemy.exc import SQLAlchemyError
 
 from education_platform.db.session import get_text_to_sql_session_factory
@@ -127,13 +127,45 @@ async def execute_sql(state: TextToSQLState) -> TextToSQLState:
                 },
             )
             await session.execute(text(f"SET LOCAL statement_timeout = {STATEMENT_TIMEOUT_MS}"))
-            result = await session.execute(text(sql))
+            parameters = {
+                **(state.get("intent_parameters") or {}),
+                "current_user_id": state["user_id"],
+                "current_institution_id": state["institution_id"],
+            }
+            unbound_statement = text(sql)
+            required_parameters = {
+                name: parameters[name]
+                for name in unbound_statement._bindparams
+                if name in parameters
+            }
+            # current_user_id/current_institution_id are always uuid columns on the
+            # scoped tables they're compared against (teacher_user_id, institution_id,
+            # ...). Without an explicit type here, asyncpg sends a plain Python str as
+            # $N::VARCHAR, and Postgres has no `uuid = character varying` operator for a
+            # bound (as opposed to literal) parameter -- confirmed live: every template
+            # filtering on :current_user_id/:current_institution_id fails with
+            # asyncpg.exceptions.UndefinedFunctionError before this fix.
+            _UUID_PARAMS = {"current_user_id", "current_institution_id"}
+            statement = unbound_statement.bindparams(
+                *(
+                    bindparam(name, value=value, type_=Uuid() if name in _UUID_PARAMS else None)
+                    for name, value in required_parameters.items()
+                )
+            )
+            result = await session.execute(statement, required_parameters)
             rows: list[dict[str, Any]] = [dict(row) for row in result.mappings().all()]
     except SQLAlchemyError as exc:
         # Postgres/driver error text can carry schema, constraint, or query fragments —
         # it goes to the log and the (internal-only) audit entry, never into
         # state["error"], which is the eventually user-facing value.
-        logger.warning("execute_sql: query failed to run", exc_info=True)
+        logger.warning(
+            "execute_sql: query failed: type=%s detail=%s cause=%s orig=%s",
+            type(exc).__name__,
+            str(exc),
+            str(exc.__cause__) if exc.__cause__ else None,
+            str(exc.orig) if getattr(exc, "orig", None) else None,
+            exc_info=True,
+        )
         return {
             **state,
             "query_result": None,
@@ -142,7 +174,14 @@ async def execute_sql(state: TextToSQLState) -> TextToSQLState:
             "audit_entry": {
                 **(state.get("audit_entry") or {}),
                 "execution_error_type": type(exc).__name__,
-                "execution_error_detail": str(exc.__cause__ or exc),
+                "execution_error_detail": str(exc),
+                "execution_error_cause": str(exc.__cause__) if exc.__cause__ else None,
+                "execution_dbapi_type": (
+                    type(exc.orig).__name__ if getattr(exc, "orig", None) else None
+                ),
+                "execution_dbapi_detail": (
+                    str(exc.orig) if getattr(exc, "orig", None) else None
+                ),
             },
         }
 
