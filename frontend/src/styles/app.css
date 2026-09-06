@@ -3793,6 +3793,186 @@ button.teacher-item-list__row:disabled {
   padding-left: calc(0.7rem - 3px);
 }
 
+/* ---- Teacher analytics dashboard ------------------------------------------------- */
+
+.progress--ok > span {
+  background: var(--success);
+}
+
+.progress--warn > span {
+  background: var(--warning);
+}
+
+.progress--danger > span {
+  background: var(--danger);
+}
+
+.analytics-kpi-grid {
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 10rem), 1fr));
+  margin-bottom: 1rem;
+}
+
+.analytics-kpi-grid .card h2 {
+  font-size: 1.6rem;
+  letter-spacing: -0.02em;
+}
+
+.analytics-panel {
+  margin-bottom: 1rem;
+}
+
+.analytics-panel h2 {
+  margin: 0 0 0.15rem;
+  font-size: 1.1rem;
+  letter-spacing: -0.02em;
+}
+
+.analytics-subject-list {
+  display: grid;
+  gap: 0.6rem;
+  margin-top: 0.6rem;
+}
+
+.analytics-subject-list--compact {
+  margin-top: 0.85rem;
+}
+
+.subject-bar-row__head {
+  display: flex;
+  justify-content: space-between;
+  font-size: 0.85rem;
+  margin-bottom: 0.25rem;
+}
+
+.subject-bar-row__head span:last-child {
+  font-family: var(--font-mono);
+  color: var(--ink-muted);
+}
+
+.analytics-sections {
+  display: grid;
+  gap: 1rem;
+}
+
+.analytics-section-panel__head {
+  display: flex;
+  gap: 1rem;
+  align-items: center;
+  margin-bottom: 0.75rem;
+}
+
+.analytics-section-panel__head h2 {
+  margin: 0;
+  font-size: 1.2rem;
+}
+
+.mastery-ring {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+}
+
+.mastery-ring__track {
+  stroke: var(--surface-2);
+}
+
+.mastery-ring__value {
+  stroke: var(--accent);
+  transition: stroke-dashoffset 500ms ease;
+}
+
+.mastery-ring--strong .mastery-ring__value {
+  stroke: var(--success);
+}
+
+.mastery-ring--average .mastery-ring__value {
+  stroke: var(--warning);
+}
+
+.mastery-ring--struggling .mastery-ring__value {
+  stroke: var(--danger);
+}
+
+.mastery-ring--none .mastery-ring__value {
+  stroke: var(--border);
+}
+
+.mastery-ring__label {
+  position: absolute;
+  display: grid;
+  justify-items: center;
+  gap: 0.05rem;
+  text-align: center;
+}
+
+.mastery-ring__label strong {
+  font-size: 1.05rem;
+  letter-spacing: -0.02em;
+}
+
+.mastery-ring__label span {
+  font-family: var(--font-mono);
+  font-size: 0.6rem;
+  color: var(--ink-muted);
+  text-transform: uppercase;
+}
+
+.distribution-bar {
+  display: flex;
+  height: 0.6rem;
+  border-radius: var(--radius-pill);
+  overflow: hidden;
+  background: var(--surface-2);
+}
+
+.distribution-bar__seg--strong {
+  background: var(--success);
+}
+
+.distribution-bar__seg--average {
+  background: var(--warning);
+}
+
+.distribution-bar__seg--struggling {
+  background: var(--danger);
+}
+
+.distribution-bar__seg--none {
+  background: var(--border);
+}
+
+.distribution-bar__legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  margin-top: 0.5rem;
+}
+
+.dot {
+  display: inline-block;
+  width: 0.5rem;
+  height: 0.5rem;
+  border-radius: 50%;
+}
+
+.dot--strong {
+  background: var(--success);
+}
+
+.dot--average {
+  background: var(--warning);
+}
+
+.dot--struggling {
+  background: var(--danger);
+}
+
+.dot--none {
+  background: var(--border);
+}
+
 /* --- Roster: find and sort --- */
 
 .roster-controls {
