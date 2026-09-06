@@ -40,6 +40,7 @@ export function TeacherShell() {
     location.pathname === "/teacher" || location.pathname.startsWith("/teacher/classes");
   const onAssistant = location.pathname.startsWith("/teacher/assistant");
   const onQuestions = location.pathname.startsWith("/teacher/questions");
+  const onAtRisk = location.pathname.startsWith("/teacher/at-risk");
 
   return (
     <div className="app-frame">
@@ -101,6 +102,16 @@ export function TeacherShell() {
               </span>
               <span className="rail__link-label">Question bank</span>
             </Link>
+            <Link
+              to="/teacher/at-risk"
+              className={`rail__link ${onAtRisk ? "is-active" : ""}`}
+              title="At-risk flags"
+            >
+              <span className="rail__link-short" aria-hidden="true">
+                !
+              </span>
+              <span className="rail__link-label">At-risk flags</span>
+            </Link>
           </nav>
           <div className="rail__user">
             <div className="rail__name">{user?.full_name ?? "Teacher"}</div>
@@ -140,6 +151,9 @@ export function TeacherShell() {
                 className={`rail__link ${onQuestions ? "is-active" : ""}`}
               >
                 Question bank
+              </Link>
+              <Link to="/teacher/at-risk" className={`rail__link ${onAtRisk ? "is-active" : ""}`}>
+                At-risk flags
               </Link>
             </nav>
           </div>
