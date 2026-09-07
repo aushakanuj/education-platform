@@ -95,6 +95,24 @@ def test_a_teacher_cannot_trigger_a_recompute(api: TestClient) -> None:
 # --------------------------------------------------------------------------------------
 
 
+def test_recompute_skips_subjects_with_no_quiz_attempts(client: TestClient) -> None:
+    """Demo student is enrolled but has never sat a quiz. student_360 reports
+    mastery_percent=0 via COALESCE; that must not become a false mastery flag."""
+    headers = _headers(client, POC_ADMIN, institution_name="POC Demo School")
+    result = client.post("/api/v1/at-risk/recompute", headers=headers)
+    assert result.status_code == 200, result.text
+
+    flags = client.get("/api/v1/at-risk/flags", headers=headers)
+    assert flags.status_code == 200, flags.text
+    mastery_flags = [
+        item
+        for item in flags.json()["items"]
+        if any(driver["metric"] == "mastery_percent" for driver in item["drivers"])
+        or any(driver["metric"] == "mastery_trend" for driver in item["drivers"])
+    ]
+    assert mastery_flags == []
+
+
 def test_recompute_flags_aisha_rahman_for_mathematics(api: TestClient) -> None:
     """The named case from spec Section 6.3, run end-to-end: real login, real Scope, real
     query against student_360 and quiz_attempts, real persisted row."""

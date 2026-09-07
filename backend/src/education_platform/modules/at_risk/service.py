@@ -311,7 +311,12 @@ async def _signals_for_institution(
     by_student: dict[UUID, _Bucket] = {}
     for row in register:
         bucket = by_student.setdefault(row.student_id, _Bucket())
-        if row.grade_subject_offering_id is not None:
+        # student_360 coalesces "no scored attempts" to mastery_percent=0 (see the view's
+        # COALESCE(avg_score_percent, 0)). Feeding that 0 into the mastery-level driver
+        # falsely flags every enrolled subject a student has never sat a quiz for. Skip
+        # subjects with no attempts -- same idea as attendance staying NULL when
+        # days_counted is 0 -- so the engine only sees real mastery readings.
+        if row.grade_subject_offering_id is not None and (row.quizzes_taken or 0) > 0:
             scores = scores_by_enrolment.get(row.student_subject_enrollment_id, [])
             bucket.subjects.append(
                 SubjectSignal(
