@@ -165,6 +165,23 @@ async def test_no_excluded_table_reaches_schema_context_for_any_role(role: str) 
         assert table not in context, f"{table!r} leaked into schema_context for role={role}"
 
 
+@pytest.mark.parametrize("role", ["admin", "teacher", "student", "parent"])
+async def test_password_hash_and_token_hash_columns_are_absent_for_any_role(role: str) -> None:
+    result = await load_schema(_base_state(role))
+    assert result["error"] is None
+    context = result["schema_context"]
+    assert "password_hash" not in context, f"leaked into schema_context for role={role}"
+    assert "token_hash" not in context, f"leaked into schema_context for role={role}"
+
+
+def test_sibling_columns_of_scrubbed_tables_survive() -> None:
+    filtered = _filter_schema_catalog(_raw_catalog())
+    assert "#### `users`" in filtered
+    assert "#### `refresh_sessions`" in filtered
+    for column in ("email", "full_name", "status", "expires_at", "revoked_at"):
+        assert f"`{column}`" in filtered, f"{column!r} should survive column-row removal"
+
+
 def test_excluded_tables_cover_the_required_set() -> None:
     # Guards the test file itself against silent drift from the spec.
     assert set(EXCLUDED_TABLES) == {
@@ -176,6 +193,7 @@ def test_excluded_tables_cover_the_required_set() -> None:
         "ingest_jobs",
         "chunk_embeddings",
         "audit_events",
+        "question_answer_keys",
     }
 
 
@@ -226,7 +244,6 @@ def test_academics_assessments_attendance_and_student_360_survive() -> None:
         "questions",
         "question_versions",
         "question_options",
-        "question_answer_keys",
         "question_outcome_tags",
         "common_mastery_quizzes",
         "quiz_versions",
@@ -246,7 +263,9 @@ def test_general_conventions_in_section_1_survive() -> None:
     assert "**Multi-tenancy**" in filtered
     assert "**Versioning pattern**" in filtered
     assert "**Role model**" in filtered
-    assert "**Answer keys are server-only**" in filtered
+    # The "Answer keys are server-only" bullet existed solely to describe the now
+    # fully-excluded question_answer_keys table and is gone, not rewritten.
+    assert "**Answer keys are server-only**" not in filtered
     # Rewritten (originally mentioned chunk_embeddings/audit_events as exceptions).
     assert "**Primary keys**" in filtered
     assert "**Timestamps**" in filtered
@@ -263,10 +282,15 @@ def test_relevant_glossary_rows_survive() -> None:
         '"attendance rate" / "attendance percentage"',
         '"enrolled in a subject"',
         '"a teacher\'s students"',
-        '"correct answer" / "answer key" for a question',
         '"logged in recently" / "active session"',
     ):
         assert snippet in filtered, f"glossary row {snippet!r} should survive"
+
+
+def test_answer_key_glossary_row_removed() -> None:
+    # This row was entirely about the now fully-excluded question_answer_keys table.
+    filtered = _filter_schema_catalog(_raw_catalog())
+    assert '"correct answer" / "answer key" for a question' not in filtered
 
 
 def test_general_gotcha_bullets_survive_scrubbed_of_excluded_names() -> None:

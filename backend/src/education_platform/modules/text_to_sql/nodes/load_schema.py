@@ -2,39 +2,49 @@
 
 The `assistant` module (chat_conversations, chat_messages), the `rag` module
 (knowledge_documents, knowledge_document_versions, knowledge_chunks, ingest_jobs,
-chunk_embeddings), and the `audit_events` table (auth module) are out of scope for the
-text-to-SQL assistant and must never reach the LLM as schema context — for any role,
-under any circumstances.
+chunk_embeddings), the `audit_events` table (auth module), and `question_answer_keys`
+(already unconditionally blocked by `apply_role_scope`'s blocklist and by DB-level GRANTs,
+for every role) are out of scope for the text-to-SQL assistant and must never reach the LLM
+as schema context — for any role, under any circumstances. `users.password_hash` and
+`refresh_sessions.token_hash` are excluded the same way at the column level: those two
+tables otherwise stay fully in scope, only these two columns never reach the LLM. None of
+this changes enforcement — it exists purely so the model is never tempted to write a query
+against something it can never actually read, wasting a generate/validate/retry cycle on a
+query guaranteed to be rejected downstream.
 
 This is enforced as a hard filter, not a prompt instruction: the excluded content is
 structurally removed from the markdown before it is ever assigned to
 `state["schema_context"]`, and a post-filter guard re-scans the result and refuses to
-return it if any excluded table name survived. Read the catalog once (cached
+return it if any excluded table or column name survived. Read the catalog once (cached
 thereafter, see `_load_filtered_schema_context`), not on every call.
 
 Filtering approach, in order:
 1. Structurally remove the `assistant` and `rag` `### Module: ...` sections of §2
    wholesale (every table under them is excluded).
-2. Structurally remove just the `audit_events` table block from within the `auth`
-   module section (its siblings — institutions, users, ... — are kept).
-3. Rewrite the handful of genuinely general §1/§7 bullets that happen to *mention* an
+2. Structurally remove the `audit_events` and `question_answer_keys` table blocks from
+   within their module sections (their siblings — institutions, users, questions, ... —
+   are kept).
+3. Structurally remove the single `password_hash` row from inside the `users` block and
+   the single `token_hash` row from inside the `refresh_sessions` block — both tables
+   otherwise stay fully in scope.
+4. Rewrite the handful of genuinely general §1/§7 bullets that happen to *mention* an
    excluded table only incidentally (as an example), so their real, still-applicable
-   point survives without the excluded name attached. This has to happen before step 4,
+   point survives without the excluded name attached. This has to happen before step 5,
    or the blanket line-drop would delete these bullets outright along with everything
    else that mentions an excluded name.
-4. Blanket-drop every remaining single line (table row, FK line, glossary row, gotcha
+5. Blanket-drop every remaining single line (table row, FK line, glossary row, gotcha
    bullet) that mentions an excluded table name — safe here because every remaining
    such line in this catalog is self-contained (see the module-level tests for the one
    case, a glossary row mixing an excluded and a kept table, where this deliberately
    drops the whole row rather than trying to save half of it).
-5. Remove the "Polymorphic references" intro sentence in §4, which does not itself name
-   an excluded table but is left pointing at an empty code fence once step 4 has run
+6. Remove the "Polymorphic references" intro sentence in §4, which does not itself name
+   an excluded table but is left pointing at an empty code fence once step 5 has run
    (every line inside that fence names one), and collapse any empty code fences and
    excess blank lines left behind by the removals above.
-6. Validate: no excluded table name survives anywhere in the result, every table that
-   *should* survive still does, and the result isn't suspiciously short or missing its
-   top-level section headers. Any failure here means the filter itself broke (e.g.
-   schema_catalog.md's structure changed) — fail loudly rather than ship a silently
+7. Validate: no excluded table or column name survives anywhere in the result, every
+   table that *should* survive still does, and the result isn't suspiciously short or
+   missing its top-level section headers. Any failure here means the filter itself broke
+   (e.g. schema_catalog.md's structure changed) — fail loudly rather than ship a silently
    gutted or leaky context.
 
 Any `SchemaCatalogError` from the steps above (missing/unreadable file, or step 6's own
@@ -75,7 +85,13 @@ EXCLUDED_TABLES: tuple[str, ...] = (
     "ingest_jobs",
     "chunk_embeddings",
     "audit_events",
+    "question_answer_keys",
 )
+
+# Columns that must never appear in schema_context, for any role, ever — the table they
+# live on otherwise stays fully in scope, so these are stripped row-by-row rather than
+# via EXCLUDED_TABLES's whole-table removal.
+_EXCLUDED_COLUMNS: tuple[str, ...] = ("password_hash", "token_hash")
 
 # Tables/views that must survive filtering. If any go missing, the filter over-stripped
 # (most likely schema_catalog.md's structure changed under it) and load_schema should
@@ -105,7 +121,6 @@ REQUIRED_TABLES: tuple[str, ...] = (
     "questions",
     "question_versions",
     "question_options",
-    "question_answer_keys",
     "question_outcome_tags",
     "common_mastery_quizzes",
     "quiz_versions",
@@ -172,6 +187,32 @@ def _remove_table_block(text: str, table_name: str) -> str:
             f"found {count} — has the document structure changed?"
         )
     return new_text
+
+
+def _remove_column_row(text: str, table_name: str, column_name: str) -> str:
+    """Remove one `| \\`column_name\\` | ... |` row from inside the named table's
+    `#### \\`table_name\\`` block only — scoped to that table, never a document-wide
+    match, so a column name that happened to recur elsewhere would be left alone.
+    """
+    block_pattern = re.compile(
+        rf"(#### `{re.escape(table_name)}`\n.*?)(?=\n#### |\n---\n)",
+        re.DOTALL,
+    )
+    match = block_pattern.search(text)
+    if match is None:
+        raise SchemaCatalogError(
+            f"expected to find table block '{table_name}' to strip column "
+            f"'{column_name}' from, found none — has the document structure changed?"
+        )
+    block = match.group(1)
+    row_pattern = re.compile(rf"\n\| `{re.escape(column_name)}` \|[^\n]*")
+    new_block, count = row_pattern.subn("", block, count=1)
+    if count != 1:
+        raise SchemaCatalogError(
+            f"expected exactly one '{column_name}' row inside the '{table_name}' "
+            f"block, found {count} — has the wording changed?"
+        )
+    return text[: match.start(1)] + new_block + text[match.end(1) :]
 
 
 def _replace_once(text: str, old: str, new: str, *, label: str) -> str:
@@ -259,6 +300,9 @@ def _filter_schema_catalog(raw: str) -> str:
     text = _remove_module_section(text, "assistant")
     text = _remove_module_section(text, "rag")
     text = _remove_table_block(text, "audit_events")
+    text = _remove_table_block(text, "question_answer_keys")
+    text = _remove_column_row(text, "users", "password_hash")
+    text = _remove_column_row(text, "refresh_sessions", "token_hash")
     text = _scrub_general_bullets(text)
     text = _drop_lines_mentioning_excluded(text)
     text = _tidy(text)
@@ -285,6 +329,11 @@ def _validate_filtered(text: str) -> None:
         raise SchemaCatalogError(
             f"filtered schema_context still contains excluded table(s): {sorted(set(leaked))}"
         )
+    for column in _EXCLUDED_COLUMNS:
+        if re.search(rf"`{re.escape(column)}`", text):
+            raise SchemaCatalogError(
+                f"filtered schema_context still contains excluded column {column!r}"
+            )
 
 
 @lru_cache(maxsize=1)
