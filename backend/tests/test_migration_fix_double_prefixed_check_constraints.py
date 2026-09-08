@@ -270,8 +270,11 @@ def test_downgrade_reverses_every_rename_and_reupgrade_restores_them(clean_db: s
     for table, names in _FIXED_NAMES.items():
         assert names <= before.get(table, set()), f"{table} missing its fixed name(s) pre-downgrade"
 
-    # Actually run the downgrade -- not assumed correct because upgrade() worked.
-    command.downgrade(cfg, "-1")
+    # Actually run the downgrade -- not assumed correct because upgrade() worked. Target
+    # d0e1f2a3b4c5's own predecessor explicitly, not a relative "-1": two migrations
+    # (e1f2a3b4c5d6, f7a8b9c0d1e2) have landed on top of it since this test was written,
+    # so "-1" would now downgrade one of those instead of the rename migration under test.
+    command.downgrade(cfg, "c9d0e1f2a3b4")
     try:
         after_downgrade = _all_check_constraint_names(sync_url)
         for table, names in _ORIGINAL_NAMES.items():
@@ -284,8 +287,10 @@ def test_downgrade_reverses_every_rename_and_reupgrade_restores_them(clean_db: s
             )
     finally:
         # Always re-upgrade, even on assertion failure, so later tests in the session
-        # (which assume head) aren't left on a downgraded schema.
-        command.upgrade(cfg, "+1")
+        # (which assume head) aren't left on a downgraded schema. Explicit "head", to
+        # match the explicit downgrade target above -- also re-applies e1f2a3b4c5d6 and
+        # f7a8b9c0d1e2, which the downgrade above necessarily undid too.
+        command.upgrade(cfg, "head")
 
     after_reupgrade = _all_check_constraint_names(sync_url)
     for table, names in _FIXED_NAMES.items():

@@ -167,10 +167,47 @@ _RENAMES: tuple[tuple[str, str, str], ...] = (
 
 
 def upgrade() -> None:
+    # Conditional, not a plain `ALTER TABLE ... RENAME CONSTRAINT`: an already-existing
+    # deployment (that ran the buggy `CheckConstraint(name=...)` call sites this migration
+    # exists to fix) really does have the double-prefixed/truncated name on the left below
+    # and needs the rename. A database migrated from scratch, on the other hand, creates
+    # every one of these 19 constraints correctly the first time, because the root-cause
+    # fix to `education_platform.db.base.metadata`'s naming_convention (see this module's
+    # docstring) has been in effect for every migration in this chain from the start --
+    # there is no double-prefixed name to find, and the plain rename fails outright
+    # (`constraint ... does not exist`), rolling back this whole migration and leaving
+    # every later one unreachable. Guard on `pg_constraint` so this migration is a no-op
+    # in the already-correct case and only renames where the old name is actually there.
     for table, old_name, new_name in _RENAMES:
-        op.execute(f'ALTER TABLE {table} RENAME CONSTRAINT "{old_name}" TO "{new_name}"')
+        op.execute(
+            f"""
+            DO $$
+            BEGIN
+                IF EXISTS (
+                    SELECT FROM pg_constraint
+                    WHERE conrelid = '{table}'::regclass AND conname = '{old_name}'
+                ) THEN
+                    ALTER TABLE {table} RENAME CONSTRAINT "{old_name}" TO "{new_name}";
+                END IF;
+            END
+            $$;
+            """
+        )
 
 
 def downgrade() -> None:
     for table, old_name, new_name in _RENAMES:
-        op.execute(f'ALTER TABLE {table} RENAME CONSTRAINT "{new_name}" TO "{old_name}"')
+        op.execute(
+            f"""
+            DO $$
+            BEGIN
+                IF EXISTS (
+                    SELECT FROM pg_constraint
+                    WHERE conrelid = '{table}'::regclass AND conname = '{new_name}'
+                ) THEN
+                    ALTER TABLE {table} RENAME CONSTRAINT "{new_name}" TO "{old_name}";
+                END IF;
+            END
+            $$;
+            """
+        )
