@@ -205,7 +205,9 @@ def _seed(session: Session) -> _Fixture:
     session.add(subtopic)
     session.flush()
     quiz = CommonMasteryQuiz(
-        subtopic_id=subtopic.id, quiz_scope=QuizScope.SUBTOPIC_MASTERY, title="Linear Equations Quiz"
+        subtopic_id=subtopic.id,
+        quiz_scope=QuizScope.SUBTOPIC_MASTERY,
+        title="Linear Equations Quiz",
     )
     session.add(quiz)
     session.flush()
@@ -231,7 +233,9 @@ def _seed(session: Session) -> _Fixture:
     session.add(topic_quiz_version)
     session.flush()
 
-    def _enroll(identifier: str, section: Section) -> tuple[StudentProfile, StudentSubjectEnrollment]:
+    def _enroll(
+        identifier: str, section: Section
+    ) -> tuple[StudentProfile, StudentSubjectEnrollment]:
         user = User(
             institution_id=inst.id,
             email=f"{identifier}@live-llm-test.school",
@@ -267,8 +271,10 @@ def _seed(session: Session) -> _Fixture:
         session.flush()
         return profile, subject_enrollment
 
-    students = [_enroll(f"student-{i}-{section.name}", section) for i, section in
-                enumerate([section_a, section_a, section_b, section_b])]
+    students = [
+        _enroll(f"student-{i}-{section.name}", section)
+        for i, section in enumerate([section_a, section_a, section_b, section_b])
+    ]
 
     # Real duplicate-prone quiz_attempts data: a second attempt (attempt_number=2) for
     # the first student, same quiz_version as their first attempt.
@@ -357,9 +363,7 @@ def _initial_state(fixture: _Fixture, question: str, *, role: str = "teacher") -
 
 async def _run(fixture: _Fixture, question: str) -> TextToSQLState:
     graph = build_text_to_sql_graph()
-    return await graph.ainvoke(
-        _initial_state(fixture, question), config={"recursion_limit": 15}
-    )
+    return await graph.ainvoke(_initial_state(fixture, question), config={"recursion_limit": 15})
 
 
 def _mentions_deferred_table(sql: str | None) -> bool:
@@ -378,10 +382,7 @@ def _has_quiz_scope_path(sql: str | None, scope: str) -> bool:
     if scope == "subtopic":
         return (
             "join subtopics" in lowered
-            and (
-                "st.id = cmq.subtopic_id" in lowered
-                or "cmq.subtopic_id = st.id" in lowered
-            )
+            and ("st.id = cmq.subtopic_id" in lowered or "cmq.subtopic_id = st.id" in lowered)
             and ("t.id = st.topic_id" in lowered or "st.topic_id = t.id" in lowered)
         )
     return "join topics" in lowered and (

@@ -56,9 +56,7 @@ def _router_context(catalog: dict[str, Any]) -> str:
     return json.dumps({"intent_router": config, "templates": templates}, ensure_ascii=True)
 
 
-def _normalize_parameters(
-    parameters: dict[str, Any], catalog: dict[str, Any]
-) -> dict[str, Any]:
+def _normalize_parameters(parameters: dict[str, Any], catalog: dict[str, Any]) -> dict[str, Any]:
     normalized = dict(parameters)
     subject_rules = catalog.get("intent_router", {}).get("normalization", {}).get("subject", {})
     aliases = subject_rules.get("aliases", {})

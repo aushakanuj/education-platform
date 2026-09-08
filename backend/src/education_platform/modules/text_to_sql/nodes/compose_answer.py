@@ -262,9 +262,7 @@ async def _llm_answer(question: str, rows: list[dict[str, Any]]) -> str:
     return text if text else _fallback_summary(rows)
 
 
-async def _compose_core_answer(
-    question: str, rows: list[dict[str, Any]], row_count: int
-) -> str:
+async def _compose_core_answer(question: str, rows: list[dict[str, Any]], row_count: int) -> str:
     if row_count == 0:
         return _ZERO_ROW_ANSWER
     if row_count == 1 and len(rows[0]) == 1:

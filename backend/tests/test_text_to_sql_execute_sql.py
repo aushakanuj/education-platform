@@ -310,7 +310,9 @@ async def test_db_level_failure_produces_execution_error_not_a_crash(
     seeded_institution: UUID, seeded_admin_user_id: UUID
 ) -> None:
     result = await execute_sql(
-        _admin_state("SELECT 1 / 0", institution_id=seeded_institution, user_id=seeded_admin_user_id)
+        _admin_state(
+            "SELECT 1 / 0", institution_id=seeded_institution, user_id=seeded_admin_user_id
+        )
     )
 
     assert error_category(result["error"]) == EXECUTION_ERROR
@@ -322,7 +324,9 @@ async def test_raw_postgres_error_text_not_leaked_into_user_facing_error(
     seeded_institution: UUID, seeded_admin_user_id: UUID
 ) -> None:
     result = await execute_sql(
-        _admin_state("SELECT 1 / 0", institution_id=seeded_institution, user_id=seeded_admin_user_id)
+        _admin_state(
+            "SELECT 1 / 0", institution_id=seeded_institution, user_id=seeded_admin_user_id
+        )
     )
 
     error = result["error"]
@@ -444,9 +448,7 @@ async def test_reader_role_cannot_insert_into_an_in_scope_table(clean_db: str) -
 
 
 async def test_reader_role_cannot_update_an_in_scope_table(clean_db: str) -> None:
-    await _expect_permission_denied(
-        "UPDATE attendance_records SET note = 'tampered' WHERE TRUE"
-    )
+    await _expect_permission_denied("UPDATE attendance_records SET note = 'tampered' WHERE TRUE")
 
 
 async def test_reader_role_cannot_delete_from_an_in_scope_table(clean_db: str) -> None:

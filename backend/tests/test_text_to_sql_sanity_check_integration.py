@@ -266,9 +266,7 @@ async def test_zero_valued_count_regression_does_not_affect_null_valued_aggregat
     async def _fake_generate_sql(state: TextToSQLState) -> TextToSQLState:
         return {
             **state,
-            "generated_sql": (
-                "SELECT AVG(1) AS n FROM institutions WHERE name = 'no such school'"
-            ),
+            "generated_sql": ("SELECT AVG(1) AS n FROM institutions WHERE name = 'no such school'"),
             "error": None,
         }
 

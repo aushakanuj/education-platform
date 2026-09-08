@@ -50,27 +50,32 @@ _VIOLATING_INSERTS: tuple[tuple[str, str], ...] = (
     ),
     (
         "ck_knowledge_chunks_ordinal",
-        "INSERT INTO knowledge_chunks (id, knowledge_document_version_id, ordinal, text, content_hash) "
+        "INSERT INTO knowledge_chunks "
+        "(id, knowledge_document_version_id, ordinal, text, content_hash) "
         "VALUES (gen_random_uuid(), gen_random_uuid(), 0, 'x', 'x')",
     ),
     (
         "ck_knowledge_chunks_token_count",
-        "INSERT INTO knowledge_chunks (id, knowledge_document_version_id, ordinal, text, content_hash, token_count) "
+        "INSERT INTO knowledge_chunks "
+        "(id, knowledge_document_version_id, ordinal, text, content_hash, token_count) "
         "VALUES (gen_random_uuid(), gen_random_uuid(), 1, 'x', 'x', -1)",
     ),
     (
         "ck_knowledge_document_versions_version_number",
-        "INSERT INTO knowledge_document_versions (id, document_id, version_number, lifecycle_status) "
+        "INSERT INTO knowledge_document_versions "
+        "(id, document_id, version_number, lifecycle_status) "
         "VALUES (gen_random_uuid(), gen_random_uuid(), 0, 'draft')",
     ),
     (
         "ck_question_versions_marks",
-        "INSERT INTO question_versions (id, question_id, version_number, prompt, question_type, marks, lifecycle_status) "
+        "INSERT INTO question_versions "
+        "(id, question_id, version_number, prompt, question_type, marks, lifecycle_status) "
         "VALUES (gen_random_uuid(), gen_random_uuid(), 1, 'x', 'multiple_choice', -1, 'draft')",
     ),
     (
         "ck_question_versions_version_number",
-        "INSERT INTO question_versions (id, question_id, version_number, prompt, question_type, marks, lifecycle_status) "
+        "INSERT INTO question_versions "
+        "(id, question_id, version_number, prompt, question_type, marks, lifecycle_status) "
         "VALUES (gen_random_uuid(), gen_random_uuid(), 0, 'x', 'multiple_choice', 1, 'draft')",
     ),
     (
@@ -80,12 +85,14 @@ _VIOLATING_INSERTS: tuple[tuple[str, str], ...] = (
     ),
     (
         "ck_quiz_attempts_pass_threshold",
-        "INSERT INTO quiz_attempts (id, student_id, quiz_version_id, attempt_number, status, pass_threshold_percent) "
+        "INSERT INTO quiz_attempts "
+        "(id, student_id, quiz_version_id, attempt_number, status, pass_threshold_percent) "
         "VALUES (gen_random_uuid(), gen_random_uuid(), gen_random_uuid(), 1, 'not_started', 150)",
     ),
     (
         "ck_quiz_attempts_score_percent",
-        "INSERT INTO quiz_attempts (id, student_id, quiz_version_id, attempt_number, status, score_percent) "
+        "INSERT INTO quiz_attempts "
+        "(id, student_id, quiz_version_id, attempt_number, status, score_percent) "
         "VALUES (gen_random_uuid(), gen_random_uuid(), gen_random_uuid(), 1, 'not_started', 150)",
     ),
     (
@@ -100,17 +107,20 @@ _VIOLATING_INSERTS: tuple[tuple[str, str], ...] = (
     ),
     (
         "ck_quiz_versions_duration_seconds",
-        "INSERT INTO quiz_versions (id, quiz_id, version_number, lifecycle_status, result_release_mode, duration_seconds) "
+        "INSERT INTO quiz_versions "
+        "(id, quiz_id, version_number, lifecycle_status, result_release_mode, duration_seconds) "
         "VALUES (gen_random_uuid(), gen_random_uuid(), 1, 'draft', 'immediate', 0)",
     ),
     (
         "ck_quiz_versions_max_attempts",
-        "INSERT INTO quiz_versions (id, quiz_id, version_number, lifecycle_status, result_release_mode, max_attempts) "
+        "INSERT INTO quiz_versions "
+        "(id, quiz_id, version_number, lifecycle_status, result_release_mode, max_attempts) "
         "VALUES (gen_random_uuid(), gen_random_uuid(), 1, 'draft', 'immediate', 0)",
     ),
     (
         "ck_quiz_versions_version_number",
-        "INSERT INTO quiz_versions (id, quiz_id, version_number, lifecycle_status, result_release_mode) "
+        "INSERT INTO quiz_versions "
+        "(id, quiz_id, version_number, lifecycle_status, result_release_mode) "
         "VALUES (gen_random_uuid(), gen_random_uuid(), 0, 'draft', 'immediate')",
     ),
     (
@@ -120,23 +130,31 @@ _VIOLATING_INSERTS: tuple[tuple[str, str], ...] = (
     ),
     (
         "ck_source_chunks_token_count",
-        "INSERT INTO source_chunks (id, source_material_version_id, ordinal, text, content_hash, token_count) "
+        "INSERT INTO source_chunks "
+        "(id, source_material_version_id, ordinal, text, content_hash, token_count) "
         "VALUES (gen_random_uuid(), gen_random_uuid(), 1, 'x', 'x', -1)",
     ),
     (
         "ck_source_material_versions_version_number",
-        "INSERT INTO source_material_versions (id, source_material_id, version_number, lifecycle_status, title, content_format) "
+        "INSERT INTO source_material_versions "
+        "(id, source_material_id, version_number, lifecycle_status, title, content_format) "
         "VALUES (gen_random_uuid(), gen_random_uuid(), 0, 'draft', 'x', 'markdown')",
     ),
     (
         "ck_student_material_progress_last_unit",
-        "INSERT INTO student_material_progress (id, student_subject_enrollment_id, source_material_version_id, status, opened_at, last_opened_at, last_unit_ordinal) "
-        "VALUES (gen_random_uuid(), gen_random_uuid(), gen_random_uuid(), 'opened', now(), now(), 0)",
+        "INSERT INTO student_material_progress "
+        "(id, student_subject_enrollment_id, source_material_version_id, status, "
+        "opened_at, last_opened_at, last_unit_ordinal) "
+        "VALUES (gen_random_uuid(), gen_random_uuid(), gen_random_uuid(), "
+        "'opened', now(), now(), 0)",
     ),
     (
         "ck_student_material_progress_status_timestamps",
-        "INSERT INTO student_material_progress (id, student_subject_enrollment_id, source_material_version_id, status, opened_at, last_opened_at, completed_at) "
-        "VALUES (gen_random_uuid(), gen_random_uuid(), gen_random_uuid(), 'completed', now(), now(), NULL)",
+        "INSERT INTO student_material_progress "
+        "(id, student_subject_enrollment_id, source_material_version_id, status, "
+        "opened_at, last_opened_at, completed_at) "
+        "VALUES (gen_random_uuid(), gen_random_uuid(), gen_random_uuid(), "
+        "'completed', now(), now(), NULL)",
     ),
 )
 
@@ -188,9 +206,7 @@ _ORIGINAL_NAMES: dict[str, set[str]] = {
         "ck_knowledge_chunks_ck_knowledge_chunks_ordinal",
         "ck_knowledge_chunks_ck_knowledge_chunks_token_count",
     },
-    "knowledge_document_versions": {
-        "ck_knowledge_document_versions_ck_knowledge_document_ve_06e1"
-    },
+    "knowledge_document_versions": {"ck_knowledge_document_versions_ck_knowledge_document_ve_06e1"},
     "question_versions": {
         "ck_question_versions_ck_question_versions_marks",
         "ck_question_versions_ck_question_versions_version_number",
@@ -211,9 +227,7 @@ _ORIGINAL_NAMES: dict[str, set[str]] = {
         "ck_source_chunks_ck_source_chunks_ordinal",
         "ck_source_chunks_ck_source_chunks_token_count",
     },
-    "source_material_versions": {
-        "ck_source_material_versions_ck_source_material_versions_f04b"
-    },
+    "source_material_versions": {"ck_source_material_versions_ck_source_material_versions_f04b"},
     "student_material_progress": {
         "ck_student_material_progress_ck_student_material_progre_2be0",
         "ck_student_material_progress_ck_student_material_progre_6a51",

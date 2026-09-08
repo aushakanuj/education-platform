@@ -12,9 +12,7 @@ from education_platform.core.config import Settings
 from education_platform.modules.text_to_sql.graph import build_text_to_sql_graph
 from education_platform.modules.text_to_sql.state import TextToSQLState
 
-_MODULE = importlib.import_module(
-    "education_platform.modules.text_to_sql.nodes.intent_router"
-)
+_MODULE = importlib.import_module("education_platform.modules.text_to_sql.nodes.intent_router")
 
 
 def _state() -> TextToSQLState:
@@ -122,10 +120,31 @@ async def test_latest_quiz_attempt_without_subject_uses_null_parameter(
     "response",
     [
         {"intent": "count_my_students", "confidence": 0.89, "parameters": {}, "operation": "count"},
-        {"intent": "list_students_below_score_in_subject", "confidence": 0.95, "parameters": {"subject": "Mathematics"}, "operation": "list"},
-        {"intent": "list_students_in_section", "confidence": 0.95, "parameters": {"section_name": "8A"}, "operation": "count"},
-        {"intent": "count_my_students", "confidence": 0.95, "parameters": {}, "operation": "list", "ambiguous": True},
-        {"intent": "students_meeting_performance_bar", "confidence": 0.99, "parameters": {}, "operation": "count"},
+        {
+            "intent": "list_students_below_score_in_subject",
+            "confidence": 0.95,
+            "parameters": {"subject": "Mathematics"},
+            "operation": "list",
+        },
+        {
+            "intent": "list_students_in_section",
+            "confidence": 0.95,
+            "parameters": {"section_name": "8A"},
+            "operation": "count",
+        },
+        {
+            "intent": "count_my_students",
+            "confidence": 0.95,
+            "parameters": {},
+            "operation": "list",
+            "ambiguous": True,
+        },
+        {
+            "intent": "students_meeting_performance_bar",
+            "confidence": 0.99,
+            "parameters": {},
+            "operation": "count",
+        },
         {"intent": "unknown_intent", "confidence": 0.99, "parameters": {}, "operation": "count"},
     ],
 )

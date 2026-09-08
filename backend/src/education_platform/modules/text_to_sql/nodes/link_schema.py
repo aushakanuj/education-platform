@@ -114,7 +114,6 @@ from __future__ import annotations
 import re
 from typing import Final
 
-from education_platform.modules.text_to_sql.nodes.load_schema import REQUIRED_TABLES
 from education_platform.modules.text_to_sql.state import TextToSQLState
 
 # Rounds of "add any table one FK hop from a currently-selected table" to run after the
@@ -257,10 +256,7 @@ def _narrow_table_catalog(schema_context: str, selected: set[str]) -> str:
         + "## 2. Table Catalog\n\n"
         + "Narrowed to the tables this question's schema-linking step selected as "
         "relevant (see below for the full catalog's actual scope, unaffected by this "
-        "narrowing).\n\n"
-        + body
-        + "\n\n---\n\n"
-        + schema_context[section_end:]
+        "narrowing).\n\n" + body + "\n\n---\n\n" + schema_context[section_end:]
     )
 
 

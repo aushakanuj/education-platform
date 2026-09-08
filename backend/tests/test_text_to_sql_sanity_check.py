@@ -84,18 +84,14 @@ async def test_zero_valued_count_and_equivalent_zero_row_list_get_matching_confi
     count_result = await sanity_check(
         _state(question="how many students failed?", query_result=[{"count": 0}])
     )
-    list_result = await sanity_check(
-        _state(question="which students failed?", query_result=[])
-    )
+    list_result = await sanity_check(_state(question="which students failed?", query_result=[]))
     assert count_result["confidence"] == list_result["confidence"] == "medium"
 
 
 async def test_zero_valued_sum_also_downgrades_to_medium() -> None:
     # Not just COUNT — any single-value aggregate (SUM, etc.) that lands on exactly 0.
     result = await sanity_check(
-        _state(
-            question="what is the total marks awarded?", query_result=[{"total_marks": 0.0}]
-        )
+        _state(question="what is the total marks awarded?", query_result=[{"total_marks": 0.0}])
     )
     assert result["confidence"] == "medium"
     assert _triggers(result)[0].startswith("zero_valued_aggregate:")

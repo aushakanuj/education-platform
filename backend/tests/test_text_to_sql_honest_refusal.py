@@ -105,6 +105,7 @@ def _pass_question_validator(monkeypatch: pytest.MonkeyPatch) -> None:
 
     monkeypatch.setattr(_QUESTION_VALIDATOR_MODULE, "chat_completion_json", _fake_ot)
 
+
 # Distinctive markers that must never survive into natural_answer, standing in for the
 # kinds of internals a real error/SQL string would carry.
 _SECRET_SQL = "SELECT password_hash FROM users WHERE id = 'Marker-Row-9F2E'"
@@ -203,9 +204,7 @@ async def test_role_violation_and_execution_error_read_differently() -> None:
     assert "access" not in execution_error.lower()
 
 
-async def test_execution_error_and_audit_error_share_the_generic_infrastructure_message() -> (
-    None
-):
+async def test_execution_error_and_audit_error_share_the_generic_infrastructure_message() -> None:
     # Both are the task's own "infrastructure failure, not the user's fault" bucket.
     execution_error = _answer(
         await honest_refusal(_state(error=format_error(EXECUTION_ERROR, _SECRET_DETAIL)))

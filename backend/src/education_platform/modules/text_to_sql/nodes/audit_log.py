@@ -151,9 +151,7 @@ def _fail_closed(state: TextToSQLState, payload: dict[str, Any], reason: str) ->
     # The record never made it into audit_events, so `payload` is logged here in full —
     # recoverable from logs even though it's unaudited, rather than lost outright. The
     # fail-closed response withholds the answer regardless of *why* the write failed.
-    logger.error(
-        "audit_log: %s; content follows: %r", reason, payload, exc_info=True
-    )
+    logger.error("audit_log: %s; content follows: %r", reason, payload, exc_info=True)
     return {
         **state,
         "natural_answer": _AUDIT_FAILURE_ANSWER,
@@ -175,9 +173,7 @@ async def audit_log(state: TextToSQLState) -> TextToSQLState:
         # would otherwise be an uncaught crash rather than a controlled failure. Same
         # fail-closed outcome as a DB write failure: no valid audit record could be
         # constructed, so no answer is served without one.
-        return _fail_closed(
-            state, payload, "state is missing a valid institution_id/user_id"
-        )
+        return _fail_closed(state, payload, "state is missing a valid institution_id/user_id")
 
     session_factory = get_session_factory()
     try:

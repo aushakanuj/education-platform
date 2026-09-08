@@ -146,9 +146,7 @@ async def test_blocks_password_hash_regardless_of_role() -> None:
 
 
 async def test_blocks_token_hash_regardless_of_role() -> None:
-    error = await _rejected(
-        "SELECT token_hash FROM refresh_sessions", role="admin", user_id="x"
-    )
+    error = await _rejected("SELECT token_hash FROM refresh_sessions", role="admin", user_id="x")
     assert "token_hash" in error
 
 
@@ -234,9 +232,7 @@ def _teaching_assignments_exists(select_node: exp.Select) -> exp.Exists:
     return found
 
 
-async def test_teacher_role_restricted_to_own_teaching_assignments_including_null_section() -> (
-    None
-):
+async def test_teacher_role_restricted_to_own_teaching_assignments_including_null_section() -> None:
     validated = await _scoped(
         "SELECT * FROM attendance_records ar",
         role="teacher",
@@ -309,9 +305,7 @@ async def test_unrecognized_role_denies_all_rows_on_sensitive_table() -> None:
     assert "inst-1" in where  # institution pin still applies even though rows are denied
 
 
-async def test_query_touching_only_institution_scoped_tables_gets_institution_pin_only() -> (
-    None
-):
+async def test_query_touching_only_institution_scoped_tables_gets_institution_pin_only() -> None:
     # subjects/grades aren't individually student- or teacher-restricted (a subject named
     # "Mathematics" isn't private), but they do belong to exactly one institution and must
     # not leak across tenants — unlike the original 5-table design, this is no longer a
@@ -491,9 +485,7 @@ async def test_qualified_teacher_sentinel_against_student_id_rejected() -> None:
     assert "does not identify the asking user" in error
 
 
-async def test_reverse_case_student_sentinel_against_teacher_identity_preempted_by_role_forbidden() -> (
-    None
-):
+async def test_reverse_case_student_sentinel_preempted_by_role_forbidden() -> None:
     # Step 0's original reverse case here asserted an identity-mismatch rejection: a
     # student's own token can no more claim to be a specific teacher than a teacher's
     # can claim to be a specific student. That's now preempted by a stronger, earlier
@@ -556,7 +548,7 @@ async def test_legitimate_self_reference_cases_are_unaffected() -> None:
 async def test_admin_sentinel_allowed_against_either_identity_shape() -> None:
     # Admin is otherwise unrestricted elsewhere in this file; the identity-mismatch check
     # extends that same posture rather than inventing a narrower rule for admin alone.
-    for sql, alias in (
+    for sql, _alias in (
         ("SELECT * FROM student_360 s WHERE s.student_id = '__CURRENT_USER_ID__'", "s"),
         (
             "SELECT * FROM teaching_assignments ta WHERE ta.teacher_user_id = "
@@ -564,9 +556,7 @@ async def test_admin_sentinel_allowed_against_either_identity_shape() -> None:
             "ta",
         ),
     ):
-        validated = await _scoped(
-            sql, role="admin", user_id="admin-1", institution_id="inst-1"
-        )
+        validated = await _scoped(sql, role="admin", user_id="admin-1", institution_id="inst-1")
         assert "admin-1" in validated
 
 
@@ -789,9 +779,7 @@ async def test_teaching_assignments_subquery_scoped_independently_from_outer_que
     assert "teacher-1" in inner_where
 
 
-async def test_teaching_assignments_student_gets_a_real_refusal_not_a_silent_empty_result() -> (
-    None
-):
+async def test_teaching_assignments_student_gets_a_real_refusal_not_a_silent_empty_result() -> None:
     # No legitimate reading of "my teaching assignment" for a student. Refused outright
     # (_ROLE_FORBIDDEN_TABLES/_find_role_forbidden_table_reference) rather than silently
     # narrowed to a FALSE predicate that executes successfully to zero rows -- the two
@@ -935,7 +923,14 @@ async def test_batch_3_single_fk_tables_pinned_via_one_hop_to_batch_2_parent() -
 
 async def test_batch_3_dual_fk_tables_pinned_via_both_sides() -> None:
     cases = (
-        ("quiz_items", "qi", "quiz_version_id", "quiz_versions", "question_version_id", "question_versions"),
+        (
+            "quiz_items",
+            "qi",
+            "quiz_version_id",
+            "quiz_versions",
+            "question_version_id",
+            "question_versions",
+        ),
         (
             "quiz_material_bindings",
             "qmb",
@@ -1329,59 +1324,65 @@ async def test_rejection_clears_validated_sql_and_leaves_retry_count_untouched()
 
 
 async def test_student_scoped_tables_is_the_documented_set() -> None:
-    assert frozenset(
-        {
-            "student_360",
-            "student_profiles",
-            "quiz_attempts",
-            "attendance_records",
-            "student_material_progress",
-            "student_subject_enrollments",
-            "student_grade_enrollments",
-            "attempt_answers",
-        }
-    ) == STUDENT_SCOPED_TABLES
+    assert (
+        frozenset(
+            {
+                "student_360",
+                "student_profiles",
+                "quiz_attempts",
+                "attendance_records",
+                "student_material_progress",
+                "student_subject_enrollments",
+                "student_grade_enrollments",
+                "attempt_answers",
+            }
+        )
+        == STUDENT_SCOPED_TABLES
+    )
 
 
 async def test_institution_scoped_tables_is_the_documented_set() -> None:
-    assert frozenset(
-        {
-            "institutions",
-            "users",
-            "user_roles",
-            "refresh_sessions",
-            "grades",
-            "subjects",
-            "academic_periods",
-            "period_grades",
-            "sections",
-            "grade_subject_offerings",
-            "teaching_assignments",
-            # Batch 1 of the deferred-curriculum-table scoping project.
-            "topics",
-            "subtopics",
-            "learning_outcomes",
-            "source_materials",
-            "questions",
-            "common_mastery_quizzes",
-            # Batch 2.
-            "source_material_versions",
-            "question_versions",
-            "quiz_versions",
-            # Batch 3 (final batch) -- the deferred-curriculum-table scoping project
-            # is now complete.
-            "source_chunks",
-            "question_options",
-            "question_outcome_tags",
-            "quiz_items",
-            "quiz_material_bindings",
-            "quiz_releases",
-        }
-    ) == INSTITUTION_SCOPED_TABLES
+    assert (
+        frozenset(
+            {
+                "institutions",
+                "users",
+                "user_roles",
+                "refresh_sessions",
+                "grades",
+                "subjects",
+                "academic_periods",
+                "period_grades",
+                "sections",
+                "grade_subject_offerings",
+                "teaching_assignments",
+                # Batch 1 of the deferred-curriculum-table scoping project.
+                "topics",
+                "subtopics",
+                "learning_outcomes",
+                "source_materials",
+                "questions",
+                "common_mastery_quizzes",
+                # Batch 2.
+                "source_material_versions",
+                "question_versions",
+                "quiz_versions",
+                # Batch 3 (final batch) -- the deferred-curriculum-table scoping project
+                # is now complete.
+                "source_chunks",
+                "question_options",
+                "question_outcome_tags",
+                "quiz_items",
+                "quiz_material_bindings",
+                "quiz_releases",
+            }
+        )
+        == INSTITUTION_SCOPED_TABLES
+    )
 
 
 async def test_student_and_institution_scoped_tables_are_disjoint() -> None:
-    assert STUDENT_SCOPED_TABLES & INSTITUTION_SCOPED_TABLES == set()
+    assert set() == STUDENT_SCOPED_TABLES & INSTITUTION_SCOPED_TABLES
 
 
 async def test_every_required_table_except_deferred_curriculum_ones_is_classified() -> None:
@@ -1495,7 +1496,7 @@ async def test_institution_scoped_identity_columns_are_deliberately_reviewed() -
     decide policy on them itself; both were reviewed and fixed rather than deferred,
     per _apply_row_scoping's _SELF_USER_ID_SCOPED_TABLES case).
     """
-    from education_platform.db.base import Base
+    import education_platform.modules.academics.models  # noqa: F401
 
     # Import every module that defines a mapped table so Base.metadata is fully
     # populated -- SQLAlchemy only registers a table once its module has been imported.
@@ -1503,7 +1504,7 @@ async def test_institution_scoped_identity_columns_are_deliberately_reviewed() -
     import education_platform.modules.attendance.models  # noqa: F401
     import education_platform.modules.auth.models  # noqa: F401
     import education_platform.modules.materials.models  # noqa: F401
-    import education_platform.modules.academics.models  # noqa: F401
+    from education_platform.db.base import Base
 
     identity_pattern = re.compile(r"(^|.*_)(user_id|owner_id)$", re.IGNORECASE)
 

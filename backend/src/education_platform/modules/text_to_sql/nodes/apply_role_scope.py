@@ -378,9 +378,7 @@ def _table_for_alias(tree: exp.Expr, alias_or_name: str) -> str | None:
     return next(iter(matches))
 
 
-def _find_identity_mismatch(
-    tree: exp.Expr, excluded_aliases: set[str], role: str
-) -> str | None:
+def _find_identity_mismatch(tree: exp.Expr, excluded_aliases: set[str], role: str) -> str | None:
     """A `<column> = '__CURRENT_USER_ID__'` comparison whose column is confidently
     resolved to a table this role's identity could never actually match — e.g. a teacher
     token compared against `student_360.student_id`, which is guaranteed to return
@@ -509,9 +507,7 @@ def _find_blocklist_violation(tree: exp.Expr) -> str | None:
     for col in tree.find_all(exp.Column):
         if col.name.lower() in _BLOCKED_COLUMN_NAMES:
             qualifier = f"{col.table}." if col.table else ""
-            return (
-                f"column `{qualifier}{col.name}` may never be referenced by a text-to-SQL query"
-            )
+            return f"column `{qualifier}{col.name}` may never be referenced by a text-to-SQL query"
     # `SELECT *`/`alias.*` produces no explicit `exp.Column` node for the check above to
     # catch by name, even though it would still expand to include a blocked column at
     # execution -- were it not for the independent `text_to_sql_reader` DB-grant backstop
@@ -1038,8 +1034,7 @@ def _institution_predicate_sql(table: str, alias: str, institution_id_literal: s
         )
     if table == "subtopics":
         return (
-            f"{alias}.topic_id IN "
-            f"{_institution_scoped_subquery('topics', institution_id_literal)}"
+            f"{alias}.topic_id IN {_institution_scoped_subquery('topics', institution_id_literal)}"
         )
     if table in ("learning_outcomes", "source_materials", "questions"):
         # All three hang directly off subtopics (one FK apiece: subtopic_id) --

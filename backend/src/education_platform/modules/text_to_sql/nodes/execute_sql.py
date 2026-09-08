@@ -179,9 +179,7 @@ async def execute_sql(state: TextToSQLState) -> TextToSQLState:
                 "execution_dbapi_type": (
                     type(exc.orig).__name__ if getattr(exc, "orig", None) else None
                 ),
-                "execution_dbapi_detail": (
-                    str(exc.orig) if getattr(exc, "orig", None) else None
-                ),
+                "execution_dbapi_detail": (str(exc.orig) if getattr(exc, "orig", None) else None),
             },
         }
 

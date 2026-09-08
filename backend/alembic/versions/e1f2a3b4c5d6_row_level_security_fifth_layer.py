@@ -576,10 +576,7 @@ def upgrade() -> None:
 
     for table, using_expr in _POLICIES:
         op.execute(f"ALTER TABLE {table} ENABLE ROW LEVEL SECURITY")
-        op.execute(
-            f"CREATE POLICY {table}_rls_select ON {table} "
-            f"FOR SELECT USING ({using_expr})"
-        )
+        op.execute(f"CREATE POLICY {table}_rls_select ON {table} FOR SELECT USING ({using_expr})")
 
     # Explicit, reviewable bypass for the app's own full-privilege role -- not solely
     # dependent on it remaining a Postgres superuser. See the module docstring's

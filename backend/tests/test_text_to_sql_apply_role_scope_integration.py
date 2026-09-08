@@ -76,11 +76,6 @@ from education_platform.modules.assessments.models import (
     QuizVersionStatus,
 )
 from education_platform.modules.attendance.models import AttendanceRecord, AttendanceStatus
-from education_platform.modules.materials.models import (
-    SourceChunk,
-    SourceMaterial,
-    SourceMaterialVersion,
-)
 from education_platform.modules.auth.models import (
     Institution,
     RefreshSession,
@@ -93,6 +88,11 @@ from education_platform.modules.authorization.predicate import ScopeColumns, sco
 from education_platform.modules.authorization.scope import scope_for
 from education_platform.modules.insights.models import student_360
 from education_platform.modules.insights.service import scope_predicate
+from education_platform.modules.materials.models import (
+    SourceChunk,
+    SourceMaterial,
+    SourceMaterialVersion,
+)
 from education_platform.modules.text_to_sql.graph import build_text_to_sql_graph
 from education_platform.modules.text_to_sql.nodes.apply_role_scope import apply_role_scope
 from education_platform.modules.text_to_sql.state import (
@@ -434,7 +434,9 @@ def _seed(session: Session) -> _Fixture:
     # content, deliberately out of scope for this fix) feed into real quiz_attempts /
     # attempt_answers rows (in scope), one per Math student, so the teacher/student row
     # predicates on the newly-scoped attempt_answers table can be proven against live data.
-    topic = Topic(grade_subject_offering_id=offering_math.id, name="Algebra", slug="algebra", sequence=1)
+    topic = Topic(
+        grade_subject_offering_id=offering_math.id, name="Algebra", slug="algebra", sequence=1
+    )
     session.add(topic)
     session.flush()
     subtopic = Subtopic(topic_id=topic.id, name="Linear Equations", slug="linear-eq", sequence=1)
@@ -453,7 +455,9 @@ def _seed(session: Session) -> _Fixture:
     session.add(question_version)
     session.flush()
     quiz = CommonMasteryQuiz(
-        subtopic_id=subtopic.id, quiz_scope=QuizScope.SUBTOPIC_MASTERY, title="Linear Equations Quiz"
+        subtopic_id=subtopic.id,
+        quiz_scope=QuizScope.SUBTOPIC_MASTERY,
+        title="Linear Equations Quiz",
     )
     session.add(quiz)
     session.flush()
@@ -672,7 +676,9 @@ def _seed(session: Session) -> _Fixture:
     )
     session.add(quiz_release)
     other_quiz_release = QuizRelease(
-        quiz_version_id=other_quiz_version.id, released_by_user_id=None, status=QuizReleaseStatus.OPEN
+        quiz_version_id=other_quiz_version.id,
+        released_by_user_id=None,
+        status=QuizReleaseStatus.OPEN,
     )
     session.add(other_quiz_release)
     session.flush()
@@ -865,9 +871,7 @@ async def test_cross_check_teacher_scope_matches_scope_predicate(
     scope = await scope_for(async_session, principal)
     scope_predicate_rows = (
         await async_session.execute(
-            select(student_360.c.student_id, student_360.c.section_id).where(
-                scope_predicate(scope)
-            )
+            select(student_360.c.student_id, student_360.c.section_id).where(scope_predicate(scope))
         )
     ).all()
     scope_predicate_set = {(row.student_id, row.section_id) for row in scope_predicate_rows}
@@ -911,9 +915,7 @@ async def test_cross_check_student_scope_matches_scope_predicate(
     scope = await scope_for(async_session, principal)
     scope_predicate_rows = (
         await async_session.execute(
-            select(student_360.c.student_id, student_360.c.section_id).where(
-                scope_predicate(scope)
-            )
+            select(student_360.c.student_id, student_360.c.section_id).where(scope_predicate(scope))
         )
     ).all()
     scope_predicate_set = {(row.student_id, row.section_id) for row in scope_predicate_rows}
@@ -1337,9 +1339,7 @@ async def test_refresh_sessions_admin_sees_every_users_sessions_within_instituti
 # --- learning_outcomes/source_materials/questions/common_mastery_quizzes) -------------
 
 
-async def test_topics_institution_isolation(
-    async_session: AsyncSession, seeded: _Fixture
-) -> None:
+async def test_topics_institution_isolation(async_session: AsyncSession, seeded: _Fixture) -> None:
     rows = await _run_scoped(
         async_session,
         sql="SELECT id FROM topics",

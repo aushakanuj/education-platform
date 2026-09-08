@@ -28,14 +28,6 @@ import pytest
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from education_platform.db.session import get_text_to_sql_session_factory, reset_engine
-from education_platform.modules.text_to_sql.nodes.apply_role_scope import (
-    INSTITUTION_SCOPED_TABLES,
-    STUDENT_SCOPED_TABLES,
-)
-from education_platform.modules.text_to_sql.nodes.execute_sql import execute_sql
-from education_platform.modules.text_to_sql.state import TextToSQLState
-
 # Reused, not re-seeded -- the exact fixtures Finding 4/5's own integration tests already
 # built and this session already trusts.
 from tests.test_text_to_sql_apply_role_scope_integration import (  # noqa: F401 -- seeded/async_session are fixtures, used by name
@@ -44,6 +36,14 @@ from tests.test_text_to_sql_apply_role_scope_integration import (  # noqa: F401 
     async_session,
     seeded,
 )
+
+from education_platform.db.session import get_text_to_sql_session_factory, reset_engine
+from education_platform.modules.text_to_sql.nodes.apply_role_scope import (
+    INSTITUTION_SCOPED_TABLES,
+    STUDENT_SCOPED_TABLES,
+)
+from education_platform.modules.text_to_sql.nodes.execute_sql import execute_sql
+from education_platform.modules.text_to_sql.state import TextToSQLState
 
 _ALL_SCOPED_TABLES: frozenset[str] = STUDENT_SCOPED_TABLES | INSTITUTION_SCOPED_TABLES
 
@@ -172,7 +172,9 @@ async def test_rls_matches_apply_role_scope_for_student_role_on_student_scoped_t
         )
         app_layer_ids = {row[id_col] for row in via_app_layer}
         rls_ids = {row[id_col] for row in via_rls_only}
-        assert rls_ids == app_layer_ids, f"table={table!r} role='student': {app_layer_ids} vs {rls_ids}"
+        assert rls_ids == app_layer_ids, (
+            f"table={table!r} role='student': {app_layer_ids} vs {rls_ids}"
+        )
 
 
 # --- Requirement 2: the single most important test in this task -----------------------

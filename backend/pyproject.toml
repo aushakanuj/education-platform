@@ -58,6 +58,10 @@ known-first-party = ["education_platform"]
 
 [tool.ruff.lint.per-file-ignores]
 "alembic/versions/*.py" = ["E501"]
+# Fixtures imported for reuse (`seeded`, `async_session`) are legitimately
+# "redefined" as same-named test parameters -- that's how pytest fixture
+# injection works, not an actual shadowing bug.
+"tests/test_text_to_sql_row_level_security.py" = ["F811"]
 
 [tool.mypy]
 python_version = "3.12"

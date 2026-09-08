@@ -90,7 +90,7 @@ _CLASSIFIER_SYSTEM_PROMPT: Final[str] = (
     'a school. Return JSON {"off_topic": true|false, "reason": "..."}. Set "off_topic" '
     "for a question that has nothing to do with a school's students, grades, "
     "attendance, or curriculum data at all (e.g. the weather, general trivia, writing a "
-    "poem, unrelated coding help). Do not set \"off_topic\" for a question that is "
+    'poem, unrelated coding help). Do not set "off_topic" for a question that is '
     "merely blunt, broad, vague, or oddly phrased but still about school data — a "
     "genuinely ambiguous in-domain question should not be flagged. Default to false "
     "when in doubt."

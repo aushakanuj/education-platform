@@ -93,9 +93,7 @@ def _provenance_of(result: TextToSQLState) -> str:
 async def test_single_scalar_result_does_not_call_the_llm(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(_MODULE, "chat_completion", _never_called)
 
-    result = await compose_answer(
-        _base_state(query_result=[{"count": 42}], result_row_count=1)
-    )
+    result = await compose_answer(_base_state(query_result=[{"count": 42}], result_row_count=1))
 
     assert _answer(result) == "The count is 42."
 
@@ -114,9 +112,7 @@ async def test_multi_row_result_calls_the_llm(monkeypatch: pytest.MonkeyPatch) -
 
     rows = [{"name": "A", "passed": True}, {"name": "B", "passed": True}]
     result = await compose_answer(
-        _base_state(
-            question="are my students passing?", query_result=rows, result_row_count=2
-        )
+        _base_state(question="are my students passing?", query_result=rows, result_row_count=2)
     )
 
     assert _answer(result) == "Both students are passing their classes."
@@ -226,7 +222,9 @@ async def test_full_name_roster_with_a_repeated_value_reaches_the_llm_not_hidden
     # would be.
     captured: dict[str, object] = {}
 
-    async def _fake(messages: list[dict[str, str]], *, settings: object, temperature: float = 0.0) -> str:
+    async def _fake(
+        messages: list[dict[str, str]], *, settings: object, temperature: float = 0.0
+    ) -> str:
         captured["messages"] = messages
         return "Two records for Aisha Rahman were found."
 

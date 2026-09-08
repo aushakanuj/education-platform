@@ -36,8 +36,7 @@ from education_platform.modules.text_to_sql.nodes.load_schema import (
 )
 
 _GOLDEN_EVAL_XLSX = (
-    Path(__file__).resolve().parent.parent.parent
-    / "Text-to-SQL-Golden-Eval-Set-50_Set-2.xlsx"
+    Path(__file__).resolve().parent.parent.parent / "Text-to-SQL-Golden-Eval-Set-50_Set-2.xlsx"
 )
 
 
@@ -88,9 +87,7 @@ def test_select_tables_closure_reaches_unnamed_intermediate_table() -> None:
     # The exact row-45/46 pattern this node exists to avoid repeating: "period" is never
     # said, but the join needs period_grades between grades and grade_subject_offerings.
     ctx = _full_schema_context()
-    selected = _select_tables(
-        "What topics are covered in the Grade 8 Science curriculum?", ctx
-    )
+    selected = _select_tables("What topics are covered in the Grade 8 Science curriculum?", ctx)
     assert selected is not None
     assert "period_grades" in selected
     assert "topics" in selected
@@ -205,7 +202,9 @@ async def test_link_schema_never_reads_identity_fields() -> None:
         "retry_count": 0,
         "audit_entry": None,
     }
-    result_a = await link_schema({**base_state, "user_id": "a", "user_role": "teacher", "institution_id": "i1"})
+    result_a = await link_schema(
+        {**base_state, "user_id": "a", "user_role": "teacher", "institution_id": "i1"}
+    )
     result_b = await link_schema(
         {**base_state, "user_id": None, "user_role": None, "institution_id": None}
     )
@@ -239,9 +238,7 @@ _GROUND_TRUTH_CASES: tuple[tuple[str, frozenset[str]], ...] = (
 
 
 @pytest.mark.parametrize("question,expected_tables", _GROUND_TRUTH_CASES)
-def test_ground_truth_recall_regression(
-    question: str, expected_tables: frozenset[str]
-) -> None:
+def test_ground_truth_recall_regression(question: str, expected_tables: frozenset[str]) -> None:
     ctx = _full_schema_context()
     selected = _select_tables(question, ctx)
     assert selected is not None
