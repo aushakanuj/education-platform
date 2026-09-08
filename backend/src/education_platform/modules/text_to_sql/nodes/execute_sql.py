@@ -67,7 +67,7 @@ import logging
 from typing import Any, Final
 
 from sqlalchemy import Uuid, bindparam, text
-from sqlalchemy.exc import SQLAlchemyError
+from sqlalchemy.exc import DBAPIError, SQLAlchemyError
 
 from education_platform.db.session import get_text_to_sql_session_factory
 from education_platform.modules.text_to_sql.nodes.validate_sql import (
@@ -158,12 +158,13 @@ async def execute_sql(state: TextToSQLState) -> TextToSQLState:
         # Postgres/driver error text can carry schema, constraint, or query fragments —
         # it goes to the log and the (internal-only) audit entry, never into
         # state["error"], which is the eventually user-facing value.
+        orig = exc.orig if isinstance(exc, DBAPIError) and exc.orig is not None else None
         logger.warning(
             "execute_sql: query failed: type=%s detail=%s cause=%s orig=%s",
             type(exc).__name__,
             str(exc),
             str(exc.__cause__) if exc.__cause__ else None,
-            str(exc.orig) if getattr(exc, "orig", None) else None,
+            str(orig) if orig else None,
             exc_info=True,
         )
         return {
@@ -176,10 +177,8 @@ async def execute_sql(state: TextToSQLState) -> TextToSQLState:
                 "execution_error_type": type(exc).__name__,
                 "execution_error_detail": str(exc),
                 "execution_error_cause": str(exc.__cause__) if exc.__cause__ else None,
-                "execution_dbapi_type": (
-                    type(exc.orig).__name__ if getattr(exc, "orig", None) else None
-                ),
-                "execution_dbapi_detail": (str(exc.orig) if getattr(exc, "orig", None) else None),
+                "execution_dbapi_type": type(orig).__name__ if orig else None,
+                "execution_dbapi_detail": str(orig) if orig else None,
             },
         }
 

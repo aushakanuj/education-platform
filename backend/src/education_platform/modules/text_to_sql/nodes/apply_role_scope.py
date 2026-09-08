@@ -794,7 +794,7 @@ def _redact_identity_columns(
                 continue
             if col.table and col.table != alias:
                 continue
-            replacement = exp.maybe_parse(
+            replacement: exp.Expr = exp.maybe_parse(
                 f"CASE WHEN {alias}.{column_name} = {user_id_literal} "
                 f"THEN {alias}.{column_name} ELSE NULL END",
                 dialect="postgres",
