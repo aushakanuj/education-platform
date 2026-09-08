@@ -12,8 +12,13 @@ if either of those has an undiscovered bug, a query that reaches this node still
 read a column or table it wasn't granted, or write anything at all, regardless of what SQL
 text made it this far.
 
-Three more layers enforced here, at the database connection itself rather than in Python:
+Four more layers enforced here, at the database connection itself rather than in Python:
 
+* **Read-only transaction** (`SET TRANSACTION READ ONLY`) — belt-and-suspenders on top of
+  `text_to_sql_reader`'s missing INSERT/UPDATE/DELETE grants: even if a future migration or
+  manual `GRANT` ever loosened that role's privileges, or a bug elsewhere in this pipeline
+  let a mutating statement reach here, Postgres itself refuses to run it in this
+  transaction, independent of role privileges entirely.
 * **Row-Level Security identity propagation** (migration `e1f2a3b4c5d6`) — the 5th
   defense-in-depth layer, and the one that still holds if `apply_role_scope` (Task 6) has
   a bug nobody's found yet: RLS policies on every scoped table re-derive the same row-
@@ -127,6 +132,11 @@ async def execute_sql(state: TextToSQLState) -> TextToSQLState:
                 },
             )
             await session.execute(text(f"SET LOCAL statement_timeout = {STATEMENT_TIMEOUT_MS}"))
+            # Defense-in-depth: `text_to_sql_reader` already has no INSERT/UPDATE/DELETE
+            # grants (migration c9d0e1f2a3b4), but mark the transaction read-only at the
+            # Postgres level too, so a future grant regression or an unexpected mutating
+            # statement is rejected by Postgres itself, independent of role privileges.
+            await session.execute(text("SET TRANSACTION READ ONLY"))
             parameters = {
                 **(state.get("intent_parameters") or {}),
                 "current_user_id": state["user_id"],

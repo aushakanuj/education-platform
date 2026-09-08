@@ -266,6 +266,33 @@ async def test_slow_query_is_cancelled_by_statement_timeout(
     assert result["result_row_count"] is None
 
 
+# --- Read-only transaction ---------------------------------------------------------------
+
+
+async def test_read_only_transaction_rejects_a_temp_table(
+    seeded_institution: UUID, seeded_admin_user_id: UUID
+) -> None:
+    # `text_to_sql_reader` has no table GRANTs revoked that would touch this -- CREATE
+    # TEMP privilege on the database is Postgres' PUBLIC default, and confirmed directly
+    # (`docker exec ... psql -U text_to_sql_reader`) that this exact statement succeeds
+    # for this role outside a read-only transaction. So a failure here proves the new
+    # `SET TRANSACTION READ ONLY` is what's blocking it, unlike a plain INSERT/UPDATE/
+    # DELETE against a real table, which the reader role's existing GRANTs (migration
+    # c9d0e1f2a3b4) already block regardless of this change and so wouldn't prove
+    # anything new about this specific transaction-level setting.
+    result = await execute_sql(
+        _admin_state(
+            "CREATE TEMP TABLE execute_sql_read_only_probe (x int)",
+            institution_id=seeded_institution,
+            user_id=seeded_admin_user_id,
+        )
+    )
+
+    assert error_category(result["error"]) == EXECUTION_ERROR
+    assert result["query_result"] is None
+    assert result["result_row_count"] is None
+
+
 # --- Row cap, belt-and-suspenders ---------------------------------------------------------
 
 
