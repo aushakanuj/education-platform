@@ -9,8 +9,12 @@ from typing import Any, Literal, TypedDict
 from langgraph.graph import END, StateGraph
 from pydantic import ValidationError
 
-from education_platform.api.deps import Principal
 from education_platform.core.config import Settings, get_settings
+from education_platform.core.llm import (
+    OpenRouterError,
+    chat_completion,
+    chat_completion_json,
+)
 from education_platform.modules.assistant.contracts import (
     AssistantGraphState,
     CitationModel,
@@ -20,16 +24,12 @@ from education_platform.modules.assistant.contracts import (
     dump_graph_state,
     parse_graph_state,
 )
-from education_platform.modules.assistant.openrouter import (
-    OpenRouterError,
-    chat_completion,
-    chat_completion_json,
-)
 from education_platform.modules.assistant.tokens import estimate_tokens
 from education_platform.modules.assistant.tools.registry import (
     ToolValidationError,
     get_tool_registry,
 )
+from education_platform.modules.authorization.principal import Principal
 
 _INJECTION_PATTERNS = re.compile(
     r"(ignore\s+(all\s+)?(previous|prior)\s+instructions|"

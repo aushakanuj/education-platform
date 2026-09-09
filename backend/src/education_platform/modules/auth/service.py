@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime
+from typing import NoReturn
 from uuid import UUID
 
-from fastapi import HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from education_platform.core.errors import DomainError
+from education_platform.modules.audit.service import AuditAction, record_event
 from education_platform.modules.auth.models import (
     Institution,
     RefreshSession,
@@ -46,26 +48,43 @@ async def _student_profile_id(session: AsyncSession, user_id: UUID) -> UUID | No
     return profile_id if isinstance(profile_id, UUID) else None
 
 
+async def _refuse_login(
+    session: AsyncSession,
+    *,
+    institution_id: UUID | None = None,
+    actor_user_id: UUID | None = None,
+) -> NoReturn:
+    if institution_id is not None:
+        await record_event(
+            session,
+            institution_id=institution_id,
+            actor_user_id=actor_user_id,
+            event_type=AuditAction.LOGIN_FAILED,
+            entity_type="auth",
+        )
+    raise DomainError("Invalid credentials", status_code=401)
+
+
 async def login(session: AsyncSession, payload: LoginRequest) -> TokenResponse:
     stmt = select(User).where(User.email == str(payload.email).lower())
+    institution_id: UUID | None = None
     if payload.institution_name:
         institution = await session.scalar(
             select(Institution).where(Institution.name == payload.institution_name)
         )
         if institution is None:
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid credentials"
-            )
+            await _refuse_login(session)
+        institution_id = institution.id
         stmt = stmt.where(User.institution_id == institution.id)
 
     users = (await session.scalars(stmt)).all()
     if len(users) != 1:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid credentials")
+        await _refuse_login(session, institution_id=institution_id)
     user = users[0]
     if user.status not in {UserStatus.ACTIVE, UserStatus.PROVISIONED}:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid credentials")
+        await _refuse_login(session, institution_id=user.institution_id, actor_user_id=user.id)
     if not verify_password(user.password_hash, payload.password):
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid credentials")
+        await _refuse_login(session, institution_id=user.institution_id, actor_user_id=user.id)
 
     if user.status == UserStatus.PROVISIONED:
         user.status = UserStatus.ACTIVE
@@ -77,7 +96,15 @@ async def login(session: AsyncSession, payload: LoginRequest) -> TokenResponse:
             user_id=user.id, token_hash=token_hash, expires_at=expires_at, revoked_at=None
         )
     )
-    await session.commit()
+    await record_event(
+        session,
+        institution_id=user.institution_id,
+        actor_user_id=user.id,
+        event_type=AuditAction.LOGIN,
+        entity_type="auth",
+        entity_id=user.id,
+    )
+    await session.flush()
     return TokenResponse(access_token=access, refresh_token=refresh)
 
 
@@ -85,40 +112,28 @@ async def refresh(session: AsyncSession, refresh_token: str) -> TokenResponse:
     try:
         payload = decode_token(refresh_token)
     except Exception as exc:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid refresh token"
-        ) from exc
+        raise DomainError("Invalid refresh token", status_code=401) from exc
     if payload.get("type") != "refresh":
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid refresh token"
-        )
+        raise DomainError("Invalid refresh token", status_code=401)
     token_hash = payload.get("jti")
     user_id = payload.get("sub")
     if not token_hash or not user_id:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid refresh token"
-        )
+        raise DomainError("Invalid refresh token", status_code=401)
 
     stored = await session.scalar(
         select(RefreshSession).where(RefreshSession.token_hash == token_hash)
     )
     if stored is None or stored.revoked_at is not None:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid refresh token"
-        )
+        raise DomainError("Invalid refresh token", status_code=401)
     expires_at = stored.expires_at
     if expires_at.tzinfo is None:
         expires_at = expires_at.replace(tzinfo=UTC)
     if expires_at < datetime.now(UTC):
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid refresh token"
-        )
+        raise DomainError("Invalid refresh token", status_code=401)
 
     user = await session.get(User, UUID(str(user_id)))
     if user is None or user.status not in {UserStatus.ACTIVE, UserStatus.PROVISIONED}:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid refresh token"
-        )
+        raise DomainError("Invalid refresh token", status_code=401)
 
     stored.revoked_at = datetime.now(UTC)
     access = create_access_token(user_id=user.id, institution_id=user.institution_id)
@@ -126,7 +141,7 @@ async def refresh(session: AsyncSession, refresh_token: str) -> TokenResponse:
     session.add(
         RefreshSession(user_id=user.id, token_hash=new_hash, expires_at=expires_at, revoked_at=None)
     )
-    await session.commit()
+    await session.flush()
     return TokenResponse(access_token=access, refresh_token=new_refresh)
 
 
@@ -143,13 +158,13 @@ async def logout(session: AsyncSession, refresh_token: str) -> None:
     )
     if stored is not None and stored.revoked_at is None:
         stored.revoked_at = datetime.now(UTC)
-        await session.commit()
+        await session.flush()
 
 
 async def me(session: AsyncSession, user_id: UUID) -> MeResponse:
     user = await session.get(User, user_id)
     if user is None:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Unauthorized")
+        raise DomainError("Unauthorized", status_code=401)
     return MeResponse(
         id=user.id,
         email=user.email,
@@ -167,9 +182,9 @@ async def provision_student(session: AsyncSession, payload: ProvisionStudentRequ
         select(Institution).where(Institution.name == payload.institution_name)
     )
     if institution is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Institution '{payload.institution_name}' not found; seed materials first",
+        raise DomainError(
+            f"Institution '{payload.institution_name}' not found; seed materials first",
+            status_code=404,
         )
 
     email = str(payload.email).lower()
@@ -177,7 +192,7 @@ async def provision_student(session: AsyncSession, payload: ProvisionStudentRequ
         select(User).where(User.institution_id == institution.id, User.email == email)
     )
     if existing is not None:
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="User already exists")
+        raise DomainError("User already exists", status_code=409)
 
     user = User(
         institution_id=institution.id,
@@ -207,12 +222,12 @@ async def provision_student(session: AsyncSession, payload: ProvisionStudentRequ
         session.add(profile)
     else:
         if profile.user_id is not None:
-            raise HTTPException(
-                status_code=status.HTTP_409_CONFLICT,
-                detail="Student identifier already linked to a user",
+            raise DomainError(
+                "Student identifier already linked to a user",
+                status_code=409,
             )
         profile.user_id = user.id
         profile.full_name = payload.full_name
 
-    await session.commit()
+    await session.flush()
     return await me(session, user.id)

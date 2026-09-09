@@ -16,6 +16,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 from sqlalchemy.orm import Session
 
 from education_platform.core.config import get_settings
+from education_platform.core.errors import DomainError
 from education_platform.db import models as _models
 from education_platform.db.session import get_session, reset_engine
 from education_platform.db.url import to_async_url, to_sync_url
@@ -157,7 +158,16 @@ def client(seeded_db: Session, clean_db: str) -> Iterator[TestClient]:
 
     async def _override_session() -> AsyncIterator[AsyncSession]:
         async with session_factory() as session:
-            yield session
+            try:
+                yield session
+            except DomainError:
+                await session.commit()
+                raise
+            except Exception:
+                await session.rollback()
+                raise
+            else:
+                await session.commit()
 
     app.dependency_overrides[get_session] = _override_session
     with TestClient(app, raise_server_exceptions=True) as test_client:

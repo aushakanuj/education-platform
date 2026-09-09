@@ -2,31 +2,15 @@
 
 from __future__ import annotations
 
-from datetime import datetime
-from typing import Any
-from uuid import UUID
-
 from fastapi import APIRouter, Depends, Query
-from pydantic import BaseModel, ConfigDict
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from education_platform.api.deps import Principal, require_administrator
 from education_platform.db.session import get_session
 from education_platform.modules.audit import service
+from education_platform.modules.audit.schemas import AuditEventOut
 
 router = APIRouter(tags=["audit"])
-
-
-class AuditEventOut(BaseModel):
-    model_config = ConfigDict(from_attributes=True)
-
-    id: UUID
-    created_at: datetime
-    actor_user_id: UUID | None
-    event_type: str
-    entity_type: str
-    entity_id: UUID | None
-    payload: dict[str, Any]
 
 
 @router.get("/admin/audit-events", response_model=list[AuditEventOut])

@@ -10,10 +10,16 @@ from dataclasses import dataclass
 from typing import cast
 from uuid import UUID
 
-from fastapi import HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from education_platform.core.errors import DomainError
+from education_platform.modules.academics.constants import (
+    POC_GRADE_NAME,
+    POC_INSTITUTION_NAME,
+    POC_PERIOD_NAME,
+    POC_SUBJECT_CODE,
+)
 from education_platform.modules.academics.models import (
     AcademicPeriod,
     AcademicPeriodStatus,
@@ -210,30 +216,35 @@ async def subject_enrollment_for(
     )
 
 
+async def require_subject_enrollment(
+    session: AsyncSession, scope: Scope, offering_id: UUID
+) -> StudentSubjectEnrollment:
+    """Active subject enrollment for the scoped student, or 403.
+
+    Used by materials progress and assessments start so the 403 is written once.
+    """
+    if scope.self_student_id is None:
+        raise DomainError("Student enrollment required", status_code=403)
+    enrollment = await subject_enrollment_for(session, scope.self_student_id, offering_id)
+    if enrollment is None:
+        raise DomainError("Student enrollment required", status_code=403)
+    return enrollment
+
+
 async def enroll_student_in_poc_math(
     session: AsyncSession,
     *,
     student_profile_id: UUID,
 ) -> None:
     """Test/POC helper: enroll a student in the seeded Grade 8 Mathematics offering."""
-    from education_platform.modules.materials.seed import (
-        POC_GRADE_NAME,
-        POC_INSTITUTION_NAME,
-        POC_PERIOD_NAME,
-        POC_SUBJECT_CODE,
-    )
-
     institution = await session.scalar(
         select(Institution).where(Institution.name == POC_INSTITUTION_NAME)
     )
     if institution is None:
-        raise HTTPException(status_code=404, detail="Seed curriculum first")
+        raise DomainError("Seed curriculum first", status_code=404)
     student = await session.get(StudentProfile, student_profile_id)
     if student is None or student.institution_id != institution.id:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Student must belong to the POC institution",
-        )
+        raise DomainError("Student must belong to the POC institution", status_code=403)
     period = await session.scalar(
         select(AcademicPeriod).where(
             AcademicPeriod.institution_id == institution.id,
@@ -249,14 +260,14 @@ async def enroll_student_in_poc_math(
         )
     )
     if period is None or grade is None or subject is None:
-        raise HTTPException(status_code=404, detail="Seed curriculum first")
+        raise DomainError("Seed curriculum first", status_code=404)
     period_grade = await session.scalar(
         select(PeriodGrade).where(
             PeriodGrade.academic_period_id == period.id, PeriodGrade.grade_id == grade.id
         )
     )
     if period_grade is None:
-        raise HTTPException(status_code=404, detail="Seed curriculum first")
+        raise DomainError("Seed curriculum first", status_code=404)
     offering = await session.scalar(
         select(GradeSubjectOffering).where(
             GradeSubjectOffering.period_grade_id == period_grade.id,
@@ -264,7 +275,7 @@ async def enroll_student_in_poc_math(
         )
     )
     if offering is None:
-        raise HTTPException(status_code=404, detail="Seed curriculum first")
+        raise DomainError("Seed curriculum first", status_code=404)
 
     existing_grade = await session.scalar(
         select(StudentGradeEnrollment).where(
@@ -299,4 +310,4 @@ async def enroll_student_in_poc_math(
                 status=EnrollmentStatus.ACTIVE,
             )
         )
-    await session.commit()
+    await session.flush()

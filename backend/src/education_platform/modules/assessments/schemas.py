@@ -1,14 +1,60 @@
-"""Quiz attempt schemas."""
+"""Quiz attempt and presentation schemas."""
 
 from __future__ import annotations
 
 from datetime import datetime
 from decimal import Decimal
+from typing import Literal
 from uuid import UUID
 
 from pydantic import BaseModel, Field
 
-from education_platform.modules.materials.schemas import QuizQuestion
+
+class QuizOption(BaseModel):
+    label: str
+    text: str
+
+
+class QuizQuestion(BaseModel):
+    number: int
+    difficulty: str | None = None
+    prompt: str
+    options: list[QuizOption]
+
+
+class QuizMaterial(BaseModel):
+    id: UUID
+    title: str
+    questions: list[QuizQuestion]
+    pass_threshold_percent: Decimal
+    duration_seconds: int | None = None
+    max_attempts: int | None = None
+    result_release_mode: str
+
+
+class AttemptHistoryItem(BaseModel):
+    id: UUID
+    attempt_number: int
+    status: str
+    score_percent: Decimal | None
+    passed: bool | None
+    submitted_at: datetime | None
+    started_at: datetime | None
+
+
+class QuizSummaryOut(BaseModel):
+    id: UUID | None = None
+    title: str | None = None
+    scope: Literal["subtopic_mastery", "topic_mastery"]
+    available: bool = False
+    unlocked: bool = False
+    locked_reason: str | None = None
+    pass_threshold_percent: Decimal | None = None
+    attempt_count: int = 0
+    best_score_percent: Decimal | None = None
+    passed: bool = False
+    in_progress_attempt_id: UUID | None = None
+    recent_attempts: list[AttemptHistoryItem] = Field(default_factory=list)
 
 
 class StartAttemptResponse(BaseModel):

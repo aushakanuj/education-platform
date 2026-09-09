@@ -9,12 +9,12 @@ from education_platform.api.deps import get_scope
 from education_platform.db.session import get_session
 from education_platform.modules.assessments import service
 from education_platform.modules.assessments.schemas import (
+    AttemptHistoryItem,
     AttemptResult,
     StartAttemptResponse,
     SubmitAttemptRequest,
 )
 from education_platform.modules.authorization.scope import Scope
-from education_platform.modules.materials.schemas import AttemptHistoryItem
 
 router = APIRouter(tags=["attempts"])
 

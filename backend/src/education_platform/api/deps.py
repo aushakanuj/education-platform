@@ -12,36 +12,19 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from education_platform.db.session import get_session
+from education_platform.modules.audit.models import AuditEvent
 from education_platform.modules.audit.service import AuditAction, record_event
 from education_platform.modules.auth.models import (
-    AuditEvent,
     StudentProfile,
     User,
     UserRole,
     UserStatus,
 )
 from education_platform.modules.auth.security import decode_token
+from education_platform.modules.authorization.principal import Principal
 from education_platform.modules.authorization.scope import Scope, scope_for
 
 _bearer = HTTPBearer(auto_error=False)
-
-
-@dataclass(frozen=True, slots=True)
-class Principal:
-    user_id: UUID
-    institution_id: UUID
-    email: str
-    roles: frozenset[str]
-    student_profile_id: UUID | None
-    status: str
-
-    @property
-    def is_administrator(self) -> bool:
-        return "administrator" in self.roles
-
-    @property
-    def is_student(self) -> bool:
-        return "student" in self.roles
 
 
 async def get_current_user(
@@ -92,11 +75,7 @@ async def require_administrator(
 
 
 def require_role(*roles: str) -> Callable[..., Awaitable[Principal]]:
-    """Gate a route on holding at least one of `roles`.
-
-    Use this instead of hand-writing a 403 in a service function, so that every role check
-    in the codebase is the same check and can be tested once.
-    """
+    """Require at least one of the given roles."""
     allowed = frozenset(roles)
 
     async def _dependency(
@@ -116,26 +95,18 @@ async def get_scope(
     principal: Principal = Depends(get_current_user),
     session: AsyncSession = Depends(get_session),
 ) -> Scope:
-    """Resolve the caller's data boundary once, before any handler reads anything."""
     return await scope_for(session, principal)
 
 
 @dataclass(frozen=True, slots=True)
 class ScopedRequest:
-    """A principal, their resolved boundary, and the audit entry for this read."""
-
     principal: Principal
     scope: Scope
     session: AsyncSession
     audit_event: AuditEvent
 
     async def record_rows(self, rows_returned: int, detail: str | None = None) -> None:
-        """Complete this read's audit entry with what it actually returned.
-
-        The entry is created up front by `scoped()` so a handler cannot forget to log the
-        access at all; this fills in the outcome. One read, one audit row -- an entry
-        recording `rows_returned = 0` is the evidence the boundary held.
-        """
+        """Fill in row count for the audit entry opened by `scoped()`."""
         payload = {**self.audit_event.payload, "rows_returned": rows_returned}
         if detail:
             payload["detail"] = detail
@@ -145,12 +116,7 @@ class ScopedRequest:
 
 
 def scoped(resource: str) -> Callable[..., Awaitable[ScopedRequest]]:
-    """Dependency for any route that reads student data.
-
-    Resolves the caller's boundary and opens an audit entry for the access. The handler
-    completes it with `request.record_rows(n)`. `resource` names what was read and appears
-    on the audit screen.
-    """
+    """Resolve scope and open a scoped-read audit entry for `resource`."""
 
     async def _dependency(
         principal: Principal = Depends(get_current_user),
@@ -172,3 +138,14 @@ def scoped(resource: str) -> Callable[..., Awaitable[ScopedRequest]]:
         return ScopedRequest(principal=principal, scope=scope, session=session, audit_event=event)
 
     return _dependency
+
+
+__all__ = [
+    "Principal",
+    "ScopedRequest",
+    "get_current_user",
+    "get_scope",
+    "require_administrator",
+    "require_role",
+    "scoped",
+]

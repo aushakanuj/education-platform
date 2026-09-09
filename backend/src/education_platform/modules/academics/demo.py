@@ -6,11 +6,10 @@ from datetime import UTC, datetime
 from decimal import Decimal
 from uuid import UUID
 
-from fastapi import HTTPException, status
 from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from education_platform.api.deps import Principal
+from education_platform.core.errors import DomainError
 from education_platform.modules.academics.models import (
     EnrollmentStatus,
     GradeSubjectOffering,
@@ -30,6 +29,8 @@ from education_platform.modules.assessments.models import (
     QuizVersion,
     QuizVersionStatus,
 )
+from education_platform.modules.assessments.queries import open_release_for_quiz_version
+from education_platform.modules.authorization.principal import Principal
 from education_platform.modules.materials.models import (
     MaterialProgressStatus,
     SourceMaterial,
@@ -37,14 +38,11 @@ from education_platform.modules.materials.models import (
     SourceMaterialVersionStatus,
     StudentMaterialProgress,
 )
-from education_platform.modules.materials.service import open_release_for_quiz_version
 
 
 async def _require_student(principal: Principal) -> UUID:
     if principal.student_profile_id is None:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN, detail="Student profile required"
-        )
+        raise DomainError("Student profile required", status_code=403)
     return principal.student_profile_id
 
 
@@ -60,10 +58,7 @@ async def _active_subject_enrollment(
         .limit(1)
     )
     if enrollment is None:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Active subject enrollment required",
-        )
+        raise DomainError("Active subject enrollment required", status_code=403)
     return enrollment
 
 
@@ -78,7 +73,7 @@ async def bootstrap_demo(session: AsyncSession, principal: Principal) -> DemoBoo
         .where(GradeSubjectOffering.id == enrollment.grade_subject_offering_id)
     )
     if subject is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Subject not found")
+        raise DomainError("Subject not found", status_code=404)
 
     topic = await session.scalar(
         select(Topic)
@@ -87,7 +82,7 @@ async def bootstrap_demo(session: AsyncSession, principal: Principal) -> DemoBoo
         .limit(1)
     )
     if topic is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No topics seeded")
+        raise DomainError("No topics seeded", status_code=404)
 
     subtopics = (
         await session.scalars(
@@ -97,14 +92,14 @@ async def bootstrap_demo(session: AsyncSession, principal: Principal) -> DemoBoo
         )
     ).all()
     if not subtopics:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No subtopics seeded")
+        raise DomainError("No subtopics seeded", status_code=404)
 
     now = datetime.now(UTC)
     for subtopic in subtopics:
         await _complete_lesson(session, enrollment.id, subtopic.id, now)
         await _pass_subtopic_quiz(session, student_id, enrollment.id, subtopic.id, now)
 
-    await session.commit()
+    await session.flush()
     return DemoBootstrapOut(
         subject_id=subject.id,
         topic_id=topic.id,
@@ -257,5 +252,5 @@ async def reset_demo(session: AsyncSession, principal: Principal) -> DemoResetOu
             )
         )
 
-    await session.commit()
+    await session.flush()
     return DemoResetOut(status="ok", message="Demo progress cleared")
