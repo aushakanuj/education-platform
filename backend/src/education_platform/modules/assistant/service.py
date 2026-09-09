@@ -5,12 +5,11 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from uuid import UUID
 
-from fastapi import HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from education_platform.api.deps import Principal
 from education_platform.core.config import get_settings
+from education_platform.core.errors import DomainError
 from education_platform.modules.assistant.graph import run_assistant_turn
 from education_platform.modules.assistant.models import (
     ChatConversation,
@@ -27,6 +26,7 @@ from education_platform.modules.assistant.schemas import (
     PostMessageOut,
 )
 from education_platform.modules.assistant.tokens import context_percent, estimate_tokens
+from education_platform.modules.authorization.principal import Principal
 
 
 def _context_out(conv: ChatConversation) -> ContextUsageOut:
@@ -81,7 +81,7 @@ async def _get_owned_conversation(
         or conv.owner_user_id != principal.user_id
         or conv.institution_id != principal.institution_id
     ):
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Conversation not found")
+        raise DomainError("Conversation not found", status_code=404)
     return conv
 
 
@@ -131,7 +131,7 @@ async def create_conversation(
             token_estimate=0,
         )
     )
-    await session.commit()
+    await session.flush()
     await session.refresh(conv)
     return CreateConversationOut(
         id=conv.id,
@@ -170,7 +170,7 @@ async def delete_conversation(
 ) -> None:
     conv = await _get_owned_conversation(session, principal, conversation_id)
     await session.delete(conv)
-    await session.commit()
+    await session.flush()
 
 
 def _trim_history_for_context(
@@ -203,7 +203,7 @@ async def post_message(
     conv = await _get_owned_conversation(session, principal, conversation_id)
     text = content.strip()
     if not text:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Message is empty")
+        raise DomainError("Message is empty", status_code=400)
 
     prior = (
         await session.scalars(
@@ -260,7 +260,7 @@ async def post_message(
     if conv.title == "New chat":
         conv.title = text[:80] + ("…" if len(text) > 80 else "")
 
-    await session.commit()
+    await session.flush()
     await session.refresh(user_msg)
     await session.refresh(assistant_msg)
     await session.refresh(conv)

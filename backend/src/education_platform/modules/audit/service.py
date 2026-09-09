@@ -1,11 +1,4 @@
-"""Write audit events.
-
-The `audit_events` table has existed since the first migration but nothing wrote to it.
-This module is the only place that does. The rule from
-`docs/design/02-identity-tenancy-and-authorization.md` section 10: an access that returned
-nothing because of scope is *more* important to record than one that succeeded, because it
-is the evidence that the boundary held.
-"""
+"""Append-only audit events — see `docs/design/02` section 10."""
 
 from __future__ import annotations
 
@@ -16,12 +9,10 @@ from uuid import UUID
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from education_platform.modules.auth.models import AuditEvent
+from education_platform.modules.audit.models import AuditEvent
 
 
 class AuditAction(str, enum.Enum):
-    """Event types. Keep this list closed so the audit screen can filter reliably."""
-
     LOGIN = "auth.login"
     LOGIN_FAILED = "auth.login_failed"
     SCOPED_READ = "data.scoped_read"
@@ -47,7 +38,6 @@ async def record_event(
     payload: dict[str, Any] | None = None,
     flush: bool = True,
 ) -> AuditEvent:
-    """Append one audit event. Never raises on payload content; keep payloads small."""
     event = AuditEvent(
         institution_id=institution_id,
         actor_user_id=actor_user_id,
@@ -62,39 +52,6 @@ async def record_event(
     return event
 
 
-async def record_scoped_read(
-    session: AsyncSession,
-    *,
-    principal: object,
-    scope: object,
-    resource: str,
-    rows_returned: int,
-    detail: str | None = None,
-) -> AuditEvent:
-    """Record a governed read, including how many rows the caller's scope allowed through.
-
-    `rows_returned == 0` on a scoped read is the signal worth keeping: it is what proves a
-    request for out-of-scope data came back empty rather than being refused with a message
-    that would itself confirm the data exists.
-    """
-    payload: dict[str, Any] = {
-        "resource": resource,
-        "rows_returned": rows_returned,
-        "unrestricted": bool(getattr(scope, "unrestricted", False)),
-        "scoped_students": len(getattr(scope, "student_ids", ()) or ()),
-    }
-    if detail:
-        payload["detail"] = detail
-    return await record_event(
-        session,
-        institution_id=principal.institution_id,  # type: ignore[attr-defined]
-        actor_user_id=principal.user_id,  # type: ignore[attr-defined]
-        event_type=AuditAction.SCOPED_READ,
-        entity_type=resource,
-        payload=payload,
-    )
-
-
 async def list_events(
     session: AsyncSession,
     *,
@@ -102,7 +59,6 @@ async def list_events(
     limit: int = 100,
     event_type: str | None = None,
 ) -> list[AuditEvent]:
-    """Newest first. Institution-scoped: an administrator never sees another tenant."""
     stmt = (
         select(AuditEvent)
         .where(AuditEvent.institution_id == institution_id)

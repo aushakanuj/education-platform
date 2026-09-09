@@ -7,7 +7,6 @@ import asyncio
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session
 
-from education_platform.api.deps import Principal
 from education_platform.core.config import get_settings
 from education_platform.db.url import to_sync_url
 from education_platform.modules.assistant.contracts import (
@@ -16,6 +15,7 @@ from education_platform.modules.assistant.contracts import (
     RetrievedChunk,
 )
 from education_platform.modules.assistant.tools.registry import ToolSpec, register_tool
+from education_platform.modules.authorization.principal import Principal
 from education_platform.modules.materials.models import SourceChunk, SourceMaterialVersion
 from education_platform.modules.rag.embeddings import embed_texts
 from education_platform.modules.rag.models import (

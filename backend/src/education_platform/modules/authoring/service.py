@@ -1,22 +1,7 @@
-"""Task 3.6 — generate draft quiz questions from a subtopic's learning outcomes.
+"""Generate draft quiz questions from subtopic learning outcomes.
 
-Three rules shape everything here.
-
-**Drafts are drafts.** Generated questions are written with
-``QuestionVersionStatus.DRAFT`` and are never attached to a quiz. A student cannot reach
-them because the student-facing paths read published questions through ``quiz_items``, and
-nothing here touches that table. Publishing is a separate, deliberate act by a person.
-
-**A teacher authors only where they teach.** A subtopic belongs to a topic, which belongs
-to a grade-subject offering -- the same offering the permission model already reasons
-about, so authorisation reuses ``Scope`` rather than inventing a rule. It checks
-``scope.taught_offering_ids`` and *not* ``teaches_offering(offering)``: with no section
-argument the latter asks "do you teach every section of this?", which is false for an
-ordinary section-scoped assignment and would lock a teacher out of her own subject.
-
-**The model's output is untrusted.** Every question is validated before it is stored --
-four options, exactly one correct, no duplicates, nothing empty. A malformed question is
-dropped with a reason rather than saved and discovered by a child in an exam.
+Drafts stay DRAFT until published; teachers author only where they teach (`taught_offering_ids`).
+Model output is validated before storage.
 """
 
 from __future__ import annotations
@@ -30,6 +15,8 @@ from uuid import UUID
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from education_platform.core.errors import DomainError
+from education_platform.core.llm import OpenRouterError, chat_completion_json
 from education_platform.modules.academics.models import (
     GradeSubjectOffering,
     LearningOutcome,
@@ -47,17 +34,17 @@ from education_platform.modules.assessments.models import (
     QuestionVersion,
     QuestionVersionStatus,
 )
-from education_platform.modules.assistant.openrouter import OpenRouterError, chat_completion_json
+from education_platform.modules.authoring.schemas import MAX_PER_REQUEST
 from education_platform.modules.authorization.scope import Scope
 
-#: Multiple choice only. Written answers are never machine-marked on this project, so
-#: generating them would create work a teacher cannot use.
 OPTION_LABELS = ("A", "B", "C", "D")
-MAX_PER_REQUEST = 10
 
 
-class AuthoringError(Exception):
-    """Raised when generation cannot proceed. The message is safe to show a teacher."""
+class AuthoringError(DomainError):
+    """Safe to show a teacher."""
+
+    def __init__(self, detail: str) -> None:
+        super().__init__(detail, status_code=403)
 
 
 @dataclass(frozen=True, slots=True)
@@ -74,8 +61,6 @@ class GenerationResult:
     subtopic_id: UUID
     subtopic_name: str
     created: list[UUID] = field(default_factory=list)
-    #: Questions the model produced that failed validation, with the reason. Surfaced
-    #: rather than hidden: a model that keeps failing one rule is worth knowing about.
     rejected: list[str] = field(default_factory=list)
 
 
@@ -129,11 +114,6 @@ async def _openrouter_writer(prompt: str) -> list[dict[str, object]]:
 
 
 def validate(raw: object) -> DraftQuestion | str:
-    """Turn one model-produced question into a `DraftQuestion`, or say why it cannot be.
-
-    Returns the reason as a string rather than raising: one bad question in five should
-    cost that question, not the whole request.
-    """
     if not isinstance(raw, dict):
         return "not an object"
 
@@ -179,11 +159,6 @@ def validate(raw: object) -> DraftQuestion | str:
 async def _authorised_subtopic(
     session: AsyncSession, scope: Scope, subtopic_id: UUID
 ) -> tuple[Subtopic, str, str, UUID]:
-    """The subtopic, its subject and grade, and the offering it sits under.
-
-    Refuses when the caller does not teach the offering. This is a *capability* failure --
-    authoring is an action, not a read -- so it raises rather than returning nothing.
-    """
     row = (
         await session.execute(
             select(
@@ -202,12 +177,8 @@ async def _authorised_subtopic(
         raise AuthoringError("That subtopic does not exist.")
 
     subtopic, subject_name, offering_id, subject_institution_id = row
-    # Same answer as a missing subtopic: confirming another school's curriculum exists would
-    # itself be the disclosure. Insights uses the same shape for out-of-scope students.
     if subject_institution_id != scope.institution_id:
         raise AuthoringError("That subtopic does not exist.")
-    # Per-offering, not per-section: a subtopic belongs to the subject, so teaching any one
-    # section of it is enough to author for it.
     if not (scope.unrestricted or offering_id in scope.taught_offering_ids):
         raise AuthoringError("You do not teach this subject, so you cannot author for it.")
 
@@ -225,7 +196,6 @@ async def generate_questions(
     difficulty: QuestionDifficulty = QuestionDifficulty.MEDIUM,
     write_questions: QuestionWriter | None = None,
 ) -> GenerationResult:
-    """Generate `count` draft questions for a subtopic the caller teaches."""
     count = max(1, min(count, MAX_PER_REQUEST))
     subtopic, subject_name, topic_name, _ = await _authorised_subtopic(session, scope, subtopic_id)
 
@@ -301,7 +271,6 @@ async def _persist(
             )
         )
 
-    # The key lives in its own table and is never joined from student-facing paths.
     session.add(
         QuestionAnswerKey(
             question_version_id=version.id,
@@ -323,15 +292,6 @@ async def list_questions(
     subtopic_id: UUID,
     status: QuestionVersionStatus = QuestionVersionStatus.DRAFT,
 ) -> list[tuple[QuestionVersion, list[QuestionOption], str | None]]:
-    """Questions for a subtopic in one lifecycle state, with options and correct answer.
-
-    The answer is included because this is the *authoring* path -- a teacher reviewing a
-    draft must see which option is marked correct in order to judge it, and one reading
-    back the approved bank needs the same to check what they approved.
-
-    Reachable only by someone who teaches the subject, whichever status is asked for:
-    published questions are still answer keys, and an answer key is not a student's to read.
-    """
     await _authorised_subtopic(session, scope, subtopic_id)
 
     versions = list(
@@ -378,7 +338,6 @@ async def _authorised_version(
 
 
 async def publish_draft(session: AsyncSession, scope: Scope, version_id: UUID) -> QuestionVersion:
-    """Move one draft to published. Deliberately one at a time -- a teacher approves each."""
     version = await _authorised_version(session, scope, version_id)
     if version.lifecycle_status != QuestionVersionStatus.DRAFT:
         raise AuthoringError("Only a draft can be published.")
@@ -388,7 +347,6 @@ async def publish_draft(session: AsyncSession, scope: Scope, version_id: UUID) -
 
 
 async def discard_draft(session: AsyncSession, scope: Scope, version_id: UUID) -> None:
-    """Archive rather than delete: what was rejected is worth keeping."""
     version = await _authorised_version(session, scope, version_id)
     if version.lifecycle_status != QuestionVersionStatus.DRAFT:
         raise AuthoringError("Only a draft can be discarded.")
@@ -397,7 +355,6 @@ async def discard_draft(session: AsyncSession, scope: Scope, version_id: UUID) -
 
 
 def _status_count(status: QuestionVersionStatus, label: str) -> Any:
-    """Per-subtopic count of question versions in one lifecycle state."""
     return (
         select(Question.subtopic_id, func.count().label(label))
         .join(QuestionVersion, QuestionVersion.question_id == Question.id)
@@ -410,11 +367,6 @@ def _status_count(status: QuestionVersionStatus, label: str) -> Any:
 async def authorable_subtopics(
     session: AsyncSession, scope: Scope
 ) -> list[tuple[Subtopic, str, str, int, int]]:
-    """Subtopics the caller may author for, with subject, topic, and both bank counts.
-
-    Both counts, because a teacher who has just approved a question needs to see where it
-    went. A draft count alone drops to zero on approval and looks like the work vanished.
-    """
     if scope.unrestricted:
         offering_filter = None
     else:
@@ -426,9 +378,6 @@ async def authorable_subtopics(
     draft_count = _status_count(QuestionVersionStatus.DRAFT, "drafts")
     published_count = _status_count(QuestionVersionStatus.PUBLISHED, "published")
 
-    # Institution is always pinned. `unrestricted` means the whole school, not every school:
-    # insights.scope_predicate does the same, and skipping this filter let an administrator
-    # list and author another tenant's questions, including answer keys.
     statement = (
         select(
             Subtopic,

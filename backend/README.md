@@ -44,6 +44,53 @@ uv run python -m education_platform.workers
 First Docling / sentence-transformers runs download models (can take several minutes). Uploads are
 stored under `backend/var/uploads/`; embeddings live in Postgres `chunk_embeddings` (pgvector).
 
+## Module rules
+
+The backend is a modular monolith. Keep HTTP in `router.py`, logic in `service.py`, ORM in
+`models.py`, and request/response models in `schemas.py`. Do not introduce Clean Architecture
+folder trees or auto-discovered routers.
+
+**Allowed**
+
+- Anyone may import another module’s **models** (SQLAlchemy tables are shared persistence).
+- A module may import another module’s **small query helpers** (for example `load_subtopic_node`,
+  `subject_enrollment_for`).
+- Routers are thin: parse/validate, call own service, map domain errors to HTTP, return schemas.
+- `authorization` may import `academics.models` (scope is derived from enrollments/assignments).
+
+**Forbidden**
+
+- Service → another module’s **service** (this is the cycle).
+- Services importing `fastapi.HTTPException` or `api.deps.Principal`.
+- Routers defining the only copy of response models (put them in `schemas.py`).
+- `__init__.py` importing `router` (keeps package imports cheap).
+
+**Ownership**
+
+| Module | Owns | May read |
+| --- | --- | --- |
+| auth | users, roles, institution, tokens | — |
+| authorization | `Scope`, `Principal`, predicates | auth + academics models |
+| academics | curriculum tree, enrollments, learning-directory composition | materials + assessments **models** |
+| materials | source materials, versions, student progress, content seed | academics query helpers |
+| assessments | quizzes, questions, attempts, quiz DTOs, question assembly | academics query helpers, materials **models** |
+| rag | knowledge docs, ingest jobs, embeddings | materials models |
+| assistant | chats, LangGraph | rag query/search, not materials service |
+| insights | `student_360` reads + column register | attendance models, predicate |
+| at_risk | flags + engine | insights view/register, predicate |
+| authoring | draft generation use-case | academics + assessments models; shared LLM client |
+| audit | `AuditEvent` + `record_event` | — |
+| attendance | ORM only | — |
+| synthetic | CLI seeder | models only |
+
+**Cross-cutting**
+
+- Errors: domain exception at service; routers (or a FastAPI handler) map to HTTP.
+- Transactions: services do not commit; the request-scoped session commits on success.
+- Authz: `Scope` is the single read model. Role deps for write/admin. SQL predicates for list
+  endpoints. In-memory `covers_offering` for single-resource loads.
+- Identity: `Principal` lives with authorization. `api.deps` is FastAPI wiring only.
+
 ## Module map
 
 | Module | Responsibility |

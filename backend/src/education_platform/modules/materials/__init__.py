@@ -1,3 +1,1 @@
-from education_platform.modules.materials.router import router
-
-__all__ = ["router"]
+"""Source materials, versions, student progress, and content seed."""
