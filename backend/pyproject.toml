@@ -91,6 +91,7 @@ ignore_missing_imports = true
 addopts = "-q --cov=education_platform --cov-report=term-missing --cov-fail-under=80"
 asyncio_mode = "auto"
 testpaths = ["tests"]
+pythonpath = ["."]
 
 [tool.coverage.run]
 branch = true
