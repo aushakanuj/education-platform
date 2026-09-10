@@ -1,77 +1,104 @@
+import { useState } from "react";
 import { Link } from "react-router-dom";
 
+import { ClassHeatmap } from "../../components/ClassHeatmap";
 import { Crumbs } from "../../components/Crumbs";
 import { MasteryRing } from "../../components/MasteryRing";
+import { StudentDotGrid } from "../../components/StudentDotGrid";
 import { useAtRiskFlags } from "../../lib/useAtRiskFlags";
-import { useTeacherClasses } from "../../lib/useTeacherClasses";
 import {
+  computeHeatmap,
   computeSectionAnalytics,
-  computeSubjectOverview,
+  TIER_BASIS,
+  type PerformanceTier,
   type SectionAnalytics,
+  type TierStudent,
 } from "../../lib/teacherAnalytics";
+import { useTeacherClasses } from "../../lib/useTeacherClasses";
 
 function round(value: number | null): string {
   return value === null ? "—" : `${Math.round(value)}%`;
 }
 
-function progressTone(value: number): "progress--danger" | "progress--warn" | "progress--ok" {
-  if (value >= 70) return "progress--ok";
-  if (value >= 50) return "progress--warn";
-  return "progress--danger";
+const TIER_DOT: Record<PerformanceTier, string> = {
+  strong: "dot--strong",
+  average: "dot--average",
+  struggling: "dot--struggling",
+  not_started: "dot--none",
+};
+
+const TIER_LABEL: Record<PerformanceTier, string> = {
+  strong: "strong",
+  average: "average",
+  struggling: "struggling",
+  not_started: "not started",
+};
+
+const TIER_ORDER: PerformanceTier[] = ["strong", "average", "struggling", "not_started"];
+
+/** Strongest first, so the dot grid reads as the shape of the class from best to worst. */
+function orderedStudents(studentsByTier: SectionAnalytics["studentsByTier"]): TierStudent[] {
+  return TIER_ORDER.flatMap((tier) => studentsByTier[tier]);
 }
 
-function SubjectOverview({ subjects }: { subjects: { subject: string; averageMastery: number }[] }) {
-  if (subjects.length === 0) return null;
-  return (
-    <section className="panel analytics-panel">
-      <h2>Subjects that need attention</h2>
-      <p className="progress-label">Averaged across every class you teach, weakest first.</p>
-      <div className="analytics-subject-list">
-        {subjects.map((entry) => (
-          <div className="subject-bar-row" key={entry.subject}>
-            <div className="subject-bar-row__head">
-              <span>{entry.subject}</span>
-              <span>{round(entry.averageMastery)}</span>
-            </div>
-            <div className={`progress ${progressTone(entry.averageMastery)}`}>
-              <span style={{ width: `${Math.max(4, entry.averageMastery)}%` }} />
-            </div>
-          </div>
-        ))}
-      </div>
-    </section>
-  );
-}
+/**
+ * A class as its students: one square each, plus counts that open into names.
+ *
+ * The counts stay clickable because "who are those 14" is the question the grid provokes
+ * and cannot answer on its own -- a square tells you someone is there, not which someone.
+ */
+function ClassComposition({
+  sectionId,
+  distribution,
+  studentsByTier,
+}: {
+  sectionId: string;
+  distribution: SectionAnalytics["distribution"];
+  studentsByTier: SectionAnalytics["studentsByTier"];
+}) {
+  const [openTier, setOpenTier] = useState<PerformanceTier | null>(null);
+  const students = orderedStudents(studentsByTier);
+  if (students.length === 0) return null;
 
-function DistributionBar({ distribution }: { distribution: SectionAnalytics["distribution"] }) {
-  const total =
-    distribution.strong + distribution.average + distribution.struggling + distribution.not_started;
-  if (total === 0) return null;
-  const seg = (count: number) => `${(count / total) * 100}%`;
   return (
     <div>
-      <div className="distribution-bar" role="img" aria-label="Class performance distribution">
-        {distribution.strong > 0 && (
-          <span className="distribution-bar__seg distribution-bar__seg--strong" style={{ width: seg(distribution.strong) }} />
-        )}
-        {distribution.average > 0 && (
-          <span className="distribution-bar__seg distribution-bar__seg--average" style={{ width: seg(distribution.average) }} />
-        )}
-        {distribution.struggling > 0 && (
-          <span className="distribution-bar__seg distribution-bar__seg--struggling" style={{ width: seg(distribution.struggling) }} />
-        )}
-        {distribution.not_started > 0 && (
-          <span className="distribution-bar__seg distribution-bar__seg--none" style={{ width: seg(distribution.not_started) }} />
-        )}
-      </div>
+      <StudentDotGrid sectionId={sectionId} students={students} />
       <div className="distribution-bar__legend">
-        <span className="chip"><i className="dot dot--strong" />{distribution.strong} strong</span>
-        <span className="chip"><i className="dot dot--average" />{distribution.average} average</span>
-        <span className="chip"><i className="dot dot--struggling" />{distribution.struggling} struggling</span>
-        {distribution.not_started > 0 && (
-          <span className="chip"><i className="dot dot--none" />{distribution.not_started} not started</span>
+        {TIER_ORDER.map((tier) =>
+          distribution[tier] > 0 ? (
+            <button
+              key={tier}
+              type="button"
+              className={`chip chip--button ${openTier === tier ? "is-active" : ""}`}
+              onClick={() => setOpenTier(openTier === tier ? null : tier)}
+              aria-expanded={openTier === tier}
+            >
+              <i className={`dot ${TIER_DOT[tier]}`} />
+              {distribution[tier]} {TIER_LABEL[tier]}
+            </button>
+          ) : null,
         )}
       </div>
+      {openTier && (
+        <div className="tier-drilldown">
+          <p className="progress-label">{TIER_BASIS[openTier]}</p>
+          <ul className="list">
+            {studentsByTier[openTier].map((student) => (
+              <li className="list-item" key={student.studentId}>
+                <Link
+                  className="list-item__title"
+                  to={`/teacher/classes/${sectionId}/students/${student.studentId}`}
+                >
+                  {student.fullName}
+                </Link>
+                <span className="badge">
+                  {student.mastery === null ? "—" : `${Math.round(student.mastery)}%`}
+                </span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
     </div>
   );
 }
@@ -107,23 +134,11 @@ function SectionPanel({ section }: { section: SectionAnalytics }) {
         </div>
       </div>
 
-      <DistributionBar distribution={section.distribution} />
-
-      {section.subjectAverages.length > 0 && (
-        <div className="analytics-subject-list analytics-subject-list--compact">
-          {section.subjectAverages.map((entry) => (
-            <div className="subject-bar-row" key={entry.subject}>
-              <div className="subject-bar-row__head">
-                <span>{entry.subject}</span>
-                <span>{round(entry.averageMastery)}</span>
-              </div>
-              <div className={`progress ${progressTone(entry.averageMastery)}`}>
-                <span style={{ width: `${Math.max(4, entry.averageMastery)}%` }} />
-              </div>
-            </div>
-          ))}
-        </div>
-      )}
+      <ClassComposition
+        sectionId={section.sectionId}
+        distribution={section.distribution}
+        studentsByTier={section.studentsByTier}
+      />
 
       {section.lowAttendance.length > 0 && (
         <div>
@@ -134,7 +149,12 @@ function SectionPanel({ section }: { section: SectionAnalytics }) {
                 <span className="list-item__num" aria-hidden="true">
                   !
                 </span>
-                <p className="list-item__title">{student.fullName}</p>
+                <Link
+                  className="list-item__title"
+                  to={`/teacher/classes/${section.sectionId}/students/${student.studentId}`}
+                >
+                  {student.fullName}
+                </Link>
                 <span className="badge badge--warn">{Math.round(student.attendancePercent)}%</span>
               </li>
             ))}
@@ -152,7 +172,7 @@ export function AnalyticsPage() {
 
   const loading = classesLoading || flagsLoading;
   const sections = computeSectionAnalytics(classes, flags);
-  const subjectOverview = computeSubjectOverview(classes);
+  const heatmap = computeHeatmap(classes);
 
   const totalStudents = classes.reduce((sum, entry) => sum + entry.students.length, 0);
   const overallMastery =
@@ -168,7 +188,7 @@ export function AnalyticsPage() {
   const totalAtRisk = sections.reduce((sum, s) => sum + s.atRiskCounts.total, 0);
 
   return (
-    <>
+    <div className="analytics-view">
       <Crumbs parts={[{ label: "Analytics" }]} />
       <header className="page-head">
         <p className="kicker">Teacher · analytics</p>
@@ -220,7 +240,7 @@ export function AnalyticsPage() {
             </div>
           )}
 
-          <SubjectOverview subjects={subjectOverview} />
+          <ClassHeatmap heatmap={heatmap} />
 
           <div className="analytics-sections">
             {sections.map((section) => (
@@ -229,6 +249,6 @@ export function AnalyticsPage() {
           </div>
         </>
       )}
-    </>
+    </div>
   );
 }

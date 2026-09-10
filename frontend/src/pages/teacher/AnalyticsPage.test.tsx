@@ -1,4 +1,5 @@
 import { render, screen, within } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -146,5 +147,54 @@ describe("AnalyticsPage", () => {
     renderPage();
 
     expect(await screen.findByRole("alert")).toHaveTextContent("Session expired.");
+  });
+
+  it("reveals the named students behind a tier only after clicking it, with the rule stated", async () => {
+    vi.mocked(fetchStudentInsights).mockResolvedValue({
+      scope_description: "1 student across 1 assignment",
+      rows_returned: 1,
+      items: [row({ full_name: "Aisha Rahman", mastery_percent: 80, attendance_percent: 95 })],
+    });
+    renderPage();
+
+    await screen.findByText("1 strong");
+    expect(screen.queryByText("Aisha Rahman")).not.toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole("button", { name: /1 strong/ }));
+
+    expect(await screen.findByText("Aisha Rahman")).toBeInTheDocument();
+    expect(screen.getByText(/Averaging 70% or higher/)).toBeInTheDocument();
+  });
+
+  it("plots every class and subject in the heatmap, with a merged row per shared grade", async () => {
+    vi.mocked(fetchStudentInsights).mockResolvedValue({
+      scope_description: "2 students across 2 assignments",
+      rows_returned: 2,
+      items: [
+        row({ student_id: "a", grade: "Grade 8", section: "8A", mastery_percent: 80 }),
+        row({ student_id: "b", grade: "Grade 8", section: "8B", mastery_percent: 60 }),
+      ],
+    });
+    renderPage();
+
+    expect(await screen.findByText("Where to look first")).toBeInTheDocument();
+
+    const grid = screen.getByRole("table");
+    expect(within(grid).getByRole("columnheader", { name: "Mathematics" })).toBeInTheDocument();
+    expect(within(grid).getByRole("rowheader", { name: /Grade 8 · all sections/ })).toBeInTheDocument();
+    // One class each way, so the grade row carries their mean.
+    expect(within(grid).getAllByText("70").length).toBeGreaterThan(0);
+  });
+
+  it("links each student square to that student", async () => {
+    vi.mocked(fetchStudentInsights).mockResolvedValue({
+      scope_description: "1 student across 1 assignment",
+      rows_returned: 1,
+      items: [row({ student_id: "s1", full_name: "Aisha Rahman", grade: "Grade 8", section: "8A" })],
+    });
+    renderPage();
+
+    const square = await screen.findByRole("link", { name: /Aisha Rahman — 56% mastery/ });
+    expect(square).toHaveAttribute("href", "/teacher/classes/grade-8-8a/students/s1");
   });
 });
