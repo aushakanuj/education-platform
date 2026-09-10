@@ -38,6 +38,18 @@ _MODULE = cast(
 )
 
 
+@pytest.fixture(autouse=True)
+def _openrouter_configured(monkeypatch: pytest.MonkeyPatch) -> None:
+    # Every test here expects to reach the classifier call (its chat_completion_json mock)
+    # rather than take the "not configured, fail open" branch -- scoped to this module's
+    # `get_settings` reference only, not the process-wide `get_settings` lru_cache, so it
+    # can't leak into other test files that rely on the opposite (unconfigured) default.
+    # test_openrouter_not_configured_fails_open below overrides this within its own test.
+    monkeypatch.setattr(
+        _MODULE, "get_settings", lambda: Settings(openrouter_api_key="test-key-not-a-real-key")
+    )
+
+
 def _state(question: str, **overrides: object) -> TextToSQLState:
     state: TextToSQLState = {
         "question": question,
