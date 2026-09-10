@@ -7,15 +7,15 @@ from education_platform.api.deps import Principal, get_current_user, get_scope
 from education_platform.core.config import Settings, get_settings
 from education_platform.db.session import get_session
 from education_platform.modules.academics import demo, service
+from education_platform.modules.academics.directory import build_learning_directory
 from education_platform.modules.academics.schemas import (
     DemoBootstrapOut,
     DemoResetOut,
     EnrollmentSummary,
     EnrollMeRequest,
+    LearningDirectoryOut,
 )
 from education_platform.modules.authorization.scope import Scope, scope_for
-from education_platform.modules.materials.schemas import LearningDirectoryOut
-from education_platform.modules.materials.service import build_learning_directory
 
 router = APIRouter(tags=["enrollments"])
 

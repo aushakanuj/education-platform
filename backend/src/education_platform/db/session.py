@@ -10,6 +10,7 @@ from sqlalchemy.ext.asyncio import (
 from sqlalchemy.orm import Session
 
 from education_platform.core.config import get_settings
+from education_platform.core.errors import DomainError
 from education_platform.db.url import to_async_url, to_sync_url
 
 _engine: AsyncEngine | None = None
@@ -83,7 +84,16 @@ def get_session_factory() -> async_sessionmaker[AsyncSession]:
 async def get_session() -> AsyncGenerator[AsyncSession, None]:
     session_factory = get_session_factory()
     async with session_factory() as session:
-        yield session
+        try:
+            yield session
+        except DomainError:
+            await session.commit()
+            raise
+        except Exception:
+            await session.rollback()
+            raise
+        else:
+            await session.commit()
 
 
 def get_text_to_sql_engine() -> AsyncEngine:

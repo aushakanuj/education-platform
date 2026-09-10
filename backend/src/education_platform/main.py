@@ -1,17 +1,20 @@
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session
 
 from education_platform.core.config import get_settings
+from education_platform.core.errors import DomainError
 from education_platform.db import models as _models
 from education_platform.db.url import to_sync_url
 from education_platform.modules.academics.router import router as academics_router
 from education_platform.modules.assessments.router import router as assessments_router
 from education_platform.modules.assistant.router import router as assistant_router
+from education_platform.modules.at_risk.router import router as at_risk_router
 from education_platform.modules.audit.router import router as audit_router
 from education_platform.modules.auth.router import router as auth_router
 from education_platform.modules.authoring.router import router as authoring_router
@@ -58,6 +61,12 @@ app.include_router(audit_router, prefix=settings.api_v1_prefix)
 app.include_router(insights_router, prefix=settings.api_v1_prefix)
 app.include_router(authoring_router, prefix=settings.api_v1_prefix)
 app.include_router(text_to_sql_router, prefix=settings.api_v1_prefix)
+app.include_router(at_risk_router, prefix=settings.api_v1_prefix)
+
+
+@app.exception_handler(DomainError)
+async def domain_error_handler(_request: Request, exc: DomainError) -> JSONResponse:
+    return JSONResponse(status_code=exc.status_code, content={"detail": exc.detail})
 
 
 @app.get("/health", tags=["system"])

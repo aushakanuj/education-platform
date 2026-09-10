@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 from datetime import UTC, datetime, timedelta
 from typing import Any
 from uuid import UUID, uuid4
@@ -42,8 +43,6 @@ def create_access_token(*, user_id: UUID, institution_id: UUID) -> str:
 
 def create_refresh_token(*, user_id: UUID) -> tuple[str, str, datetime]:
     """Return raw token, sha256 hex hash for storage, and expiry."""
-    import hashlib
-
     settings = get_settings()
     now = datetime.now(UTC)
     expires_at = now + timedelta(days=settings.refresh_token_days)

@@ -28,7 +28,8 @@ from education_platform.modules.authorization.predicate import (
     scope_sql,
 )
 from education_platform.modules.authorization.scope import Scope
-from education_platform.modules.insights.service import STUDENT_360_COLUMNS, scope_predicate
+from education_platform.modules.insights.register import STUDENT_360_SCOPE_COLUMNS
+from education_platform.modules.insights.service import scope_predicate
 
 INSTITUTION = UUID("11111111-1111-1111-1111-111111111111")
 OTHER_INSTITUTION = UUID("99999999-9999-9999-9999-999999999999")
@@ -96,7 +97,7 @@ def test_the_register_binding_matches_the_generic_rules(name: str) -> None:
     """
     scope = SCENARIOS[name]
     bound = str(scope_predicate(scope))
-    generic = str(scope_predicate_for(scope, STUDENT_360_COLUMNS))
+    generic = str(scope_predicate_for(scope, STUDENT_360_SCOPE_COLUMNS))
     assert bound == generic
 
 
@@ -108,7 +109,7 @@ def test_the_same_rules_survive_being_applied_to_a_different_table(name: str) ->
     constrained and how they are combined, not what the columns happen to be called.
     """
     scope = SCENARIOS[name]
-    register = _sql(scope, STUDENT_360_COLUMNS)
+    register = _sql(scope, STUDENT_360_SCOPE_COLUMNS)
     elsewhere = _sql(scope, OTHER_COLUMNS)
 
     normalised = (
@@ -129,7 +130,7 @@ def test_every_scope_pins_the_institution_or_matches_nothing(name: str) -> None:
     school. This is the exact assumption the review flagged, and the exact bug fixed in
     `b895828` -- asserted here so no future edit can quietly reintroduce it.
     """
-    rendered = _sql(SCENARIOS[name], STUDENT_360_COLUMNS)
+    rendered = _sql(SCENARIOS[name], STUDENT_360_SCOPE_COLUMNS)
     if rendered.strip().lower() == "(false)":
         return
     assert f"institution_id = '{INSTITUTION}'" in rendered
@@ -138,7 +139,7 @@ def test_every_scope_pins_the_institution_or_matches_nothing(name: str) -> None:
 def test_an_administrator_is_still_bounded_by_their_own_institution() -> None:
     """The single most load-bearing line in the file, spelled out."""
     admin = SCENARIOS["administrator"]
-    rendered = _sql(admin, STUDENT_360_COLUMNS)
+    rendered = _sql(admin, STUDENT_360_SCOPE_COLUMNS)
 
     assert f"'{INSTITUTION}'" in rendered
     assert str(OTHER_INSTITUTION) not in rendered
@@ -147,7 +148,9 @@ def test_an_administrator_is_still_bounded_by_their_own_institution() -> None:
 
 def test_a_principal_who_reaches_nothing_compiles_to_false_not_to_everything() -> None:
     """A boundary that fails open is worse than one that fails loudly."""
-    assert _sql(SCENARIOS["reaches-nothing"], STUDENT_360_COLUMNS).strip().lower() == "(false)"
+    assert (
+        _sql(SCENARIOS["reaches-nothing"], STUDENT_360_SCOPE_COLUMNS).strip().lower() == "(false)"
+    )
 
 
 # ------------------------------------------------------------------ composition safety
@@ -162,7 +165,7 @@ def test_the_fragment_is_parenthesised_so_it_cannot_be_or_ed_away(name: str) -> 
     ``(boundary) OR (x)`` -- true for every row, boundary gone. Wrapping is what makes the
     fragment safe to compose in a position the caller did not think about.
     """
-    rendered = _sql(SCENARIOS[name], STUDENT_360_COLUMNS)
+    rendered = _sql(SCENARIOS[name], STUDENT_360_SCOPE_COLUMNS)
     assert rendered.startswith("(") and rendered.endswith(")")
 
 
@@ -200,7 +203,7 @@ def test_the_fragment_is_one_group_so_no_surrounding_or_can_split_it(name: str) 
     this test would pass locally and silently skip in CI -- which is how a security test
     quietly stops existing.
     """
-    assert _is_one_balanced_group(_sql(SCENARIOS[name], STUDENT_360_COLUMNS))
+    assert _is_one_balanced_group(_sql(SCENARIOS[name], STUDENT_360_SCOPE_COLUMNS))
 
 
 def test_the_group_check_would_actually_catch_the_old_bug() -> None:
@@ -222,20 +225,20 @@ def test_a_non_uuid_value_is_refused_rather_than_inlined() -> None:
     """
     hostile = _scope(institution_id="' OR '1'='1")
     with pytest.raises(TypeError, match="only inline UUIDs"):
-        scope_sql(hostile, STUDENT_360_COLUMNS)
+        scope_sql(hostile, STUDENT_360_SCOPE_COLUMNS)
 
 
 def test_a_non_uuid_hidden_inside_a_taught_pair_is_also_refused() -> None:
     """The obvious field is checked; so is the one buried in a frozenset of tuples."""
     hostile = _scope(taught_offering_sections=frozenset({("' OR 1=1 --", SECTION)}))
     with pytest.raises(TypeError, match="only inline UUIDs"):
-        scope_sql(hostile, STUDENT_360_COLUMNS)
+        scope_sql(hostile, STUDENT_360_SCOPE_COLUMNS)
 
 
 def test_the_sqlalchemy_path_is_unaffected_by_the_inlining_check() -> None:
     """Bind parameters make the type question moot, so that path stays usable."""
     odd = _scope(institution_id="not-a-uuid")
-    assert scope_predicate_for(odd, STUDENT_360_COLUMNS) is not None
+    assert scope_predicate_for(odd, STUDENT_360_SCOPE_COLUMNS) is not None
 
 
 # ------------------------------------------------------------------------- tripwire
@@ -284,14 +287,14 @@ def test_the_rendered_sql_needs_no_database_session() -> None:
 
 def test_a_whole_offering_assignment_does_not_narrow_to_one_section() -> None:
     """`section_id IS NULL` on an assignment means every section of that offering."""
-    rendered = _sql(SCENARIOS["teacher-whole-offering"], STUDENT_360_COLUMNS)
+    rendered = _sql(SCENARIOS["teacher-whole-offering"], STUDENT_360_SCOPE_COLUMNS)
     assert str(OFFERING) in rendered
     assert str(SECTION) not in rendered
 
 
 def test_a_teacher_who_is_also_a_pupil_gets_both_routes_not_one() -> None:
     """Their own record *and* what they teach. Losing either is a real defect."""
-    rendered = _sql(SCENARIOS["teacher-who-is-also-a-pupil"], STUDENT_360_COLUMNS)
+    rendered = _sql(SCENARIOS["teacher-who-is-also-a-pupil"], STUDENT_360_SCOPE_COLUMNS)
     assert str(STUDENT) in rendered, "their own record must still be reachable"
     assert str(OFFERING) in rendered, "what they teach must still be reachable"
     assert " OR " in rendered.upper()
@@ -328,7 +331,7 @@ def test_scope_columns_accepts_columns_from_more_than_one_table() -> None:
 def test_scope_values_are_read_from_the_scope_not_hardcoded() -> None:
     """Guards against a copy-paste that pins the wrong tenant for everyone."""
     other = _scope(institution_id=OTHER_INSTITUTION, unrestricted=True)
-    rendered = scope_sql(other, STUDENT_360_COLUMNS)
+    rendered = scope_sql(other, STUDENT_360_SCOPE_COLUMNS)
     assert str(OTHER_INSTITUTION) in rendered
     assert str(INSTITUTION) not in rendered
 
@@ -336,6 +339,6 @@ def test_scope_values_are_read_from_the_scope_not_hardcoded() -> None:
 def test_an_unknown_scope_shape_does_not_silently_widen() -> None:
     """A student with no enrolments and no teaching reaches nothing, not everything."""
     lonely = _scope(roles=frozenset({"student"}), self_student_id=uuid4())
-    rendered = scope_sql(lonely, STUDENT_360_COLUMNS)
+    rendered = scope_sql(lonely, STUDENT_360_SCOPE_COLUMNS)
     assert f"institution_id = '{INSTITUTION}'" in rendered
     assert "student_id" in rendered

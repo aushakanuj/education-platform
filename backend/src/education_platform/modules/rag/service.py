@@ -6,13 +6,13 @@ import re
 from typing import cast
 from uuid import UUID, uuid4
 
-from fastapi import HTTPException, UploadFile, status
+from fastapi import UploadFile
 from pydantic import ValidationError
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from education_platform.api.deps import Principal
 from education_platform.core.config import get_settings
+from education_platform.core.errors import DomainError
 from education_platform.modules.academics.models import (
     AcademicPeriod,
     GradeSubjectOffering,
@@ -20,7 +20,9 @@ from education_platform.modules.academics.models import (
     Subtopic,
     Topic,
 )
+from education_platform.modules.audit.service import AuditAction, record_event
 from education_platform.modules.auth.models import Institution
+from education_platform.modules.authorization.principal import Principal
 from education_platform.modules.materials.models import (
     SourceChunk,
     SourceMaterial,
@@ -61,9 +63,9 @@ def _validated_required_roles(raw: str | None) -> list[str]:
     try:
         return parse_required_roles(raw)
     except ValidationError as exc:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Invalid required_roles: {exc.errors()[0]['msg']}",
+        raise DomainError(
+            f"Invalid required_roles: {exc.errors()[0]['msg']}",
+            status_code=400,
         ) from exc
 
 
@@ -71,16 +73,16 @@ def _validate_upload(file: UploadFile, data: bytes) -> str:
     settings = get_settings()
     content_type = (file.content_type or "").split(";")[0].strip().lower() or "application/pdf"
     if content_type not in settings.ingest_allowed_content_types:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Unsupported content type: {content_type}",
+        raise DomainError(
+            f"Unsupported content type: {content_type}",
+            status_code=400,
         )
     if len(data) == 0:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Empty upload")
+        raise DomainError("Empty upload", status_code=400)
     if len(data) > settings.max_upload_bytes:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"File exceeds max size of {settings.max_upload_bytes} bytes",
+        raise DomainError(
+            f"File exceeds max size of {settings.max_upload_bytes} bytes",
+            status_code=400,
         )
     return content_type
 
@@ -114,7 +116,7 @@ async def upload_curriculum_material(
         session, subtopic_id=subtopic_id, institution_id=principal.institution_id
     )
     if subtopic is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Subtopic not found")
+        raise DomainError("Subtopic not found", status_code=404)
 
     data = await file.read()
     content_type = _validate_upload(file, data)
@@ -167,7 +169,16 @@ async def upload_curriculum_material(
         status=IngestJobStatus.QUEUED,
     )
     session.add(job)
-    await session.commit()
+    await record_event(
+        session,
+        institution_id=principal.institution_id,
+        actor_user_id=principal.user_id,
+        event_type=AuditAction.DOCUMENT_UPLOADED,
+        entity_type="source_material_version",
+        entity_id=version.id,
+        payload={"subtopic_id": str(subtopic_id)},
+    )
+    await session.flush()
     await session.refresh(version)
     await session.refresh(job)
 
@@ -193,13 +204,13 @@ async def get_material_version_status(
     )
     result = row.first()
     if result is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Version not found")
+        raise DomainError("Version not found", status_code=404)
     version, material = result
     subtopic = await _subtopic_in_institution(
         session, subtopic_id=material.subtopic_id, institution_id=principal.institution_id
     )
     if subtopic is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Version not found")
+        raise DomainError("Version not found", status_code=404)
 
     chunk_count = int(
         await session.scalar(
@@ -280,7 +291,16 @@ async def upload_knowledge_document(
         status=IngestJobStatus.QUEUED,
     )
     session.add(job)
-    await session.commit()
+    await record_event(
+        session,
+        institution_id=principal.institution_id,
+        actor_user_id=principal.user_id,
+        event_type=AuditAction.DOCUMENT_UPLOADED,
+        entity_type="knowledge_document",
+        entity_id=document.id,
+        payload={"version_id": str(version.id)},
+    )
+    await session.flush()
     await session.refresh(document)
     await session.refresh(version)
     await session.refresh(job)
@@ -352,7 +372,7 @@ async def get_knowledge_document(
 ) -> KnowledgeDocumentDetailOut:
     document = await session.get(KnowledgeDocument, document_id)
     if document is None or document.institution_id != principal.institution_id:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Document not found")
+        raise DomainError("Document not found", status_code=404)
 
     versions = (
         await session.scalars(
@@ -402,10 +422,10 @@ async def get_knowledge_version_status(
     )
     result = row.first()
     if result is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Version not found")
+        raise DomainError("Version not found", status_code=404)
     version, document = result
     if document.institution_id != principal.institution_id:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Version not found")
+        raise DomainError("Version not found", status_code=404)
 
     chunk_count = int(
         await session.scalar(

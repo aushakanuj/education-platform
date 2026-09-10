@@ -8,7 +8,7 @@ from typing import Any
 
 from pydantic import BaseModel, ValidationError
 
-from education_platform.api.deps import Principal
+from education_platform.modules.authorization.principal import Principal
 
 ToolHandler = Callable[..., Awaitable[dict[str, Any]]]
 

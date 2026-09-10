@@ -1,13 +1,4 @@
-"""Daily attendance.
-
-Design doc 03 deferred attendance, but the rule-based early-warning engine needs marks
-*and* attendance, and CBT is providing no data of either kind -- so the platform owns this
-table and the synthetic generator populates it.
-
-Grain: one row per student per date, optionally per subject offering. A NULL
-`grade_subject_offering_id` means whole-day school attendance, which is what the POC's
-eligibility rule (75% across the term) is measured against.
-"""
+"""Daily attendance — whole-day rows use NULL `grade_subject_offering_id`."""
 
 from __future__ import annotations
 
@@ -30,7 +21,6 @@ class AttendanceStatus(str, enum.Enum):
 
     @property
     def counts_as_present(self) -> bool:
-        """Late still counts as attending; excused is removed from the denominator."""
         return self in {AttendanceStatus.PRESENT, AttendanceStatus.LATE}
 
     @property
@@ -44,14 +34,12 @@ attendance_status_enum = str_enum(AttendanceStatus, "attendance_status")
 class AttendanceRecord(UUIDTimestampMixin, Base):
     __tablename__ = "attendance_records"
     __table_args__ = (
-        # One whole-day record per student per date.
         partial_unique_index(
             "uq_attendance_records_day",
             "student_id",
             "on_date",
             where="grade_subject_offering_id IS NULL",
         ),
-        # One per-subject record per student per date.
         partial_unique_index(
             "uq_attendance_records_subject_day",
             "student_id",

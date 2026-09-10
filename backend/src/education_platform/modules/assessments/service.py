@@ -6,17 +6,17 @@ from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from uuid import UUID
 
-from fastapi import HTTPException, status
 from sqlalchemy import delete, func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from education_platform.core.errors import DomainError
 from education_platform.modules.academics.models import Subtopic
 from education_platform.modules.academics.service import (
     CurriculumNode,
     load_subtopic_node,
     load_topic_node,
-    subject_enrollment_for,
+    require_subject_enrollment,
 )
 from education_platform.modules.assessments.models import (
     AttemptAnswer,
@@ -32,12 +32,19 @@ from education_platform.modules.assessments.models import (
     QuizVersion,
     QuizVersionStatus,
 )
+from education_platform.modules.assessments.queries import (
+    open_release_for_quiz_version,
+    questions_for_quiz_version,
+)
 from education_platform.modules.assessments.schemas import (
     AttemptAnswerOut,
+    AttemptHistoryItem,
     AttemptResult,
     StartAttemptResponse,
     SubmitAttemptRequest,
 )
+from education_platform.modules.audit.service import AuditAction, record_event
+from education_platform.modules.auth.models import StudentProfile
 from education_platform.modules.authorization.scope import Scope
 from education_platform.modules.materials.models import (
     MaterialProgressStatus,
@@ -46,12 +53,7 @@ from education_platform.modules.materials.models import (
     SourceMaterialVersionStatus,
     StudentMaterialProgress,
 )
-from education_platform.modules.materials.schemas import AttemptHistoryItem
-from education_platform.modules.materials.service import (
-    get_subtopic_by_slug,
-    open_release_for_quiz_version,
-    questions_for_quiz_version,
-)
+from education_platform.modules.materials.queries import subtopic_by_slug
 
 
 async def _released_quiz_version_by_quiz_id(
@@ -69,7 +71,7 @@ async def _released_quiz_version_by_quiz_id(
         )
     ).first()
     if row is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Quiz not found")
+        raise DomainError("Quiz not found", status_code=404)
     return row[0], row[1]
 
 
@@ -82,13 +84,13 @@ async def _node_for_quiz(session: AsyncSession, quiz: CommonMasteryQuiz) -> Curr
     else:
         node = None
     if node is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Quiz not found")
+        raise DomainError("Quiz not found", status_code=404)
     return node
 
 
 def _require_covers_quiz(scope: Scope, node: CurriculumNode) -> None:
     if not scope.covers_offering(node.offering.id, institution_id=node.institution.id):
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Quiz not found")
+        raise DomainError("Quiz not found", status_code=404)
 
 
 async def _ensure_lesson_completed(
@@ -113,9 +115,7 @@ async def _ensure_lesson_completed(
         )
     )
     if progress is None:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN, detail="Complete the lesson first"
-        )
+        raise DomainError("Complete the lesson first", status_code=403)
 
 
 async def _ensure_subtopic_quizzes_passed(
@@ -154,10 +154,7 @@ async def _ensure_subtopic_quizzes_passed(
             )
         )
         if passed is None:
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="Pass all subtopic quizzes first",
-            )
+            raise DomainError("Pass all subtopic quizzes first", status_code=403)
 
 
 async def start_attempt(
@@ -167,7 +164,9 @@ async def start_attempt(
         try:
             quiz_uuid = UUID(quiz_id)
         except ValueError:
-            subtopic = await get_subtopic_by_slug(session, quiz_id, scope=scope)
+            subtopic = await subtopic_by_slug(session, quiz_id, scope=scope)
+            if subtopic is None:
+                raise DomainError("Quiz not found", status_code=404) from None
             quiz = await session.scalar(
                 select(CommonMasteryQuiz).where(
                     CommonMasteryQuiz.subtopic_id == subtopic.id,
@@ -175,62 +174,50 @@ async def start_attempt(
                 )
             )
             if quiz is None:
-                raise HTTPException(
-                    status_code=status.HTTP_404_NOT_FOUND, detail="Quiz not found"
-                ) from None
+                raise DomainError("Quiz not found", status_code=404) from None
             quiz_uuid = quiz.id
     else:
         quiz_uuid = quiz_id
     quiz, quiz_version = await _released_quiz_version_by_quiz_id(session, quiz_uuid)
     node = await _node_for_quiz(session, quiz)
     _require_covers_quiz(scope, node)
-    if scope.self_student_id is None:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN, detail="Student enrollment required"
-        )
-    enrollment = await subject_enrollment_for(session, scope.self_student_id, node.offering.id)
-    if enrollment is None:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN, detail="Student enrollment required"
-        )
+    enrollment = await require_subject_enrollment(session, scope, node.offering.id)
     enrollment_id = enrollment.id
+    student_id = enrollment.student_id
     if quiz.quiz_scope == QuizScope.SUBTOPIC_MASTERY:
         if node.subtopic is not None:
             await _ensure_lesson_completed(
                 session, subtopic_id=node.subtopic.id, enrollment_id=enrollment_id
             )
     else:
-        await _ensure_subtopic_quizzes_passed(session, scope.self_student_id, node.topic.id)
+        await _ensure_subtopic_quizzes_passed(session, student_id, node.topic.id)
     release = await open_release_for_quiz_version(session, quiz_version.id)
     if release is None:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Quiz is not open")
+        raise DomainError("Quiz is not open", status_code=403)
 
     last_error: BaseException | None = None
     for _ in range(3):
         try:
-            return await _open_new_attempt(
-                session,
-                student_id=scope.self_student_id,
-                quiz=quiz,
-                quiz_version=quiz_version,
-                release_id=release.id,
-                enrollment_id=enrollment_id,
-            )
+            async with session.begin_nested():
+                return await _open_new_attempt(
+                    session,
+                    student_id=student_id,
+                    quiz=quiz,
+                    quiz_version=quiz_version,
+                    release_id=release.id,
+                    enrollment_id=enrollment_id,
+                )
         except IntegrityError as exc:
             last_error = exc
-            await session.rollback()
-            # Rollback expires loaded ORM instances. Re-query before retrying so
-            # async lazy-loads (e.g. quiz.subtopic_id, release.id) cannot raise
-            # MissingGreenlet and 500 the start-attempt request.
+            # Savepoint rollback expires loaded ORM instances. Re-query before retrying
+            # so async lazy-loads cannot raise MissingGreenlet and 500 the request.
             quiz, quiz_version = await _released_quiz_version_by_quiz_id(session, quiz_uuid)
             release = await open_release_for_quiz_version(session, quiz_version.id)
             if release is None:
-                raise HTTPException(
-                    status_code=status.HTTP_403_FORBIDDEN, detail="Quiz is not open"
-                ) from exc
-    raise HTTPException(
-        status_code=status.HTTP_409_CONFLICT,
-        detail="Could not start a new quiz attempt. Try again.",
+                raise DomainError("Quiz is not open", status_code=403) from exc
+    raise DomainError(
+        "Could not start a new quiz attempt. Try again.",
+        status_code=409,
     ) from last_error
 
 
@@ -274,7 +261,7 @@ async def _open_new_attempt(
         )
     )
     if quiz_version.max_attempts is not None and int(counted or 0) >= quiz_version.max_attempts:
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Maximum attempts reached")
+        raise DomainError("Maximum attempts reached", status_code=409)
     now = datetime.now(UTC)
     deadline_at = (
         now + timedelta(seconds=quiz_version.duration_seconds)
@@ -293,7 +280,7 @@ async def _open_new_attempt(
         pass_threshold_percent=quiz_version.pass_threshold_percent,
     )
     session.add(attempt)
-    await session.commit()
+    await session.flush()
     await session.refresh(attempt)
     return await _start_response(session, quiz, quiz_version, attempt)
 
@@ -306,7 +293,7 @@ async def _start_response(
 ) -> StartAttemptResponse:
     target_id = quiz.subtopic_id if quiz.subtopic_id is not None else quiz.topic_id
     if target_id is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Quiz not found")
+        raise DomainError("Quiz not found", status_code=404)
     return StartAttemptResponse(
         id=attempt.id,
         quiz_id=quiz.id,
@@ -333,9 +320,9 @@ async def _owned_attempt(
 ) -> QuizAttempt:
     attempt = await session.get(QuizAttempt, attempt_id, with_for_update=for_update)
     if attempt is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Attempt not found")
+        raise DomainError("Attempt not found", status_code=404)
     if scope.self_student_id is None or attempt.student_id != scope.self_student_id:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Attempt not found")
+        raise DomainError("Attempt not found", status_code=404)
     return attempt
 
 
@@ -346,7 +333,7 @@ async def _quiz_for_quiz_version(session: AsyncSession, quiz_version_id: UUID) -
         .where(QuizVersion.id == quiz_version_id)
     )
     if quiz is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Quiz not found")
+        raise DomainError("Quiz not found", status_code=404)
     return quiz
 
 
@@ -360,21 +347,19 @@ async def submit_attempt(
     # pass the status check and then collide on uq_attempt_answers_attempt_question.
     attempt = await _owned_attempt(session, scope, attempt_id, for_update=True)
     if attempt.status not in {QuizAttemptStatus.IN_PROGRESS, QuizAttemptStatus.NOT_STARTED}:
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT, detail="Attempt is not open for submission"
-        )
+        raise DomainError("Attempt is not open for submission", status_code=409)
 
     quiz_version = await session.get(QuizVersion, attempt.quiz_version_id)
     if quiz_version is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Quiz not found")
+        raise DomainError("Quiz not found", status_code=404)
     if attempt.deadline_at is not None:
         deadline = attempt.deadline_at
         if deadline.tzinfo is None:
             deadline = deadline.replace(tzinfo=UTC)
         if deadline < datetime.now(UTC):
             attempt.status = QuizAttemptStatus.EXPIRED
-            await session.commit()
-            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Attempt expired")
+            await session.flush()
+            raise DomainError("Attempt expired", status_code=409)
 
     items = (
         await session.scalars(
@@ -386,14 +371,9 @@ async def submit_attempt(
     item_by_number = {item.sequence: item for item in items}
     numbers = [answer.question_number for answer in payload.answers]
     if len(numbers) != len(set(numbers)):
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Duplicate answers"
-        )
+        raise DomainError("Duplicate answers", status_code=422)
     if set(numbers) != set(item_by_number):
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail="Answers must match the quiz question set",
-        )
+        raise DomainError("Answers must match the quiz question set", status_code=422)
     answers_by_number = {answer.question_number: answer for answer in payload.answers}
 
     total_marks = Decimal("0")
@@ -416,10 +396,7 @@ async def submit_attempt(
             )
         )
         if label_exists is None:
-            raise HTTPException(
-                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-                detail=f"Invalid option for question {number}",
-            )
+            raise DomainError(f"Invalid option for question {number}", status_code=422)
         is_correct = bool(
             key is not None
             and selected_label is not None
@@ -467,12 +444,22 @@ async def submit_attempt(
     attempt.pass_threshold_percent = pass_threshold
     attempt.passed = percent >= pass_threshold
     try:
-        await session.commit()
+        await session.flush()
     except IntegrityError as exc:
         await session.rollback()
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT, detail="Attempt is not open for submission"
-        ) from exc
+        raise DomainError("Attempt is not open for submission", status_code=409) from exc
+
+    quiz = await _quiz_for_quiz_version(session, attempt.quiz_version_id)
+    profile = await session.get(StudentProfile, attempt.student_id)
+    await record_event(
+        session,
+        institution_id=scope.institution_id,
+        actor_user_id=profile.user_id if profile is not None else None,
+        event_type=AuditAction.QUIZ_SUBMITTED,
+        entity_type="quiz_attempt",
+        entity_id=attempt.id,
+        payload={"quiz_id": str(quiz.id), "passed": attempt.passed},
+    )
 
     return await get_attempt(session, scope, attempt.id)
 
@@ -540,10 +527,7 @@ async def list_attempts_for_quiz(
     quiz, _version = await _released_quiz_version_by_quiz_id(session, quiz_id)
     node = await _node_for_quiz(session, quiz)
     _require_covers_quiz(scope, node)
-    if scope.self_student_id is None:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN, detail="Student enrollment required"
-        )
+    enrollment = await require_subject_enrollment(session, scope, node.offering.id)
     version_ids = (
         await session.scalars(select(QuizVersion.id).where(QuizVersion.quiz_id == quiz.id))
     ).all()
@@ -551,7 +535,7 @@ async def list_attempts_for_quiz(
         await session.scalars(
             select(QuizAttempt)
             .where(
-                QuizAttempt.student_id == scope.self_student_id,
+                QuizAttempt.student_id == enrollment.student_id,
                 QuizAttempt.quiz_version_id.in_(version_ids),
                 QuizAttempt.status != QuizAttemptStatus.ABANDONED,
             )

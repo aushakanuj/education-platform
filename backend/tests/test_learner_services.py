@@ -6,13 +6,13 @@ from unittest.mock import patch
 from uuid import UUID
 
 import pytest
-from fastapi import HTTPException
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Session
 
 from education_platform.api.deps import Principal
+from education_platform.core.errors import DomainError
 from education_platform.modules.academics.service import (
     enroll_student_in_poc_math,
     list_my_enrollments,
@@ -131,7 +131,7 @@ async def test_materials_and_attempt_flow(
     fetched = await get_attempt(async_db_session, scope, UUID(str(started.id)))
     assert fetched.score_percent == result.score_percent
 
-    with pytest.raises(HTTPException) as exc:
+    with pytest.raises(DomainError) as exc:
         await submit_attempt(
             async_db_session,
             scope,
@@ -224,8 +224,8 @@ async def test_submit_attempt_integrity_error_is_conflict_not_500(
         raise IntegrityError("INSERT", {}, Exception("duplicate key"))
 
     with (
-        patch.object(async_db_session, "commit", colliding_commit),
-        pytest.raises(HTTPException) as exc,
+        patch.object(async_db_session, "flush", colliding_commit),
+        pytest.raises(DomainError) as exc,
     ):
         await submit_attempt(async_db_session, scope, started.id, payload)
     assert exc.value.status_code == 409
@@ -256,10 +256,10 @@ async def test_unenrolled_student_blocked(
     scope = await scope_for(async_db_session, principal)
     topics = await list_topics(async_db_session, scope)
     assert topics == []
-    with pytest.raises(HTTPException) as exc:
+    with pytest.raises(DomainError) as exc:
         await get_lesson(async_db_session, scope, "rectangles_squares_properties")
     assert exc.value.status_code == 404
-    with pytest.raises(HTTPException) as start_exc:
+    with pytest.raises(DomainError) as start_exc:
         await start_attempt(async_db_session, scope, "rectangles_squares_properties")
     assert start_exc.value.status_code == 404
 
@@ -268,10 +268,10 @@ async def test_unenrolled_student_blocked(
 async def test_missing_topic(async_db_session: AsyncSession, db_session: Session) -> None:
     _seed(db_session)
     _principal, scope = await _student_principal(async_db_session)
-    with pytest.raises(HTTPException) as exc:
+    with pytest.raises(DomainError) as exc:
         await get_lesson(async_db_session, scope, "missing")
     assert exc.value.status_code == 404
-    with pytest.raises(HTTPException) as missing:
+    with pytest.raises(DomainError) as missing:
         await get_subtopic_lesson(
             async_db_session, scope, UUID("00000000-0000-0000-0000-000000000001")
         )

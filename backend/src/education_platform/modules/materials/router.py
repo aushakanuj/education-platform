@@ -5,13 +5,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from education_platform.api.deps import Principal, get_scope, require_administrator
 from education_platform.db.session import get_session
+from education_platform.modules.assessments.schemas import QuizMaterial
 from education_platform.modules.authorization.scope import Scope
 from education_platform.modules.materials import service
 from education_platform.modules.materials.schemas import (
     LessonMaterial,
     MaterialProgressOut,
     MaterialProgressUpdate,
-    QuizMaterial,
     TopicSummary,
 )
 from education_platform.modules.rag import service as rag_service

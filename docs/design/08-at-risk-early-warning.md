@@ -198,6 +198,13 @@ Neither was derived from anything — both were picked for demo plausibility. Wo
 not even match doc 06 §6's own already-agreed institution default mastery threshold of `70%`, which
 is a small, concrete illustration of exactly the drift two competing numbers produce.
 
+**Status: done.** Both placeholders were removed in the same change that shipped the engine
+(`RosterPage.tsx`'s "worth a look" banner and per-row coloring, and `StudentPage.tsx`'s
+`attemptTrend()` function and its banner). Both pages now link to the real at-risk flags list
+instead. `ATTENDANCE_THRESHOLD` in `StudentPage.tsx` was doing double duty as a genuine,
+unrelated exam-eligibility rule (below 75% attendance, cannot sit the end-of-term exam) — that
+rule was kept and renamed to `EXAM_ELIGIBILITY_ATTENDANCE`, not deleted.
+
 ## 11. Test matrix
 
 To be implemented alongside the engine, in the style of doc 02 §11a.5's table.
@@ -225,7 +232,8 @@ To be implemented alongside the engine, in the style of doc 02 §11a.5's table.
 5. No automated action of any kind follows from a flag being raised.
 6. Dismissing or viewing a flag produces an audit entry.
 7. The three named cases in §6.3 behave as specified.
-8. Both placeholder thresholds named in §10 are removed in the same change that ships this.
+8. Both placeholder thresholds named in §10 are removed in the same change that ships this. Done —
+   see §10.
 
 ## 13. Deferred scope
 
