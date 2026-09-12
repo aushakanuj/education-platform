@@ -1,12 +1,14 @@
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session
 
 from education_platform.core.config import get_settings
+from education_platform.core.errors import DomainError
 from education_platform.db import models as _models
 from education_platform.db.url import to_sync_url
 from education_platform.modules.academics.router import router as academics_router
@@ -20,6 +22,7 @@ from education_platform.modules.insights.router import router as insights_router
 from education_platform.modules.materials.router import router as materials_router
 from education_platform.modules.materials.seed import seed_approved_materials
 from education_platform.modules.rag.router import router as rag_router
+from education_platform.modules.text_to_sql.router import router as text_to_sql_router
 
 _ = _models
 
@@ -57,7 +60,13 @@ app.include_router(assessments_router, prefix=settings.api_v1_prefix)
 app.include_router(audit_router, prefix=settings.api_v1_prefix)
 app.include_router(insights_router, prefix=settings.api_v1_prefix)
 app.include_router(authoring_router, prefix=settings.api_v1_prefix)
+app.include_router(text_to_sql_router, prefix=settings.api_v1_prefix)
 app.include_router(at_risk_router, prefix=settings.api_v1_prefix)
+
+
+@app.exception_handler(DomainError)
+async def domain_error_handler(_request: Request, exc: DomainError) -> JSONResponse:
+    return JSONResponse(status_code=exc.status_code, content={"detail": exc.detail})
 
 
 @app.get("/health", tags=["system"])

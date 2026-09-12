@@ -3,12 +3,12 @@
 from __future__ import annotations
 
 import pytest
-from fastapi import HTTPException
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Session
 
 from education_platform.api.deps import Principal
+from education_platform.core.errors import DomainError
 from education_platform.modules.auth.models import Institution
 from education_platform.modules.auth.schemas import LoginRequest, ProvisionStudentRequest
 from education_platform.modules.auth.service import login, provision_student
@@ -58,7 +58,7 @@ async def test_provision_duplicate_rejected(
         student_identifier="DUP-1",
     )
     await provision_student(async_db_session, payload)
-    with pytest.raises(HTTPException) as exc:
+    with pytest.raises(DomainError) as exc:
         await provision_student(async_db_session, payload)
     assert exc.value.status_code == 409
 
@@ -77,7 +77,7 @@ async def test_login_unknown_institution(
             student_identifier="X-1",
         ),
     )
-    with pytest.raises(HTTPException) as exc:
+    with pytest.raises(DomainError) as exc:
         await login(
             async_db_session,
             LoginRequest(

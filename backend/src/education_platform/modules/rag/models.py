@@ -40,11 +40,6 @@ class KnowledgeDocumentVersionStatus(str, enum.Enum):
     ARCHIVED = "archived"
 
 
-class IngestTargetKind(str, enum.Enum):
-    SOURCE_MATERIAL_VERSION = "source_material_version"
-    KNOWLEDGE_DOCUMENT_VERSION = "knowledge_document_version"
-
-
 class IngestJobStatus(str, enum.Enum):
     QUEUED = "queued"
     RUNNING = "running"
@@ -137,20 +132,27 @@ class KnowledgeChunk(UUIDTimestampMixin, Base):
 
 
 class IngestJob(UUIDTimestampMixin, Base):
+    """Work-queue row. Target is an "exclusive arc": exactly one of the two FK
+    columns below is set, and it alone tells you what kind of job this is —
+    no separate discriminator column needed.
+    """
+
     __tablename__ = "ingest_jobs"
     __table_args__ = (
         CheckConstraint(
-            "target_kind IN ('source_material_version', 'knowledge_document_version')",
-            name="ck_ingest_jobs_target_kind",
+            "(source_material_version_id IS NOT NULL) != "
+            "(knowledge_document_version_id IS NOT NULL)",
+            name="ck_ingest_jobs_exactly_one_target",
         ),
         Index("ix_ingest_jobs_status_created_at", "status", "created_at"),
     )
 
-    target_kind: Mapped[IngestTargetKind] = mapped_column(
-        str_enum(IngestTargetKind, "ingest_target_kind"),
-        index=True,
+    source_material_version_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("source_material_versions.id"), nullable=True, index=True
     )
-    target_id: Mapped[UUID] = mapped_column(index=True)
+    knowledge_document_version_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("knowledge_document_versions.id"), nullable=True, index=True
+    )
     status: Mapped[IngestJobStatus] = mapped_column(
         str_enum(IngestJobStatus, "ingest_job_status"),
         default=IngestJobStatus.QUEUED,
@@ -163,6 +165,12 @@ class ChunkEmbedding(Base):
     """pgvector row for a source/knowledge chunk embedding."""
 
     __tablename__ = "chunk_embeddings"
+    __table_args__ = (
+        CheckConstraint(
+            "doc_kind IN ('source_material_version', 'knowledge_document_version')",
+            name="ck_chunk_embeddings_doc_kind",
+        ),
+    )
 
     chunk_id: Mapped[UUID] = mapped_column(primary_key=True)
     embedding: Mapped[list[float]] = mapped_column(Vector(384))

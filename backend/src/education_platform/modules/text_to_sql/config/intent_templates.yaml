@@ -1,0 +1,847 @@
+# =============================================================================
+# Text-to-SQL — Core Template Library (v1.1 — section-scoping fix pass)
+# =============================================================================
+#
+# STATUS: LIVE. graph.py wires `intent_router` directly after
+# `question_validator`, with conditional routing straight into `validate_sql`
+# on a template match (confirmed by test_graph_places_router_after_question_validator).
+# A template match skips load_schema/generate_sql entirely. Any edit here has
+# immediate, live effect on production query behavior — this is not a draft.
+#
+# CHANGELOG (v1.1 — section-scoping correctness fix):
+#   Every template that scopes "my students" via a subquery over
+#   student_subject_enrollments (count_my_students, average_mastery_by_subject,
+#   average_attendance_rate, list_students_below_score_in_subject,
+#   top_students_by_subject, students_meeting_performance_bar,
+#   students_needing_support, students_below_attendance_threshold, and
+#   latest_quiz_attempt's EXISTS clause) was missing the section-level
+#   predicate a teaching_assignments row with a non-NULL section_id requires.
+#   `student_subject_enrollments` has NO section_id column of its own --
+#   section lives on `student_grade_enrollments` (via
+#   sse.grade_enrollment_id -> sge.id -> sge.section_id), confirmed against
+#   the live schema. Fixed by joining student_grade_enrollments and adding
+#   `AND (ta.section_id IS NULL OR ta.section_id = sge.section_id)` --
+#   mirroring the exact pattern this project's own RLS migration
+#   (e1f2a3b4c5d6, student_subject_enrollments policy / app_teaches_student())
+#   already uses for the identical check. In this environment RLS already
+#   masks the missing predicate (student_subject_enrollments' own RLS policy
+#   independently enforces the same boundary), so this was not a live data
+#   leak, but the template SQL must not rely solely on RLS to be correct --
+#   apply_role_scope's AST rewrite is skipped for query_source=="template",
+#   so each template's own hand-written scoping is the only application-layer
+#   check for these questions.
+#   list_students_in_section had the same wrong-column reference
+#   (`sse.section_id`) in its own JOIN/WHERE, but there it is not
+#   RLS-masked -- it referenced a column that does not exist at all, and
+#   errored with `column sse.section_id does not exist` on every execution
+#   (confirmed live). Fixed the same way, plus added a missing
+#   `sse.status = 'active'` filter to match every other template's pattern.
+#   top_students_by_subject: LIMIT :limit changed to LIMIT COALESCE(:limit, 5)
+#   -- Postgres treats a NULL LIMIT as "no limit," so an explicit null from
+#   the router (rather than an omitted key, which already defaults via
+#   intent_router.py's _valid_parameters) would have returned the whole
+#   roster instead of the documented default of 5.
+#   latest_quiz_attempt: added a deterministic tiebreaker
+#   (ORDER BY qa.submitted_at DESC, qa.id DESC) so simultaneous submissions
+#   resolve the same way on every call.
+#   Not changed: Physics was deliberately NOT added to the subject enums on
+#   average_mastery_by_subject / list_students_below_score_in_subject /
+#   top_students_by_subject -- confirmed live against the seeded DB that no
+#   Physics subject or student_360 data exists yet; adding it would let the
+#   router accept a subject that can never return data.
+#
+# SCOPE — read this before adding templates:
+#   This library deliberately does NOT attempt to cover every question a
+#   teacher might ask. Per the governed-hybrid design rule: a WRONG TEMPLATE
+#   (one that partially matches and silently answers a different question) is
+#   a worse outcome than falling back to the hardened free-form path. These 12
+#   cover the highest-value, most repeated question shapes observed in the
+#   golden evaluation set. Everything else is expected to abstain to free-form.
+#
+# THRESHOLDS REQUIRING SIGN-OFF:
+#   Templates marked `requires_signoff: true` encode a business/policy
+#   threshold that does NOT exist anywhere in the schema. The values below are
+#   plausible defaults chosen for review — they are NOT authoritative and must
+#   be confirmed by the school/client before this library goes live. This is
+#   the entire point of templating these questions: the definition becomes a
+#   reviewed institutional decision instead of a value the model invents
+#   fresh (and inconsistently) on every call.
+#
+# CONVENTIONS:
+#   :current_user_id  — bound server-side from the verified JWT, never from
+#                       the question, the LLM, or the request body.
+#   Scoping           — written directly into each template's SQL by the
+#                       author. apply_role_scope's `query_source == "template"`
+#                       branch skips its AST rewrite for these, but still runs
+#                       its column blocklist and audit recording.
+#   Downstream        — every template still passes through validate_sql,
+#                       execute_sql (least-privilege role + RLS), sanity_check,
+#                       compose_answer, and audit_log, unchanged.
+#
+# =============================================================================
+
+# =============================================================================
+# INTENT ROUTER CONFIGURATION
+# =============================================================================
+#
+# The router decides whether a question is sufficiently covered by one of the
+# governed templates. It MUST be conservative: a wrong template is worse than
+# falling back to the hardened free-form Text-to-SQL path.
+#
+# IMPORTANT:
+#   - confidence is an LLM score, NOT a calibrated probability.
+#   - application code MUST enforce the threshold and the other gates below.
+#   - the router must NEVER be forced to select a template.
+#
+intent_router:
+  version: 1
+
+  routing_policy:
+    template_route_min_confidence: 0.90
+    fallback_route: free_form
+    never_force_template_match: true
+
+    template_route_requires:
+      - known_intent
+      - confidence_gte_threshold
+      - all_required_parameters_present
+      - parameters_valid
+      - request_within_template_scope
+      - no_unresolved_ambiguity
+
+    principle: >
+      Optimize for very high template precision rather than maximum template
+      coverage. If there is meaningful uncertainty, route to free_form.
+
+  output_contract:
+    route:
+      type: enum
+      values: [template, free_form]
+      required: true
+    intent:
+      type: string_or_null
+      required: true
+    confidence:
+      type: number
+      min: 0
+      max: 1
+      required: true
+    parameters:
+      type: object
+      required: true
+
+  normalization:
+    subject:
+      canonical_values: [Mathematics, Science, English, Social Studies, Arabic, Physics]
+      aliases:
+        Math: Mathematics
+        Maths: Mathematics
+        Sci: Science
+        Eng: English
+        Phy: Physics
+
+  decision_rules:
+    - Match semantic intent, not keywords alone.
+    - Use the template description and examples as the intent definition.
+    - Negative/boundary examples are evidence for abstention.
+    - Every required parameter must be extracted and validated.
+    - Unsupported qualifiers or operations force free_form.
+    - Ambiguous references force free_form rather than guessing.
+    - Never use a template merely because it is the closest available match.
+    - Templates marked requires_signoff=true must not be used until approved.
+    - Curriculum-content questions remain free_form.
+    - Admin-, Student-, and Parent-scoped questions remain free_form.
+
+templates:
+
+  # ---------------------------------------------------------------------------
+  # LATEST QUIZ ATTEMPT
+  # ---------------------------------------------------------------------------
+  - name: latest_quiz_attempt
+    description: >
+      The most recent submitted quiz attempt accessible to the requesting
+      teacher, optionally restricted to one named subject. This is one intent
+      for both subject-qualified and unqualified questions; subject is NULL
+      when no subject is named. "Who took" means the latest submitted attempt.
+    example_questions:
+      - "Who took the last quiz?"
+      - "Who took the most recent quiz?"
+      - "Who took the last quiz in Math?"
+      - "Who took the last quiz in Maths?"
+      - "Who took the last quiz in Sci?"
+      - "Who took the last quiz in Eng?"
+      - "Who took the last quiz in Phy?"
+      - "Who took the latest Science quiz?"
+      - "Who took the most recent English quiz?"
+      - "Who was the most recent student to take a quiz in Physics?"
+      - "What was the score of the student who took the last quiz?"
+    parameters:
+      subject:
+        type: enum
+        values: [Mathematics, Science, English, Social Studies, Arabic, Physics]
+        required: false
+        default: null
+    requires_signoff: false
+    router:
+        intent_group: quiz_attempts
+        positive_examples:
+        - Who took the last quiz?
+        - Who took the most recent quiz?
+        - Who took the last quiz in Math?
+        - Who took the last quiz in Maths?
+        - Who took the last quiz in Sci?
+        - Who took the last quiz in Eng?
+        - Who took the last quiz in Phy?
+        - Who took the latest Science quiz?
+        - Who took the most recent English quiz?
+        - Who was the most recent student to take a quiz in Physics?
+        - What was the score of the student who took the last quiz?
+        negative_examples:
+        - What is the average quiz score?
+        - Which students are struggling?
+        - Show me all students who took a quiz.
+        - What was the highest quiz score?
+        - How did my students perform overall?
+        - Which students scored below 40%?
+        supported_operations:
+        - latest
+        - most_recent
+        - last
+        required_parameters: []
+
+    sql: |
+      SELECT sp.full_name, qa.score_percent, qa.submitted_at
+      FROM quiz_attempts qa
+      JOIN student_profiles sp ON sp.id = qa.student_id
+      JOIN quiz_versions qv ON qv.id = qa.quiz_version_id
+      JOIN common_mastery_quizzes cmq ON cmq.id = qv.quiz_id
+      LEFT JOIN subtopics st ON st.id = cmq.subtopic_id
+      LEFT JOIN topics topic_from_subtopic ON topic_from_subtopic.id = st.topic_id
+      LEFT JOIN topics topic_direct ON topic_direct.id = cmq.topic_id
+      LEFT JOIN grade_subject_offerings gso_subtopic
+        ON gso_subtopic.id = topic_from_subtopic.grade_subject_offering_id
+      LEFT JOIN grade_subject_offerings gso_topic
+        ON gso_topic.id = topic_direct.grade_subject_offering_id
+      LEFT JOIN subjects subject_subtopic ON subject_subtopic.id = gso_subtopic.subject_id
+      LEFT JOIN subjects subject_topic ON subject_topic.id = gso_topic.subject_id
+      WHERE qa.submitted_at IS NOT NULL
+        AND (CAST(:subject AS VARCHAR) IS NULL
+             OR COALESCE(subject_subtopic.name, subject_topic.name) = CAST(:subject AS VARCHAR))
+        AND EXISTS (
+          SELECT 1
+          FROM teaching_assignments ta
+          JOIN student_subject_enrollments sse
+            ON sse.grade_subject_offering_id = ta.grade_subject_offering_id
+          WHERE ta.teacher_user_id = :current_user_id
+            AND ta.status = 'active'
+            AND sse.status = 'active'
+            AND sse.student_id = qa.student_id
+            AND sse.grade_subject_offering_id = COALESCE(gso_subtopic.id, gso_topic.id)
+            AND (ta.section_id IS NULL OR ta.section_id = (
+              SELECT sge.section_id FROM student_grade_enrollments sge
+              WHERE sge.id = sse.grade_enrollment_id
+            ))
+        )
+      ORDER BY qa.submitted_at DESC, qa.id DESC
+      LIMIT 1
+
+  # ---------------------------------------------------------------------------
+  # 1. ROSTER SIZE  (golden eval row 1)
+  # ---------------------------------------------------------------------------
+  - name: count_my_students
+    description: >
+      Total count of the requesting teacher's own students across all their
+      active teaching assignments. For questions asking "how many students do
+      I teach / how many students do I have" with no subject, grade, or
+      performance qualifier.
+    example_questions:
+      - "How many students do I teach in total?"
+      - "How many students do I have?"
+    parameters: {}
+    requires_signoff: false
+    router:
+        intent_group: teacher_roster
+        positive_examples:
+        - How many students do I teach in total?
+        - How many students do I have?
+        negative_examples:
+        - How many students do I teach in Mathematics?
+        - Which students are struggling?
+        supported_operations:
+        - count
+        required_parameters: []
+
+    sql: |
+      SELECT COUNT(DISTINCT sse.student_id) AS total_students
+      FROM teaching_assignments ta
+      JOIN student_subject_enrollments sse
+        ON sse.grade_subject_offering_id = ta.grade_subject_offering_id
+      LEFT JOIN student_grade_enrollments sge ON sge.id = sse.grade_enrollment_id
+      WHERE ta.teacher_user_id = :current_user_id
+        AND ta.status = 'active'
+        AND sse.status = 'active'
+        AND (ta.section_id IS NULL OR ta.section_id = sge.section_id)
+
+  # ---------------------------------------------------------------------------
+  # 2. SUBJECT AVERAGE  (golden eval row 2)
+  # ---------------------------------------------------------------------------
+  - name: average_mastery_by_subject
+    description: >
+      Average mastery score for the requesting teacher's own students in one
+      named subject. For "what's my class average in X" / "how are my students
+      doing in X" phrased as an average, with an explicit subject named.
+    example_questions:
+      - "What is the average mastery score for my students in Mathematics?"
+      - "What's my class average in Science?"
+    parameters:
+      subject:
+        type: enum
+        values: [Mathematics, Science, English, Social Studies, Arabic]
+        required: true
+    requires_signoff: false
+    router:
+        intent_group: performance
+        positive_examples:
+        - What is the average mastery score for my students in Mathematics?
+        - What's my class average in Science?
+        negative_examples:
+        - Who are my top students in Mathematics?
+        - Which students scored below 40% in Mathematics?
+        supported_operations:
+        - average
+        required_parameters:
+        - subject
+
+    sql: |
+      SELECT AVG(s.mastery_percent) AS average_score
+      FROM student_360 s
+      JOIN subjects sub ON sub.id = s.subject_id
+      WHERE sub.name = :subject
+        AND s.student_id IN (
+          SELECT sse.student_id
+          FROM student_subject_enrollments sse
+          JOIN teaching_assignments ta
+            ON ta.grade_subject_offering_id = sse.grade_subject_offering_id
+          LEFT JOIN student_grade_enrollments sge ON sge.id = sse.grade_enrollment_id
+          WHERE ta.teacher_user_id = :current_user_id
+            AND ta.status = 'active'
+            AND (ta.section_id IS NULL OR ta.section_id = sge.section_id)
+        )
+
+  # ---------------------------------------------------------------------------
+  # 3. ATTENDANCE RATE  (golden eval row 4)
+  # ---------------------------------------------------------------------------
+  - name: average_attendance_rate
+    description: >
+      Average attendance percentage across the requesting teacher's own
+      students for the current active academic period.
+    example_questions:
+      - "What is the average attendance rate for my students this term?"
+      - "How is attendance in my classes?"
+    parameters: {}
+    requires_signoff: false
+    router:
+        intent_group: attendance
+        positive_examples:
+        - What is the average attendance rate for my students this term?
+        - How is attendance in my classes?
+        negative_examples:
+        - Which students have poor attendance?
+        - How many students have attendance below 40%?
+        supported_operations:
+        - average
+        required_parameters: []
+
+    sql: |
+      SELECT AVG(s.attendance_percent) AS average_attendance
+      FROM student_360 s
+      WHERE s.student_id IN (
+        SELECT sse.student_id
+        FROM student_subject_enrollments sse
+        JOIN teaching_assignments ta
+          ON ta.grade_subject_offering_id = sse.grade_subject_offering_id
+        LEFT JOIN student_grade_enrollments sge ON sge.id = sse.grade_enrollment_id
+        WHERE ta.teacher_user_id = :current_user_id
+          AND ta.status = 'active'
+          AND (ta.section_id IS NULL OR ta.section_id = sge.section_id)
+      )
+
+  # ---------------------------------------------------------------------------
+  # 4. SECTION ROSTER  (golden eval row 7)
+  # ---------------------------------------------------------------------------
+  - name: list_students_in_section
+    description: >
+      Named roster of the requesting teacher's students in one specific
+      section they teach. Section names follow the grade+letter convention
+      ('8A', '8B'), never spelled-out forms like 'Section A'.
+    example_questions:
+      - "List my students in section 8A."
+      - "Who are the students in 9A?"
+    parameters:
+      section_name:
+        type: string
+        pattern: '^[0-9]{1,2}[A-Z]$'
+        required: true
+    requires_signoff: false
+    router:
+        intent_group: teacher_roster
+        positive_examples:
+        - List my students in section 8A.
+        - Who are the students in 9A?
+        negative_examples:
+        - How many students do I teach?
+        - What sections am I assigned to?
+        supported_operations:
+        - list
+        required_parameters:
+        - section_name
+
+    sql: |
+      SELECT DISTINCT sp.full_name
+      FROM student_profiles sp
+      JOIN student_subject_enrollments sse ON sse.student_id = sp.id
+      JOIN student_grade_enrollments sge ON sge.id = sse.grade_enrollment_id
+      JOIN teaching_assignments ta
+        ON ta.grade_subject_offering_id = sse.grade_subject_offering_id
+      JOIN sections sec ON sec.id = sge.section_id
+      WHERE sec.name = :section_name
+        AND ta.teacher_user_id = :current_user_id
+        AND ta.status = 'active'
+        AND sse.status = 'active'
+        AND (ta.section_id IS NULL OR ta.section_id = sge.section_id)
+      ORDER BY sp.full_name
+
+  # ---------------------------------------------------------------------------
+  # 5. LOW SCORERS BY SUBJECT  (golden eval rows 6, 14)
+  # ---------------------------------------------------------------------------
+  - name: list_students_below_score_in_subject
+    description: >
+      Named list of the requesting teacher's students whose mastery in a named
+      subject falls below an explicitly-stated threshold. Requires the
+      threshold to appear in the question — if the question says "low
+      scoring" or "below average" without a number, this template must NOT
+      match (route to students_needing_support instead, or abstain).
+    example_questions:
+      - "Which of my students scored below 40% in Mathematics?"
+      - "Show me students under 50 in Science."
+    parameters:
+      subject:
+        type: enum
+        values: [Mathematics, Science, English, Social Studies, Arabic]
+        required: true
+      threshold:
+        type: number
+        min: 0
+        max: 100
+        required: true
+    requires_signoff: false
+    router:
+        intent_group: performance
+        positive_examples:
+        - Which of my students scored below 40% in Mathematics?
+        - Show me students under 50 in Science.
+        negative_examples:
+        - Which students are struggling in Mathematics?
+        - What is the average score in Mathematics?
+        supported_operations:
+        - list
+        required_parameters:
+        - subject
+        - threshold
+
+    sql: |
+      SELECT sp.full_name, s.mastery_percent
+      FROM student_360 s
+      JOIN student_profiles sp ON sp.id = s.student_id
+      JOIN subjects sub ON sub.id = s.subject_id
+      WHERE sub.name = :subject
+        AND s.mastery_percent < :threshold
+        AND s.student_id IN (
+          SELECT sse.student_id
+          FROM student_subject_enrollments sse
+          JOIN teaching_assignments ta
+            ON ta.grade_subject_offering_id = sse.grade_subject_offering_id
+          LEFT JOIN student_grade_enrollments sge ON sge.id = sse.grade_enrollment_id
+          WHERE ta.teacher_user_id = :current_user_id
+            AND ta.status = 'active'
+            AND (ta.section_id IS NULL OR ta.section_id = sge.section_id)
+        )
+      ORDER BY s.mastery_percent ASC
+
+  # ---------------------------------------------------------------------------
+  # 6. TOP N  (golden eval row 49)
+  # ---------------------------------------------------------------------------
+  - name: top_students_by_subject
+    description: >
+      The requesting teacher's highest-scoring students in a named subject,
+      limited to an explicitly-requested count.
+    example_questions:
+      - "Who are my top 5 highest-scoring students in Science?"
+      - "Show me the top 10 in Mathematics."
+    parameters:
+      subject:
+        type: enum
+        values: [Mathematics, Science, English, Social Studies, Arabic]
+        required: true
+      limit:
+        type: integer
+        min: 1
+        max: 50
+        default: 5
+        required: false
+    requires_signoff: false
+    router:
+        intent_group: performance
+        positive_examples:
+        - Who are my top 5 highest-scoring students in Science?
+        - Show me the top 10 in Mathematics.
+        negative_examples:
+        - Which students scored below 40% in Mathematics?
+        - What is the average score in Mathematics?
+        supported_operations:
+        - top_n
+        required_parameters:
+        - subject
+
+    sql: |
+      SELECT sp.full_name, s.mastery_percent
+      FROM student_360 s
+      JOIN student_profiles sp ON sp.id = s.student_id
+      JOIN subjects sub ON sub.id = s.subject_id
+      WHERE sub.name = :subject
+        AND s.student_id IN (
+          SELECT sse.student_id
+          FROM student_subject_enrollments sse
+          JOIN teaching_assignments ta
+            ON ta.grade_subject_offering_id = sse.grade_subject_offering_id
+          LEFT JOIN student_grade_enrollments sge ON sge.id = sse.grade_enrollment_id
+          WHERE ta.teacher_user_id = :current_user_id
+            AND ta.status = 'active'
+            AND (ta.section_id IS NULL OR ta.section_id = sge.section_id)
+        )
+      ORDER BY s.mastery_percent DESC
+      LIMIT COALESCE(:limit, 5)
+
+  # ---------------------------------------------------------------------------
+  # 7. SELF-REFERENCE: SUBJECTS  (golden eval row 15 — Finding 2 regression)
+  # ---------------------------------------------------------------------------
+  - name: my_subjects
+    description: >
+      The subjects the requesting teacher is currently assigned to teach.
+      Golden eval row 15 — free-form generation historically fabricated an
+      identity placeholder here, and separately dropped one of two real
+      subjects from the composed answer.
+    example_questions:
+      - "What subject do I teach?"
+      - "Which subjects am I assigned to?"
+    parameters: {}
+    requires_signoff: false
+    router:
+        intent_group: self_reference
+        positive_examples:
+        - What subject do I teach?
+        - Which subjects am I assigned to?
+        negative_examples:
+        - What subjects does the school offer?
+        - How are my students doing in Mathematics?
+        supported_operations:
+        - list
+        required_parameters: []
+
+    sql: |
+      SELECT DISTINCT sub.name AS subject
+      FROM teaching_assignments ta
+      JOIN grade_subject_offerings gso
+        ON gso.id = ta.grade_subject_offering_id
+      JOIN subjects sub ON sub.id = gso.subject_id
+      WHERE ta.teacher_user_id = :current_user_id
+        AND ta.status = 'active'
+      ORDER BY sub.name
+
+  # ---------------------------------------------------------------------------
+  # 8. SELF-REFERENCE: SECTIONS  (golden eval row 16)
+  # ---------------------------------------------------------------------------
+  - name: my_sections
+    description: >
+      The sections the requesting teacher is currently assigned to. Correctly
+      handles the all-sections case (a teaching assignment with a NULL
+      section_id means the teacher covers every section of that offering).
+    example_questions:
+      - "What sections am I assigned to?"
+      - "Which classes do I teach?"
+    parameters: {}
+    requires_signoff: false
+    router:
+        intent_group: self_reference
+        positive_examples:
+        - What sections am I assigned to?
+        - Which classes do I teach?
+        negative_examples:
+        - List my students in section 8A.
+        - What subjects do I teach?
+        supported_operations:
+        - list
+        required_parameters: []
+
+    sql: |
+      SELECT DISTINCT sec.name AS section
+      FROM teaching_assignments ta
+      JOIN grade_subject_offerings gso
+        ON gso.id = ta.grade_subject_offering_id
+      JOIN sections sec
+        ON sec.period_grade_id = gso.period_grade_id
+       AND (ta.section_id IS NULL OR ta.section_id = sec.id)
+      WHERE ta.teacher_user_id = :current_user_id
+        AND ta.status = 'active'
+      ORDER BY sec.name
+
+  # ---------------------------------------------------------------------------
+  # 9. INSTITUTION REFERENCE  (golden eval rows 19, 20, 21)
+  # ---------------------------------------------------------------------------
+  - name: list_school_subjects
+    description: >
+      All subjects offered by the requesting user's institution. Genuinely
+      institution-wide reference data — deliberately NOT restricted to the
+      teacher's own assignments, since the question asks about the school.
+    example_questions:
+      - "What subjects does the school offer?"
+      - "What subjects are available here?"
+    parameters: {}
+    requires_signoff: false
+    router:
+        intent_group: institution_reference
+        positive_examples:
+        - What subjects does the school offer?
+        - What subjects are available here?
+        negative_examples:
+        - What subjects do I teach?
+        - Which subjects are my students taking?
+        supported_operations:
+        - list
+        required_parameters: []
+
+    sql: |
+      SELECT sub.name AS subject
+      FROM subjects sub
+      WHERE sub.institution_id = :current_institution_id
+      ORDER BY sub.name
+
+  # ---------------------------------------------------------------------------
+  # 10. "DOING WELL"  ⚠ REQUIRES SIGN-OFF  (golden eval row 29 — Finding 3)
+  # ---------------------------------------------------------------------------
+  - name: students_meeting_performance_bar
+    description: >
+      Count of the requesting teacher's students who meet the institution's
+      defined performance bar. This template exists specifically because
+      "doing well" has NO definition anywhere in the schema — free-form
+      generation was observed inventing an undisclosed 70% threshold and
+      reporting the result at High confidence with no indication a judgment
+      had been made. The point of this template is that the definition
+      becomes a reviewed, stable, institutional decision.
+    example_questions:
+      - "How many of my students are doing well?"
+      - "How many students are performing well?"
+    parameters: {}
+    requires_signoff: true
+    router:
+        intent_group: performance_policy
+        positive_examples:
+        - How many of my students are doing well?
+        - How many students are performing well?
+        negative_examples:
+        - How many students scored above 70%?
+        - Which students scored below 40%?
+        supported_operations:
+        - count
+        required_parameters: []
+        requires_approved_policy: true
+
+    signoff_note: >
+      ⚠ THRESHOLD NOT YET APPROVED. The values below (mastery >= 70 AND at
+      least one quiz passed) are a plausible default for review, NOT an
+      authoritative school policy. Confirm with the client before use. Whatever
+      is agreed should also be added to schema_catalog.md §6 so the free-form
+      fallback has the same definition available when this template doesn't match.
+    answer_note: >
+      compose_answer should surface the definition alongside the number, e.g.
+      "12 students are doing well (mastery of 70% or above, with at least one
+      quiz passed)." — never a bare count, since the criterion is a policy
+      choice the teacher deserves to see.
+    sql: |
+      SELECT COUNT(DISTINCT s.student_id) AS students_doing_well
+      FROM student_360 s
+      WHERE s.mastery_percent >= 70.00      -- ⚠ REQUIRES SIGN-OFF
+        AND s.quizzes_passed > 0            -- ⚠ REQUIRES SIGN-OFF
+        AND s.student_id IN (
+          SELECT sse.student_id
+          FROM student_subject_enrollments sse
+          JOIN teaching_assignments ta
+            ON ta.grade_subject_offering_id = sse.grade_subject_offering_id
+          LEFT JOIN student_grade_enrollments sge ON sge.id = sse.grade_enrollment_id
+          WHERE ta.teacher_user_id = :current_user_id
+            AND ta.status = 'active'
+            AND (ta.section_id IS NULL OR ta.section_id = sge.section_id)
+        )
+
+  # ---------------------------------------------------------------------------
+  # 11. "STRUGGLING"  ⚠ REQUIRES SIGN-OFF  (golden eval row 30 — Finding 3)
+  # ---------------------------------------------------------------------------
+  - name: students_needing_support
+    description: >
+      Named list of the requesting teacher's students who fall below the
+      institution's defined support threshold. Same rationale as
+      students_meeting_performance_bar — "struggling" has no schema
+      definition, and free-form generation was observed inventing an
+      undisclosed <50% threshold.
+    example_questions:
+      - "Show me the struggling students."
+      - "Which of my students need extra support?"
+      - "Who is falling behind?"
+    parameters: {}
+    requires_signoff: true
+    router:
+        intent_group: support_policy
+        positive_examples:
+        - Show me the struggling students.
+        - Which of my students need extra support?
+        - Who is falling behind?
+        negative_examples:
+        - Which students scored below 40%?
+        - Which students have attendance below 40%?
+        supported_operations:
+        - list
+        required_parameters: []
+        requires_approved_policy: true
+
+    signoff_note: >
+      ⚠ THRESHOLD NOT YET APPROVED. The values below (mastery < 50 OR
+      attendance < 75) are a plausible default for review. Note the attendance
+      component uses the 75% figure already documented in schema_catalog.md §6
+      as the POC attendance-eligibility rule — reusing an existing documented
+      threshold rather than inventing a second one. The mastery component has
+      no existing precedent and is a fresh proposal. Confirm both.
+    answer_note: >
+      compose_answer should state the criterion alongside the list, and should
+      be worded supportively — this output names specific children as
+      struggling, and how it is phrased matters.
+    sql: |
+      SELECT DISTINCT sp.full_name, s.mastery_percent, s.attendance_percent
+      FROM student_360 s
+      JOIN student_profiles sp ON sp.id = s.student_id
+      WHERE (s.mastery_percent < 50.00        -- ⚠ REQUIRES SIGN-OFF
+             OR s.attendance_percent < 75.00) -- ⚠ REQUIRES SIGN-OFF (matches §6 POC rule)
+        AND s.student_id IN (
+          SELECT sse.student_id
+          FROM student_subject_enrollments sse
+          JOIN teaching_assignments ta
+            ON ta.grade_subject_offering_id = sse.grade_subject_offering_id
+          LEFT JOIN student_grade_enrollments sge ON sge.id = sse.grade_enrollment_id
+          WHERE ta.teacher_user_id = :current_user_id
+            AND ta.status = 'active'
+            AND (ta.section_id IS NULL OR ta.section_id = sge.section_id)
+        )
+      ORDER BY s.mastery_percent ASC
+
+  # ---------------------------------------------------------------------------
+  # 12. LOW ATTENDANCE  (golden eval rows 23/24 — Finding 1 regression pair)
+  # ---------------------------------------------------------------------------
+  - name: students_below_attendance_threshold
+    description: >
+      The requesting teacher's students whose attendance falls below an
+      explicitly-stated threshold. Requires the number to appear in the
+      question — vague phrasings ("poor attendance") must NOT match this;
+      they belong to students_needing_support or should abstain.
+      NOTE: this template can return zero rows legitimately. sanity_check's
+      zero_rows / zero_valued_aggregate triggers still apply, and confidence
+      must be reported consistently whether the question was phrased as a
+      list or a count (the Finding 1 regression pair).
+    example_questions:
+      - "Are there any students below 40% attendance? If yes, name them."
+      - "How many students have attendance less than 40%?"
+    parameters:
+      threshold:
+        type: number
+        min: 0
+        max: 100
+        required: true
+      shape:
+        type: enum
+        values: [list, count]
+        required: true
+        note: >
+          Router determines this from question phrasing ("name them" → list,
+          "how many" → count). Both shapes must produce consistent confidence
+          for the same underlying fact.
+    requires_signoff: false
+    router:
+        intent_group: attendance
+        positive_examples:
+        - Are there any students below 40% attendance? If yes, name them.
+        - How many students have attendance less than 40%?
+        negative_examples:
+        - Which students have poor attendance?
+        - What is the average attendance rate?
+        supported_operations:
+        - list
+        - count
+        required_parameters:
+        - threshold
+        - shape
+
+    sql_list: |
+      SELECT sp.full_name, s.attendance_percent
+      FROM student_360 s
+      JOIN student_profiles sp ON sp.id = s.student_id
+      WHERE s.attendance_percent < :threshold
+        AND s.student_id IN (
+          SELECT sse.student_id
+          FROM student_subject_enrollments sse
+          JOIN teaching_assignments ta
+            ON ta.grade_subject_offering_id = sse.grade_subject_offering_id
+          LEFT JOIN student_grade_enrollments sge ON sge.id = sse.grade_enrollment_id
+          WHERE ta.teacher_user_id = :current_user_id
+            AND ta.status = 'active'
+            AND (ta.section_id IS NULL OR ta.section_id = sge.section_id)
+        )
+      ORDER BY s.attendance_percent ASC
+    sql_count: |
+      SELECT COUNT(DISTINCT s.student_id) AS student_count
+      FROM student_360 s
+      WHERE s.attendance_percent < :threshold
+        AND s.student_id IN (
+          SELECT sse.student_id
+          FROM student_subject_enrollments sse
+          JOIN teaching_assignments ta
+            ON ta.grade_subject_offering_id = sse.grade_subject_offering_id
+          LEFT JOIN student_grade_enrollments sge ON sge.id = sse.grade_enrollment_id
+          WHERE ta.teacher_user_id = :current_user_id
+            AND ta.status = 'active'
+            AND (ta.section_id IS NULL OR ta.section_id = sge.section_id)
+        )
+
+# =============================================================================
+# DELIBERATELY NOT TEMPLATED — these must abstain to free-form
+# =============================================================================
+#
+# Recorded explicitly so a future contributor doesn't "helpfully" add them:
+#
+#   - "How many students are present in this class?"
+#       "this class" has no resolvable referent (a teacher has multiple
+#       sections). No template can bind it. Router must abstain or ask for
+#       clarification. (Golden eval row 27.)
+#
+#   - "What is the average score across all 3 subjects?"
+#       The numeric qualifier "3" doesn't map to any parameter — which three?
+#       Forcing a match here is exactly the wrong-template failure mode.
+#       (Golden eval row 28.)
+#
+#   - Curriculum-content questions (topics, quiz questions, source materials)
+#       Free-form handles these; they were only recently scoped (Batches 1-3)
+#       and have known, unresolved join-path defects that a template would
+#       need to solve correctly first, not paper over. (Golden eval rows 3, 45, 46.)
+#
+#   - Anything Admin-, Student-, or Parent-scoped
+#       The API is teacher-only by deliberate decision; parent scoping has no
+#       tested design at all. Templates must not get ahead of that.
+#
+# =============================================================================

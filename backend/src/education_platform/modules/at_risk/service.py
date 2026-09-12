@@ -1,23 +1,17 @@
-"""Compute, store, list, and dismiss at-risk flags -- the only module that touches the
-database on this feature's behalf. `engine.py` decides *whether* a flag exists; this module
-decides *where the numbers come from* and *who is allowed to see the result*, and reuses
-`authorization.predicate` for the second question rather than answering it itself (spec
-Section 7.1 -- this is Rule 7 from the permission model, applied here on purpose).
-"""
+"""At-risk flag persistence and scoped reads."""
 
 from __future__ import annotations
 
 from collections import defaultdict
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
-from typing import Any, cast
 from uuid import UUID
 
 from sqlalchemy import ColumnElement, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from education_platform.modules.academics.models import GradeSubjectOffering, Subject
-from education_platform.modules.assessments.models import QuizAttempt, QuizAttemptStatus
+from education_platform.modules.assessments.models import QuizAttempt
 from education_platform.modules.at_risk.engine import (
     DEFAULT_THRESHOLDS,
     EngineFlag,
@@ -32,47 +26,22 @@ from education_platform.modules.auth.models import StudentProfile
 from education_platform.modules.authorization.predicate import ScopeColumns, scope_predicate_for
 from education_platform.modules.authorization.scope import Scope
 from education_platform.modules.insights.models import student_360
+from education_platform.modules.insights.register import (
+    FINISHED_ATTEMPT_STATUSES,
+    STUDENT_360_IDENTITY_COLUMNS,
+    STUDENT_360_SIGNAL_COLUMNS,
+)
 
-#: How the flags table names the four concepts the boundary reasons about. Same reuse
-#: point every other governed table uses -- see `insights.service.STUDENT_360_COLUMNS`.
-#: The `cast`s are for mypy only: an ORM `Mapped[...]` attribute satisfies `ColumnElement`
-#: at runtime (that is how every `.where(Model.column == ...)` call in this codebase
-#: works) but is typed as `InstrumentedAttribute`, which `ScopeColumns` does not declare
-#: as an accepted type. `insights.service` sidesteps this by building `ScopeColumns` from
-#: a Core `Table`'s `.c.column` instead, which mypy does see as a `ColumnElement` -- not
-#: available here since `AtRiskFlag` is declared as an ORM class, not a Core table.
 AT_RISK_FLAG_COLUMNS = ScopeColumns(
-    institution_id=cast("ColumnElement[Any]", AtRiskFlag.institution_id),
-    student_id=cast("ColumnElement[Any]", AtRiskFlag.student_id),
-    grade_subject_offering_id=cast("ColumnElement[Any]", AtRiskFlag.grade_subject_offering_id),
-    section_id=cast("ColumnElement[Any]", AtRiskFlag.section_id),
+    institution_id=AtRiskFlag.institution_id,
+    student_id=AtRiskFlag.student_id,
+    grade_subject_offering_id=AtRiskFlag.grade_subject_offering_id,
+    section_id=AtRiskFlag.section_id,
 )
 
 
 def flag_scope_predicate(scope: Scope) -> ColumnElement[bool]:
-    """The permission boundary, bound to `at_risk_flags`.
-
-    `section_id` here is the flagged *student's* class section (from their grade
-    enrolment), not a property of the concern itself -- a flag is about a subject, not a
-    class register. An earlier version of this function aliased `section_id` to the
-    `grade_subject_offering_id` column to avoid adding a real one, reasoning that the
-    exact-(offering, section) branch of the teacher grant would become harmlessly
-    redundant with the whole-offering branch. That reasoning was wrong, and
-    test_at_risk_api.py caught it: most real teaching assignments in this codebase name a
-    specific section rather than a whole offering (confirmed against the live synthetic
-    school), so a teacher whose assignment is an exact (offering, section) pair was
-    matched against a fabricated pair of (offering, offering) that could never equal
-    theirs -- every section-scoped teacher saw zero flags for anything they taught. A real
-    `section_id` column (migration f8c841992918) is what actually makes the shared
-    predicate's exact-pair grant work here, the same way it works for `student_360`.
-
-    The one property that *does* still fall out of the shared predicate for free: an
-    attendance-only flag (`grade_subject_offering_id IS NULL`) fails both of a teacher's
-    grant branches -- NULL cannot equal or be IN a set of real offering ids, with or
-    without a section attached -- and passes only the unrestricted (administrator)
-    branch. Section 7.2's "administrators only" rule for attendance-only flags needed no
-    special-case code precisely because that part of the reasoning was correct.
-    """
+    """Permission boundary for `at_risk_flags` — real `section_id` required for teachers."""
     return scope_predicate_for(scope, AT_RISK_FLAG_COLUMNS)
 
 
@@ -93,23 +62,7 @@ class FlagRow:
 
 
 async def list_flags(session: AsyncSession, scope: Scope, *, limit: int = 200) -> list[FlagRow]:
-    """Flags this caller may see, and no others -- the row-level half of Section 7.2.
-
-    The capability half (a student must never reach this at all, regardless of what their
-    own Scope would technically permit) is enforced one layer up, by the router's
-    `require_role`. Both layers matter: `Scope.self_student_id` grants a principal their
-    own rows on any table using it, which is exactly right for `student_360` and exactly
-    wrong here -- a student must never see their own at-risk flag (spec Section 7.3). This
-    module does not special-case that; it relies on the router never calling it for a
-    student in the first place. See
-    test_at_risk_api.py::test_a_student_cannot_reach_the_endpoint_at_all.
-
-    Names are resolved with two small, separate lookups rather than one JOIN against
-    `student_360`: that view has one row per (student, subject), so joining it directly
-    against a table that can have `grade_subject_offering_id IS NULL` (an attendance-only
-    flag) would fan out into one duplicate result row per subject the student takes. Two
-    flat, keyed-by-id lookups avoid that entirely rather than working around it.
-    """
+    """Active flags in scope. Students are blocked at the router (`require_role`)."""
     flags = (
         (
             await session.execute(
@@ -179,7 +132,6 @@ async def list_flags(session: AsyncSession, scope: Scope, *, limit: int = 200) -
 async def record_flag_view(
     session: AsyncSession, *, institution_id: UUID, actor_user_id: UUID, rows_returned: int
 ) -> None:
-    """AR-5: a flag view is a scoped, audited read like any other analytics access."""
     await record_event(
         session,
         institution_id=institution_id,
@@ -188,10 +140,6 @@ async def record_flag_view(
         entity_type="at_risk.flags",
         payload={"rows_returned": rows_returned},
     )
-
-
-class NotInScopeError(Exception):
-    """Raised when a caller tries to dismiss a flag outside what their Scope permits."""
 
 
 async def dismiss_flag(
@@ -203,13 +151,7 @@ async def dismiss_flag(
     institution_id: UUID,
     note: str | None,
 ) -> FlagRow | None:
-    """AR-4: dismiss a flag, and audit the action regardless of outcome-adjacent details.
-
-    Returns None if no such flag exists *or* it exists outside the caller's scope -- the
-    same empty-not-refused answer as every other boundary in this codebase (spec Section
-    4's reuse of doc 02 Section 11a.3), so a teacher probing flag ids cannot learn which
-    ones exist for a child they do not teach.
-    """
+    """Dismiss in scope; return None if missing or out of scope (404 at router)."""
     statement = select(AtRiskFlag).where(
         AtRiskFlag.id == flag_id,
         flag_scope_predicate(scope),
@@ -251,33 +193,16 @@ async def dismiss_flag(
     )
 
 
-#: Attempts that count toward mastery and trend -- mirrors insights.service._FINISHED_ATTEMPTS.
-_FINISHED = (QuizAttemptStatus.SUBMITTED, QuizAttemptStatus.SCORED, QuizAttemptStatus.RELEASED)
-
-
 async def _signals_for_institution(
     session: AsyncSession, institution_id: UUID
 ) -> list[StudentSignals]:
-    """Every student's raw signals, unrestricted within one institution.
-
-    Deliberately not scope-filtered: computing flags for the whole school is an
-    administrative action (gated by `require_role("administrator")` at the router), not a
-    read on behalf of one teacher's narrower view. The *output* rows are still tagged with
-    `institution_id`/`student_id`/`grade_subject_offering_id`, so every later *read* of
-    them goes through `flag_scope_predicate` regardless of how they were computed.
-    """
+    """All student signals for recompute — not scope-filtered (admin-only at router)."""
     register = (
         (
             await session.execute(
-                select(
-                    student_360.c.student_id,
-                    student_360.c.academic_period_id,
-                    student_360.c.grade_subject_offering_id,
-                    student_360.c.mastery_percent,
-                    student_360.c.quizzes_taken,
-                    student_360.c.attendance_percent,
-                    student_360.c.student_subject_enrollment_id,
-                ).where(student_360.c.institution_id == institution_id)
+                select(*STUDENT_360_SIGNAL_COLUMNS).where(
+                    student_360.c.institution_id == institution_id
+                )
             )
         )
         .mappings()
@@ -295,7 +220,7 @@ async def _signals_for_institution(
             select(QuizAttempt.student_subject_enrollment_id, QuizAttempt.score_percent)
             .where(
                 QuizAttempt.student_subject_enrollment_id.in_(enrolment_ids),
-                QuizAttempt.status.in_(_FINISHED),
+                QuizAttempt.status.in_(FINISHED_ATTEMPT_STATUSES),
                 QuizAttempt.score_percent.is_not(None),
             )
             .order_by(QuizAttempt.student_subject_enrollment_id, QuizAttempt.submitted_at.desc())
@@ -311,7 +236,12 @@ async def _signals_for_institution(
     by_student: dict[UUID, _Bucket] = {}
     for row in register:
         bucket = by_student.setdefault(row.student_id, _Bucket())
-        if row.grade_subject_offering_id is not None:
+        # student_360 coalesces "no scored attempts" to mastery_percent=0 (see the view's
+        # COALESCE(avg_score_percent, 0)). Feeding that 0 into the mastery-level driver
+        # falsely flags every enrolled subject a student has never sat a quiz for. Skip
+        # subjects with no attempts -- same idea as attendance staying NULL when
+        # days_counted is 0 -- so the engine only sees real mastery readings.
+        if row.grade_subject_offering_id is not None and (row.quizzes_taken or 0) > 0:
             scores = scores_by_enrolment.get(row.student_subject_enrollment_id, [])
             bucket.subjects.append(
                 SubjectSignal(
@@ -346,27 +276,16 @@ async def recompute_institution(
     institution_id: UUID,
     thresholds: Thresholds = DEFAULT_THRESHOLDS,
 ) -> RecomputeResult:
-    """Run the engine for every student in an institution and persist the result.
-
-    Upserts one active row per (student, subject) or (student, NULL-for-attendance) key
-    the engine still flags; anything that *was* active but the engine no longer flags is
-    marked `resolved`, not deleted -- the flag's history (who dismissed what, when) has
-    value even after the underlying condition clears, per the audit trail's own logic.
-    """
+    """Run engine for all students; upsert active flags, resolve stale ones."""
     signals = await _signals_for_institution(session, institution_id)
 
-    # One row per student is enough for both of these: academic_period_id and section_id
-    # are constant across every subject a student takes (section comes from the grade
-    # enrolment, not the subject one) -- see migration f8c841992918's note on section_id.
     academic_period_by_student: dict[UUID, UUID] = {}
     section_by_student: dict[UUID, UUID | None] = {}
     all_students = (
         await session.execute(
-            select(
-                student_360.c.student_id,
-                student_360.c.academic_period_id,
-                student_360.c.section_id,
-            ).where(student_360.c.institution_id == institution_id)
+            select(*STUDENT_360_IDENTITY_COLUMNS).where(
+                student_360.c.institution_id == institution_id
+            )
         )
     ).all()
     for student_id, period_id, section_id in all_students:
@@ -458,7 +377,6 @@ async def _upsert_flag(
 async def _resolve_stale_flags(
     session: AsyncSession, *, institution_id: UUID, keep: set[tuple[UUID, UUID | None]]
 ) -> int:
-    """Mark `resolved` any active flag not reproduced by the run that just finished."""
     active = (
         (
             await session.execute(

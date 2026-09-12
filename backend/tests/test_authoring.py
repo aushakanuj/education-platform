@@ -10,7 +10,7 @@ No test calls OpenRouter. The writer is injected.
 
 from __future__ import annotations
 
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from typing import Any
 from uuid import UUID
 
@@ -113,7 +113,7 @@ def api(client: TestClient, clean_db: str) -> Iterator[TestClient]:
 
 
 @pytest.fixture()
-def model_writes(monkeypatch: pytest.MonkeyPatch):  # type: ignore[no-untyped-def]
+def model_writes(monkeypatch: pytest.MonkeyPatch) -> Callable[[list[dict[str, Any]]], None]:
     def _install(questions: list[dict[str, Any]]) -> None:
         async def _fake(_prompt: str) -> list[dict[str, Any]]:
             return questions
@@ -155,8 +155,10 @@ def test_an_administrator_is_offered_the_whole_school(api: TestClient) -> None:
 
 
 def test_generated_questions_are_saved_as_drafts(
-    api: TestClient, model_writes, clean_db: str
-) -> None:  # type: ignore[no-untyped-def]
+    api: TestClient,
+    model_writes: Callable[[list[dict[str, Any]]], None],
+    clean_db: str,
+) -> None:
     model_writes(
         [
             good_question(),
@@ -192,8 +194,8 @@ def test_generated_questions_are_saved_as_drafts(
 
 
 def test_a_rejected_question_is_reported_not_silently_dropped(
-    api: TestClient, model_writes
-) -> None:  # type: ignore[no-untyped-def]
+    api: TestClient, model_writes: Callable[[list[dict[str, Any]]], None]
+) -> None:
     model_writes([good_question(), good_question(correct="Z")])
     subtopic = _first_subtopic(api, TEACHER)
 
@@ -209,8 +211,8 @@ def test_a_rejected_question_is_reported_not_silently_dropped(
 
 
 def test_a_teacher_cannot_author_for_a_subject_they_do_not_teach(
-    api: TestClient, model_writes
-) -> None:  # type: ignore[no-untyped-def]
+    api: TestClient, model_writes: Callable[[list[dict[str, Any]]], None]
+) -> None:
     """Authoring is an action, so this is a 403 rather than an empty result."""
     model_writes([good_question()])
     english = next(
@@ -233,7 +235,9 @@ def test_a_student_cannot_author_at_all(api: TestClient) -> None:
     assert response.json() == [], "a student teaches nothing, so has nothing to author"
 
 
-def test_publishing_is_one_at_a_time_and_deliberate(api: TestClient, model_writes) -> None:  # type: ignore[no-untyped-def]
+def test_publishing_is_one_at_a_time_and_deliberate(
+    api: TestClient, model_writes: Callable[[list[dict[str, Any]]], None]
+) -> None:
     model_writes([good_question(), good_question(prompt="What is 5 squared?")])
     subtopic = _first_subtopic(api, TEACHER)
     headers = _headers(api, TEACHER)
@@ -255,8 +259,10 @@ def test_publishing_is_one_at_a_time_and_deliberate(api: TestClient, model_write
 
 
 def test_discarding_archives_rather_than_deletes(
-    api: TestClient, model_writes, clean_db: str
-) -> None:  # type: ignore[no-untyped-def]
+    api: TestClient,
+    model_writes: Callable[[list[dict[str, Any]]], None],
+    clean_db: str,
+) -> None:
     model_writes([good_question()])
     subtopic = _first_subtopic(api, TEACHER)
     headers = _headers(api, TEACHER)
@@ -278,7 +284,9 @@ def test_discarding_archives_rather_than_deletes(
     assert status == QuestionVersionStatus.ARCHIVED, "a rejected question is kept, not erased"
 
 
-def test_the_review_view_shows_the_correct_answer(api: TestClient, model_writes) -> None:  # type: ignore[no-untyped-def]
+def test_the_review_view_shows_the_correct_answer(
+    api: TestClient, model_writes: Callable[[list[dict[str, Any]]], None]
+) -> None:
     """A teacher judging a draft must see which option is marked correct."""
     model_writes([good_question()])
     subtopic = _first_subtopic(api, TEACHER)
@@ -295,7 +303,9 @@ def test_the_review_view_shows_the_correct_answer(api: TestClient, model_writes)
     assert [o["label"] for o in draft["options"]] == ["A", "B", "C", "D"]
 
 
-def test_an_approved_question_is_readable_back_from_the_bank(api: TestClient, model_writes) -> None:  # type: ignore[no-untyped-def]
+def test_an_approved_question_is_readable_back_from_the_bank(
+    api: TestClient, model_writes: Callable[[list[dict[str, Any]]], None]
+) -> None:
     """Approving must not feel like losing: what went in has to be findable again."""
     model_writes([good_question()])
     subtopic = _first_subtopic(api, TEACHER)
@@ -321,7 +331,9 @@ def test_an_approved_question_is_readable_back_from_the_bank(api: TestClient, mo
     assert [o["label"] for o in published["options"]] == ["A", "B", "C", "D"]
 
 
-def test_a_discarded_question_is_in_neither_list(api: TestClient, model_writes) -> None:  # type: ignore[no-untyped-def]
+def test_a_discarded_question_is_in_neither_list(
+    api: TestClient, model_writes: Callable[[list[dict[str, Any]]], None]
+) -> None:
     """Archived means out of the way, not resurfacing in the approved bank."""
     model_writes([good_question()])
     subtopic = _first_subtopic(api, TEACHER)
@@ -356,7 +368,9 @@ def test_the_approved_bank_is_not_readable_outside_what_you_teach(api: TestClien
     assert response.status_code == 403
 
 
-def test_the_subtopic_list_counts_both_waiting_and_approved(api: TestClient, model_writes) -> None:  # type: ignore[no-untyped-def]
+def test_the_subtopic_list_counts_both_waiting_and_approved(
+    api: TestClient, model_writes: Callable[[list[dict[str, Any]]], None]
+) -> None:
     """A draft count alone drops to zero on approval and looks like the work vanished."""
     model_writes([good_question()])
     headers = _headers(api, TEACHER)
@@ -388,7 +402,9 @@ def test_the_subtopic_list_counts_both_waiting_and_approved(api: TestClient, mod
     assert published_after == published_before + 1
 
 
-def test_generation_is_audited(api: TestClient, model_writes) -> None:  # type: ignore[no-untyped-def]
+def test_generation_is_audited(
+    api: TestClient, model_writes: Callable[[list[dict[str, Any]]], None]
+) -> None:
     model_writes([good_question()])
     subtopic = _first_subtopic(api, TEACHER)
     api.post(
@@ -427,8 +443,8 @@ def test_an_administrator_does_not_see_another_institution_subtopics(api: TestCl
 
 
 def test_an_administrator_cannot_author_another_institution_subtopic(
-    api: TestClient, model_writes
-) -> None:  # type: ignore[no-untyped-def]
+    api: TestClient, model_writes: Callable[[list[dict[str, Any]]], None]
+) -> None:
     """Answer keys and generate/publish are the write side of the same tenant boundary."""
     model_writes([good_question()])
     poc_subtopic = api.get(

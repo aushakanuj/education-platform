@@ -7,7 +7,6 @@ import asyncio
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session
 
-from education_platform.api.deps import Principal
 from education_platform.core.config import get_settings
 from education_platform.db.url import to_sync_url
 from education_platform.modules.assistant.contracts import (
@@ -16,6 +15,7 @@ from education_platform.modules.assistant.contracts import (
     RetrievedChunk,
 )
 from education_platform.modules.assistant.tools.registry import ToolSpec, register_tool
+from education_platform.modules.authorization.principal import Principal
 from education_platform.modules.materials.models import SourceChunk, SourceMaterialVersion
 from education_platform.modules.rag.embeddings import embed_texts
 from education_platform.modules.rag.models import (
@@ -38,7 +38,7 @@ def _load_chunk_payloads(hits: list[SimilarChunk]) -> list[RetrievedChunk]:
                 label = "Source"
                 excerpt = ""
                 page_number: int | None = None
-                if hit.doc_kind == "knowledge_document":
+                if hit.doc_kind == "knowledge_document_version":
                     knowledge_chunk = session.get(KnowledgeChunk, hit.chunk_id)
                     if knowledge_chunk is None:
                         continue
@@ -49,7 +49,7 @@ def _load_chunk_payloads(hits: list[SimilarChunk]) -> list[RetrievedChunk]:
                         doc = session.get(KnowledgeDocument, knowledge_version.document_id)
                         if doc is not None:
                             label = doc.title
-                elif hit.doc_kind == "source_material":
+                elif hit.doc_kind == "source_material_version":
                     source_chunk = session.get(SourceChunk, hit.chunk_id)
                     if source_chunk is None:
                         continue

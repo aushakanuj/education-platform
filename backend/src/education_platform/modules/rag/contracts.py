@@ -3,15 +3,14 @@
 from __future__ import annotations
 
 import json
-from typing import Literal
+from typing import Literal, Self
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from education_platform.modules.rag.embeddings import embedding_dimensions
-from education_platform.modules.rag.models import IngestTargetKind
 
-DocKind = Literal["source_material", "knowledge_document"]
+DocKind = Literal["source_material_version", "knowledge_document_version"]
 AllowedRole = Literal["administrator", "teacher", "student"]
 _ALLOWED_ROLES = frozenset({"administrator", "teacher", "student"})
 
@@ -88,13 +87,28 @@ class VectorRow(BaseModel):
 
 
 class IngestJobClaim(BaseModel):
-    """Validated claim handoff from queue → worker process."""
+    """Validated claim handoff from queue → worker process.
+
+    Target is an exclusive arc: exactly one of the two ids must be set, mirroring the
+    `ck_ingest_jobs_exactly_one_target` DB constraint.
+    """
 
     model_config = ConfigDict(extra="ignore", from_attributes=True, frozen=True)
 
     id: UUID
-    target_kind: IngestTargetKind
-    target_id: UUID
+    source_material_version_id: UUID | None = None
+    knowledge_document_version_id: UUID | None = None
+
+    @model_validator(mode="after")
+    def exactly_one_target(self) -> Self:
+        has_material = self.source_material_version_id is not None
+        has_knowledge = self.knowledge_document_version_id is not None
+        if has_material == has_knowledge:
+            raise ValueError(
+                "exactly one of source_material_version_id or knowledge_document_version_id "
+                "must be set"
+            )
+        return self
 
 
 class RequiredRoles(BaseModel):

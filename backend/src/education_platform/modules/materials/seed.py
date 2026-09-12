@@ -1,22 +1,25 @@
-"""Import approved markdown curriculum from docs/curriculum into SQLite."""
+"""Import approved markdown curriculum from docs/curriculum into Postgres."""
 
 from __future__ import annotations
 
-import hashlib
-from datetime import UTC, date, datetime
 from pathlib import Path
 
-from sqlalchemy import func, select
+from sqlalchemy import create_engine, select
 from sqlalchemy.orm import Session
 
 from education_platform.core.config import get_settings
+from education_platform.db.url import to_sync_url
+from education_platform.modules.academics.constants import (
+    POC_GRADE_NAME,
+    POC_INSTITUTION_NAME,
+    POC_PERIOD_NAME,
+    POC_SUBJECT_CODE,
+)
 from education_platform.modules.academics.models import (
     AcademicPeriod,
-    AcademicPeriodStatus,
     EnrollmentStatus,
     Grade,
     GradeSubjectOffering,
-    LearningOutcome,
     PeriodGrade,
     StudentGradeEnrollment,
     StudentSubjectEnrollment,
@@ -24,29 +27,9 @@ from education_platform.modules.academics.models import (
     Subtopic,
     Topic,
 )
-from education_platform.modules.assessments.models import (
-    CommonMasteryQuiz,
-    Question,
-    QuestionAnswerKey,
-    QuestionDifficulty,
-    QuestionOption,
-    QuestionOutcomeTag,
-    QuestionType,
-    QuestionVersion,
-    QuestionVersionStatus,
-    QuizAttempt,
-    QuizItem,
-    QuizMaterialBinding,
-    QuizRelease,
-    QuizReleaseStatus,
-    QuizResultReleaseMode,
-    QuizScope,
-    QuizVersion,
-    QuizVersionStatus,
-)
+from education_platform.modules.assessments.models import QuizAttempt
 from education_platform.modules.auth.models import (
     Institution,
-    InstitutionStatus,
     RoleName,
     StudentProfile,
     StudentProfileStatus,
@@ -56,36 +39,35 @@ from education_platform.modules.auth.models import (
 )
 from education_platform.modules.auth.security import hash_password
 from education_platform.modules.materials.markdown_parser import (
-    ParsedQuiz,
     parse_lesson,
     parse_objectives_from_lesson,
     parse_quiz,
 )
-from education_platform.modules.materials.models import (
-    SourceMaterial,
-    SourceMaterialStatus,
-    SourceMaterialVersion,
-    SourceMaterialVersionStatus,
+from education_platform.modules.materials.models import SourceMaterialVersion
+from education_platform.modules.materials.seed_content import (
+    ensure_outcomes,
+    upsert_material_version,
 )
-
-POC_INSTITUTION_NAME = "POC Demo School"
-POC_PERIOD_NAME = "2026-27"
-POC_GRADE_NAME = "Grade 8"
-POC_SUBJECT_CODE = "MATH"
-POC_TOPIC_SLUG = "approved_materials"
+from education_platform.modules.materials.seed_curriculum import ensure_curriculum_root
+from education_platform.modules.materials.seed_quizzes import (
+    seed_topic_mastery_quiz,
+    upsert_subtopic_quiz,
+)
 
 _LESSON_SUFFIX = "_lesson.md"
 _QUIZ_SUFFIX = "_quiz.md"
 
-_DIFFICULTY = {
-    "easy": QuestionDifficulty.EASY,
-    "medium": QuestionDifficulty.MEDIUM,
-    "hard": QuestionDifficulty.HARD,
-}
-
-
-def _checksum(content: str) -> str:
-    return hashlib.sha256(content.encode("utf-8")).hexdigest()
+__all__ = [
+    "POC_GRADE_NAME",
+    "POC_INSTITUTION_NAME",
+    "POC_PERIOD_NAME",
+    "POC_SUBJECT_CODE",
+    "discover_topic_ids",
+    "main",
+    "seed_approved_materials",
+    "seed_demo_admin",
+    "seed_demo_student",
+]
 
 
 def discover_topic_ids(materials_dir: Path) -> list[str]:
@@ -97,372 +79,6 @@ def discover_topic_ids(materials_dir: Path) -> list[str]:
         elif name.endswith(_QUIZ_SUFFIX):
             topic_ids.add(name[: -len(_QUIZ_SUFFIX)])
     return sorted(topic_ids)
-
-
-def _ensure_curriculum_root(session: Session) -> Topic:
-    """Return the parent Topic that holds approved-material subtopics."""
-    institution = session.scalar(
-        select(Institution).where(Institution.name == POC_INSTITUTION_NAME)
-    )
-    if institution is None:
-        institution = Institution(
-            name=POC_INSTITUTION_NAME,
-            timezone="UTC",
-            status=InstitutionStatus.ACTIVE,
-        )
-        session.add(institution)
-        session.flush()
-
-    period = session.scalar(
-        select(AcademicPeriod).where(
-            AcademicPeriod.institution_id == institution.id,
-            AcademicPeriod.name == POC_PERIOD_NAME,
-        )
-    )
-    if period is None:
-        period = AcademicPeriod(
-            institution_id=institution.id,
-            name=POC_PERIOD_NAME,
-            start_date=date(2026, 6, 1),
-            end_date=date(2027, 3, 31),
-            status=AcademicPeriodStatus.ACTIVE,
-        )
-        session.add(period)
-        session.flush()
-    elif period.status != AcademicPeriodStatus.ACTIVE:
-        period.status = AcademicPeriodStatus.ACTIVE
-
-    grade = session.scalar(
-        select(Grade).where(
-            Grade.institution_id == institution.id,
-            Grade.name == POC_GRADE_NAME,
-        )
-    )
-    if grade is None:
-        grade = Grade(institution_id=institution.id, name=POC_GRADE_NAME, sort_order=8)
-        session.add(grade)
-        session.flush()
-
-    subject = session.scalar(
-        select(Subject).where(
-            Subject.institution_id == institution.id,
-            Subject.code == POC_SUBJECT_CODE,
-        )
-    )
-    if subject is None:
-        subject = Subject(
-            institution_id=institution.id,
-            name="Mathematics",
-            code=POC_SUBJECT_CODE,
-        )
-        session.add(subject)
-        session.flush()
-
-    period_grade = session.scalar(
-        select(PeriodGrade).where(
-            PeriodGrade.academic_period_id == period.id,
-            PeriodGrade.grade_id == grade.id,
-        )
-    )
-    if period_grade is None:
-        period_grade = PeriodGrade(academic_period_id=period.id, grade_id=grade.id)
-        session.add(period_grade)
-        session.flush()
-
-    offering = session.scalar(
-        select(GradeSubjectOffering).where(
-            GradeSubjectOffering.period_grade_id == period_grade.id,
-            GradeSubjectOffering.subject_id == subject.id,
-        )
-    )
-    if offering is None:
-        offering = GradeSubjectOffering(period_grade_id=period_grade.id, subject_id=subject.id)
-        session.add(offering)
-        session.flush()
-
-    topic = session.scalar(
-        select(Topic).where(
-            Topic.grade_subject_offering_id == offering.id,
-            Topic.slug == POC_TOPIC_SLUG,
-        )
-    )
-    if topic is None:
-        topic = Topic(
-            grade_subject_offering_id=offering.id,
-            name="Approved Materials",
-            slug=POC_TOPIC_SLUG,
-            sequence=1,
-        )
-        session.add(topic)
-        session.flush()
-    return topic
-
-
-def _ensure_open_release(session: Session, quiz_version: QuizVersion) -> None:
-    release = session.scalar(
-        select(QuizRelease).where(
-            QuizRelease.quiz_version_id == quiz_version.id,
-            QuizRelease.status == QuizReleaseStatus.OPEN,
-        )
-    )
-    if release is None:
-        session.add(
-            QuizRelease(
-                quiz_version_id=quiz_version.id,
-                status=QuizReleaseStatus.OPEN,
-                released_by_user_id=None,
-            )
-        )
-
-
-def _ensure_outcomes(
-    session: Session,
-    subtopic: Subtopic,
-    statements: list[str],
-    *,
-    display_title: str,
-) -> LearningOutcome:
-    cleaned = [item.strip() for item in statements if item.strip()]
-    if not cleaned:
-        cleaned = [f"Demonstrate understanding of {display_title}"]
-
-    primary: LearningOutcome | None = None
-    for index, statement in enumerate(cleaned, start=1):
-        code = f"LO{index}"
-        outcome = session.scalar(
-            select(LearningOutcome).where(
-                LearningOutcome.subtopic_id == subtopic.id,
-                LearningOutcome.code == code,
-            )
-        )
-        if outcome is None:
-            outcome = LearningOutcome(
-                subtopic_id=subtopic.id,
-                code=code,
-                statement=statement,
-                sequence=index,
-            )
-            session.add(outcome)
-            session.flush()
-        else:
-            outcome.statement = statement
-            outcome.sequence = index
-        if primary is None:
-            primary = outcome
-
-    assert primary is not None
-    return primary
-
-
-def _upsert_material_version(
-    session: Session,
-    subtopic: Subtopic,
-    *,
-    title: str,
-    markdown: str,
-) -> SourceMaterialVersion:
-    material = session.scalar(
-        select(SourceMaterial).where(
-            SourceMaterial.subtopic_id == subtopic.id,
-            SourceMaterial.slug == "lesson",
-        )
-    )
-    if material is None:
-        material = SourceMaterial(
-            subtopic_id=subtopic.id,
-            title=title,
-            slug="lesson",
-            status=SourceMaterialStatus.PUBLISHED,
-        )
-        session.add(material)
-        session.flush()
-    else:
-        material.title = title
-        material.status = SourceMaterialStatus.PUBLISHED
-
-    checksum = _checksum(markdown)
-    published = session.scalar(
-        select(SourceMaterialVersion).where(
-            SourceMaterialVersion.source_material_id == material.id,
-            SourceMaterialVersion.lifecycle_status == SourceMaterialVersionStatus.PUBLISHED,
-        )
-    )
-    if published is not None and published.checksum == checksum:
-        return published
-    if published is not None:
-        published.lifecycle_status = SourceMaterialVersionStatus.SUPERSEDED
-
-    next_version = (
-        int(
-            session.scalar(
-                select(func.max(SourceMaterialVersion.version_number)).where(
-                    SourceMaterialVersion.source_material_id == material.id
-                )
-            )
-            or 0
-        )
-        + 1
-    )
-    version = SourceMaterialVersion(
-        source_material_id=material.id,
-        version_number=next_version,
-        lifecycle_status=SourceMaterialVersionStatus.PUBLISHED,
-        title=title,
-        content_markdown=markdown,
-        content_format="markdown",
-        checksum=checksum,
-        published_at=datetime.now(UTC),
-    )
-    session.add(version)
-    session.flush()
-    return version
-
-
-def _latest_released_quiz_version(session: Session, quiz_id: object) -> QuizVersion | None:
-    return session.scalar(
-        select(QuizVersion)
-        .where(
-            QuizVersion.quiz_id == quiz_id,
-            QuizVersion.lifecycle_status == QuizVersionStatus.RELEASED,
-        )
-        .order_by(QuizVersion.version_number.desc())
-    )
-
-
-def _quiz_version_matches(
-    session: Session, quiz_version: QuizVersion, quiz_data: ParsedQuiz
-) -> bool:
-    items = session.scalars(
-        select(QuizItem)
-        .where(QuizItem.quiz_version_id == quiz_version.id)
-        .order_by(QuizItem.sequence)
-    ).all()
-    questions = quiz_data.questions
-    if len(items) != len(questions):
-        return False
-    for item, parsed in zip(items, questions, strict=True):
-        version = session.get(QuestionVersion, item.question_version_id)
-        if version is None or version.prompt != parsed.prompt:
-            return False
-        options = session.scalars(
-            select(QuestionOption)
-            .where(QuestionOption.question_version_id == version.id)
-            .order_by(QuestionOption.sequence)
-        ).all()
-        if [(o.label, o.text) for o in options] != [(o.label, o.text) for o in parsed.options]:
-            return False
-        key = session.scalar(
-            select(QuestionAnswerKey).where(QuestionAnswerKey.question_version_id == version.id)
-        )
-        if key is None or key.correct_option_label != parsed.correct_option_label:
-            return False
-    return True
-
-
-def _upsert_subtopic_quiz(
-    session: Session,
-    subtopic: Subtopic,
-    outcome: LearningOutcome,
-    quiz_data: ParsedQuiz,
-    material_version: SourceMaterialVersion | None,
-) -> QuizVersion:
-    mastery_quiz = session.scalar(
-        select(CommonMasteryQuiz).where(
-            CommonMasteryQuiz.subtopic_id == subtopic.id,
-            CommonMasteryQuiz.quiz_scope == QuizScope.SUBTOPIC_MASTERY,
-        )
-    )
-    if mastery_quiz is None:
-        mastery_quiz = CommonMasteryQuiz(
-            quiz_scope=QuizScope.SUBTOPIC_MASTERY,
-            subtopic_id=subtopic.id,
-            title=quiz_data.title,
-        )
-        session.add(mastery_quiz)
-        session.flush()
-    else:
-        mastery_quiz.title = quiz_data.title
-
-    existing = _latest_released_quiz_version(session, mastery_quiz.id)
-    if existing is not None and _quiz_version_matches(session, existing, quiz_data):
-        _ensure_open_release(session, existing)
-        return existing
-
-    next_version = (
-        int(
-            session.scalar(
-                select(func.max(QuizVersion.version_number)).where(
-                    QuizVersion.quiz_id == mastery_quiz.id
-                )
-            )
-            or 0
-        )
-        + 1
-    )
-    quiz_version = QuizVersion(
-        quiz_id=mastery_quiz.id,
-        version_number=next_version,
-        lifecycle_status=QuizVersionStatus.RELEASED,
-        result_release_mode=QuizResultReleaseMode.IMMEDIATE,
-        pass_threshold_percent=get_settings().mastery_pass_percent,
-        released_at=datetime.now(UTC),
-    )
-    session.add(quiz_version)
-    session.flush()
-    _ensure_open_release(session, quiz_version)
-
-    if material_version is not None:
-        session.add(
-            QuizMaterialBinding(
-                quiz_version_id=quiz_version.id,
-                source_material_version_id=material_version.id,
-            )
-        )
-
-    for question_data in quiz_data.questions:
-        question = Question(subtopic_id=subtopic.id, code=f"Q{question_data.number}")
-        session.add(question)
-        session.flush()
-        difficulty = None
-        if question_data.difficulty:
-            difficulty = _DIFFICULTY.get(question_data.difficulty.lower())
-        version = QuestionVersion(
-            question_id=question.id,
-            version_number=1,
-            prompt=question_data.prompt,
-            question_type=QuestionType.MULTIPLE_CHOICE,
-            difficulty=difficulty,
-            explanation=question_data.explanation,
-            lifecycle_status=QuestionVersionStatus.PUBLISHED,
-        )
-        session.add(version)
-        session.flush()
-        for index, option in enumerate(question_data.options, start=1):
-            session.add(
-                QuestionOption(
-                    question_version_id=version.id,
-                    label=option.label,
-                    text=option.text,
-                    sequence=index,
-                )
-            )
-        session.add(
-            QuestionAnswerKey(
-                question_version_id=version.id,
-                correct_option_label=question_data.correct_option_label,
-            )
-        )
-        session.add(
-            QuestionOutcomeTag(question_version_id=version.id, learning_outcome_id=outcome.id)
-        )
-        session.add(
-            QuizItem(
-                quiz_version_id=quiz_version.id,
-                question_version_id=version.id,
-                sequence=question_data.number,
-            )
-        )
-    return quiz_version
 
 
 def _seed_subtopic(
@@ -506,107 +122,15 @@ def _seed_subtopic(
     if lesson_path.is_file():
         lesson = parse_lesson(lesson_path.read_text(encoding="utf-8"), topic_id)
         outcome_statements = parse_objectives_from_lesson(lesson.markdown)
-        published_material_version = _upsert_material_version(
+        published_material_version = upsert_material_version(
             session, subtopic, title=lesson.title, markdown=lesson.markdown
         )
 
-    outcome = _ensure_outcomes(session, subtopic, outcome_statements, display_title=display_title)
+    outcome = ensure_outcomes(session, subtopic, outcome_statements, display_title=display_title)
 
     if quiz_path.is_file():
         quiz = parse_quiz(quiz_path.read_text(encoding="utf-8"), topic_id)
-        _upsert_subtopic_quiz(session, subtopic, outcome, quiz, published_material_version)
-
-
-def _seed_topic_mastery_quiz(session: Session, parent_topic: Topic) -> None:
-    subtopics = session.scalars(
-        select(Subtopic)
-        .where(Subtopic.topic_id == parent_topic.id)
-        .order_by(Subtopic.sequence, Subtopic.slug)
-    ).all()
-    source_items: list[QuizItem] = []
-    for subtopic in subtopics:
-        quiz = session.scalar(
-            select(CommonMasteryQuiz).where(
-                CommonMasteryQuiz.subtopic_id == subtopic.id,
-                CommonMasteryQuiz.quiz_scope == QuizScope.SUBTOPIC_MASTERY,
-            )
-        )
-        if quiz is None:
-            continue
-        version = _latest_released_quiz_version(session, quiz.id)
-        if version is None:
-            continue
-        source_items.extend(
-            session.scalars(
-                select(QuizItem)
-                .where(QuizItem.quiz_version_id == version.id)
-                .order_by(QuizItem.sequence)
-            ).all()
-        )
-    if not source_items:
-        return
-
-    quiz = session.scalar(
-        select(CommonMasteryQuiz).where(
-            CommonMasteryQuiz.topic_id == parent_topic.id,
-            CommonMasteryQuiz.quiz_scope == QuizScope.TOPIC_MASTERY,
-        )
-    )
-    if quiz is None:
-        quiz = CommonMasteryQuiz(
-            quiz_scope=QuizScope.TOPIC_MASTERY,
-            topic_id=parent_topic.id,
-            title="Approved Materials Overall Quiz",
-        )
-        session.add(quiz)
-        session.flush()
-    else:
-        quiz.title = "Approved Materials Overall Quiz"
-
-    latest = _latest_released_quiz_version(session, quiz.id)
-    latest_ids = []
-    if latest is not None:
-        latest_ids = [
-            item.question_version_id
-            for item in session.scalars(
-                select(QuizItem)
-                .where(QuizItem.quiz_version_id == latest.id)
-                .order_by(QuizItem.sequence)
-            ).all()
-        ]
-    source_ids = [item.question_version_id for item in source_items]
-    if latest is not None and latest_ids == source_ids:
-        _ensure_open_release(session, latest)
-        return
-
-    next_version = (
-        int(
-            session.scalar(
-                select(func.max(QuizVersion.version_number)).where(QuizVersion.quiz_id == quiz.id)
-            )
-            or 0
-        )
-        + 1
-    )
-    version = QuizVersion(
-        quiz_id=quiz.id,
-        version_number=next_version,
-        lifecycle_status=QuizVersionStatus.RELEASED,
-        result_release_mode=QuizResultReleaseMode.IMMEDIATE,
-        pass_threshold_percent=get_settings().mastery_pass_percent,
-        released_at=datetime.now(UTC),
-    )
-    session.add(version)
-    session.flush()
-    _ensure_open_release(session, version)
-    for sequence, item in enumerate(source_items, start=1):
-        session.add(
-            QuizItem(
-                quiz_version_id=version.id,
-                question_version_id=item.question_version_id,
-                sequence=sequence,
-            )
-        )
+        upsert_subtopic_quiz(session, subtopic, outcome, quiz, published_material_version)
 
 
 def _attempts_exist(session: Session) -> bool:
@@ -781,14 +305,14 @@ def seed_approved_materials(
     if not topic_ids:
         return []
 
-    parent_topic = _ensure_curriculum_root(session)
+    parent_topic = ensure_curriculum_root(session)
 
     if replace and _attempts_exist(session):
         raise RuntimeError("Cannot destructively replace seeded content after attempts exist")
 
     for sequence, topic_id in enumerate(topic_ids, start=1):
         _seed_subtopic(session, parent_topic, topic_id, sequence, directory)
-    _seed_topic_mastery_quiz(session, parent_topic)
+    seed_topic_mastery_quiz(session, parent_topic)
     seed_demo_student(session)
     seed_demo_admin(session)
 
@@ -797,15 +321,10 @@ def seed_approved_materials(
 
 
 def main() -> None:
-    from sqlalchemy import create_engine
-    from sqlalchemy.orm import Session as SyncSession
-
-    from education_platform.db.url import to_sync_url
-
     settings = get_settings()
     engine = create_engine(to_sync_url(settings.database_url))
 
-    with SyncSession(engine) as session:
+    with Session(engine) as session:
         seeded = seed_approved_materials(session, replace=False)
     engine.dispose()
     print(f"Seeded topics: {', '.join(seeded) if seeded else '(none)'}")

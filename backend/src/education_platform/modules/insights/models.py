@@ -1,14 +1,4 @@
-"""Typed handle on the `student_360` database view.
-
-Declared against its own MetaData rather than `Base.metadata`, so Alembic autogenerate
-never mistakes the view for a table it should create or drop. The view itself is owned by
-migration `d3e4f5a6b7c8`.
-
-Typing the columns matters more than it looks: SQLAlchemy stores UUIDs on SQLite as
-32-character hex *without* dashes, so comparing against `str(uuid)` in raw SQL silently
-matches nothing. Going through this table lets SQLAlchemy bind values correctly on any
-backend, and returns real `UUID` objects rather than strings.
-"""
+"""Typed handle on the `student_360` view (migration d3e4f5a6b7c8)."""
 
 from __future__ import annotations
 

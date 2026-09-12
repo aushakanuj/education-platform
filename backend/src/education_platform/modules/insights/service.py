@@ -1,9 +1,4 @@
-"""Read the student_360 master register, always through a Scope.
-
-This is the pattern every later feature copies: the caller writes the *question*, and this
-module appends the *boundary*. Dashboards, ask-the-data and the early-warning engine all
-read here rather than assembling their own joins, so a permission fix lands in one place.
-"""
+"""Read `student_360` through a resolved `Scope`."""
 
 from __future__ import annotations
 
@@ -18,19 +13,18 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from education_platform.modules.assessments.models import (
     CommonMasteryQuiz,
     QuizAttempt,
-    QuizAttemptStatus,
     QuizVersion,
 )
 from education_platform.modules.attendance.models import AttendanceRecord, AttendanceStatus
-from education_platform.modules.authorization.predicate import ScopeColumns, scope_predicate_for
+from education_platform.modules.authorization.predicate import scope_predicate_for
 from education_platform.modules.authorization.scope import Scope
 from education_platform.modules.insights.models import student_360
+from education_platform.modules.insights.register import (
+    FINISHED_ATTEMPT_STATUSES,
+    STUDENT_360_SCOPE_COLUMNS,
+)
 
-#: Hard ceiling on any single read, so no question can pull the whole school by accident.
 MAX_ROWS = 500
-
-#: How much of one student's history the detail view carries back. Enough to see a trend
-#: without turning a page open into a full export.
 MAX_ATTEMPTS = 25
 MAX_ABSENCES = 10
 
@@ -53,8 +47,6 @@ class Student360Row:
 
 @dataclass(frozen=True, slots=True)
 class SubjectStanding:
-    """One subject of one student, as far as the caller is permitted to see it."""
-
     subject: str
     quizzes_taken: int
     quizzes_passed: int
@@ -83,12 +75,6 @@ class AbsenceRow:
 
 @dataclass(frozen=True, slots=True)
 class StudentDetail:
-    """Everything one screen needs about one student, already narrowed to the caller.
-
-    `subjects` and `attempts` cover only the subjects the caller may see; `attendance` is
-    whole-day and so is not divided by subject at all.
-    """
-
     student_id: UUID
     full_name: str
     student_identifier: str
@@ -103,33 +89,11 @@ class StudentDetail:
     absences: list[AbsenceRow]
 
 
-#: How the register names the four concepts the boundary reasons about. Any other query
-#: supplies its own mapping -- see `authorization.predicate.ScopeColumns`.
-STUDENT_360_COLUMNS = ScopeColumns(
-    institution_id=student_360.c.institution_id,
-    student_id=student_360.c.student_id,
-    grade_subject_offering_id=student_360.c.grade_subject_offering_id,
-    section_id=student_360.c.section_id,
-)
-
-
 def scope_predicate(scope: Scope) -> ColumnElement[bool]:
-    """The permission boundary, bound to the `student_360` register.
-
-    The rules themselves live in `authorization.predicate` so that a query over some other
-    table -- attendance, attempts, whatever a text-to-SQL pipeline reaches for -- can apply
-    the *same* rules by supplying its own `ScopeColumns` instead of writing them again.
-    Two implementations of "which students may this person read" will drift, and a fix to
-    one will never reach the other.
-
-    This wrapper is kept because it is what every existing caller imports, and because
-    binding the register's column names in one place is worth doing once.
-    """
-    return scope_predicate_for(scope, STUDENT_360_COLUMNS)
+    return scope_predicate_for(scope, STUDENT_360_SCOPE_COLUMNS)
 
 
 def scoped_select(scope: Scope) -> Select[Any]:
-    """A SELECT over the register with the boundary already applied."""
     return select(
         student_360.c.student_id,
         student_360.c.full_name,
@@ -155,7 +119,6 @@ async def query_student_360(
     section: str | None = None,
     limit: int = 100,
 ) -> list[Student360Row]:
-    """Rows from the master register that this scope permits, and no others."""
     statement = scoped_select(scope)
 
     if subject:
@@ -191,33 +154,12 @@ async def query_student_360(
     ]
 
 
-#: Attempts a teacher has any business seeing: ones the student actually finished.
-_FINISHED_ATTEMPTS = (
-    QuizAttemptStatus.SUBMITTED,
-    QuizAttemptStatus.SCORED,
-    QuizAttemptStatus.RELEASED,
-)
-
-
 async def student_detail(
     session: AsyncSession,
     scope: Scope,
     student_id: UUID,
 ) -> StudentDetail | None:
-    """One student's record, narrowed to the subjects the caller may see.
-
-    Returns `None` when the caller may see nothing about this student -- whether because no
-    such student exists or because they are outside the boundary. The two are deliberately
-    indistinguishable, for the same reason an out-of-scope list read returns zero rows: a
-    "not permitted" that differs from a "no such student" confirms the student exists.
-
-    The boundary is applied exactly once, by `scope_predicate`, and everything else follows
-    from its result. The register rows carry `student_subject_enrollment_id`, so the set of
-    enrolments the caller may see falls out of the same query -- and filtering the attempt
-    history on that set means a Mathematics teacher gets Mathematics attempts and nothing
-    else, without a second permission rule written here. An attempt whose enrolment is NULL
-    is therefore excluded: unattributable, so not shown, which is the safe direction.
-    """
+    """One student in scope, or None (indistinguishable from not existing)."""
     register = (
         (
             await session.execute(
@@ -278,8 +220,6 @@ async def student_detail(
             for row in register
         ],
         attempts=await _permitted_attempts(session, student_id, subject_of_enrolment),
-        # Whole-day figures repeat on every subject row of the same student, so any row
-        # carries them. See the `attendance_stats` CTE in migration d3e4f5a6b7c8.
         days_present=int(head.days_present or 0),
         days_counted=int(head.days_counted or 0),
         attendance_percent=(
@@ -294,7 +234,6 @@ async def _permitted_attempts(
     student_id: UUID,
     subject_of_enrolment: dict[UUID, str],
 ) -> list[AttemptRow]:
-    """The student's finished attempts, in the subjects `subject_of_enrolment` permits."""
     if not subject_of_enrolment:
         return []
 
@@ -313,7 +252,7 @@ async def _permitted_attempts(
         .where(
             QuizAttempt.student_id == student_id,
             QuizAttempt.student_subject_enrollment_id.in_(subject_of_enrolment),
-            QuizAttempt.status.in_(_FINISHED_ATTEMPTS),
+            QuizAttempt.status.in_(FINISHED_ATTEMPT_STATUSES),
         )
         .order_by(QuizAttempt.submitted_at.desc().nullslast())
         .limit(MAX_ATTEMPTS)
@@ -334,12 +273,6 @@ async def _permitted_attempts(
 
 
 async def _recent_absences(session: AsyncSession, student_id: UUID) -> list[AbsenceRow]:
-    """Recent days the student was not simply present, whole-day records only.
-
-    Not narrowed by subject because whole-day attendance is not a subject's to divide: it
-    is the same fact for every teacher of the child, and it is the figure the 75%
-    eligibility rule is measured against.
-    """
     rows = await session.execute(
         select(AttendanceRecord.on_date, AttendanceRecord.status)
         .where(
