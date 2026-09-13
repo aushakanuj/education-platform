@@ -68,7 +68,10 @@ async def test_high_confidence_template_match(monkeypatch: pytest.MonkeyPatch) -
         ("Sci", "Science"),
         ("Science", "Science"),
         ("Eng", "English"),
-        ("Phy", "Physics"),
+        # Physics deliberately not a valid value for this template's `subject` enum —
+        # no Physics subject exists in this schema (see intent_templates.yaml's own
+        # note on this and the sibling templates it matches for consistency); a "Phy"
+        # alias must fall through to free_form here, not match this template.
     ],
 )
 async def test_latest_quiz_attempt_subject_alias_is_normalized(
@@ -92,6 +95,32 @@ async def test_latest_quiz_attempt_subject_alias_is_normalized(
     assert result["intent"] == "latest_quiz_attempt"
     assert result["intent_parameters"] == {"subject": canonical}
     assert ":subject" in (result["generated_sql"] or "")
+
+
+@pytest.mark.asyncio
+async def test_latest_quiz_attempt_physics_falls_back_to_free_form(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Physics is not a valid `subject` value for this template — no Physics subject
+    exists in this schema (see intent_templates.yaml's own note, shared with the three
+    sibling templates that already exclude it). A classifier match naming Physics must
+    fail validation and fall through to free_form, never silently accept a subject that
+    can never return data.
+    """
+    _mock_classifier(
+        monkeypatch,
+        {
+            "intent": "latest_quiz_attempt",
+            "confidence": 0.95,
+            "parameters": {"subject": "Physics"},
+            "operation": "last",
+        },
+    )
+
+    result = await _MODULE.intent_router(_state())
+
+    assert result["intent_route"] == "free_form"
+    assert result["query_source"] is None
 
 
 @pytest.mark.asyncio

@@ -170,15 +170,17 @@ templates:
       - "Who took the last quiz in Maths?"
       - "Who took the last quiz in Sci?"
       - "Who took the last quiz in Eng?"
-      - "Who took the last quiz in Phy?"
       - "Who took the latest Science quiz?"
       - "Who took the most recent English quiz?"
-      - "Who was the most recent student to take a quiz in Physics?"
       - "What was the score of the student who took the last quiz?"
     parameters:
       subject:
         type: enum
-        values: [Mathematics, Science, English, Social Studies, Arabic, Physics]
+        # Physics deliberately excluded — no Physics subject exists in this schema yet
+        # (confirmed live), same reason it's excluded from average_mastery_by_subject /
+        # list_students_below_score_in_subject / top_students_by_subject below. This
+        # enum previously still listed it; fixed for consistency with those three.
+        values: [Mathematics, Science, English, Social Studies, Arabic]
         required: false
         default: null
     requires_signoff: false
@@ -191,10 +193,8 @@ templates:
         - Who took the last quiz in Maths?
         - Who took the last quiz in Sci?
         - Who took the last quiz in Eng?
-        - Who took the last quiz in Phy?
         - Who took the latest Science quiz?
         - Who took the most recent English quiz?
-        - Who was the most recent student to take a quiz in Physics?
         - What was the score of the student who took the last quiz?
         negative_examples:
         - What is the average quiz score?
@@ -316,7 +316,9 @@ templates:
       SELECT AVG(s.mastery_percent) AS average_score
       FROM student_360 s
       JOIN subjects sub ON sub.id = s.subject_id
+      JOIN academic_periods ap ON ap.id = s.academic_period_id
       WHERE sub.name = :subject
+        AND ap.status = 'active'
         AND s.student_id IN (
           SELECT sse.student_id
           FROM student_subject_enrollments sse
@@ -355,7 +357,9 @@ templates:
     sql: |
       SELECT AVG(s.attendance_percent) AS average_attendance
       FROM student_360 s
-      WHERE s.student_id IN (
+      JOIN academic_periods ap ON ap.id = s.academic_period_id
+      WHERE ap.status = 'active'
+        AND s.student_id IN (
         SELECT sse.student_id
         FROM student_subject_enrollments sse
         JOIN teaching_assignments ta
@@ -397,18 +401,21 @@ templates:
         - section_name
 
     sql: |
-      SELECT DISTINCT sp.full_name
+      SELECT sp.full_name
       FROM student_profiles sp
-      JOIN student_subject_enrollments sse ON sse.student_id = sp.id
-      JOIN student_grade_enrollments sge ON sge.id = sse.grade_enrollment_id
-      JOIN teaching_assignments ta
-        ON ta.grade_subject_offering_id = sse.grade_subject_offering_id
-      JOIN sections sec ON sec.id = sge.section_id
-      WHERE sec.name = :section_name
-        AND ta.teacher_user_id = :current_user_id
-        AND ta.status = 'active'
-        AND sse.status = 'active'
-        AND (ta.section_id IS NULL OR ta.section_id = sge.section_id)
+      WHERE sp.id IN (
+        SELECT sse.student_id
+        FROM student_subject_enrollments sse
+        JOIN student_grade_enrollments sge ON sge.id = sse.grade_enrollment_id
+        JOIN teaching_assignments ta
+          ON ta.grade_subject_offering_id = sse.grade_subject_offering_id
+        JOIN sections sec ON sec.id = sge.section_id
+        WHERE sec.name = :section_name
+          AND ta.teacher_user_id = :current_user_id
+          AND ta.status = 'active'
+          AND sse.status = 'active'
+          AND (ta.section_id IS NULL OR ta.section_id = sge.section_id)
+      )
       ORDER BY sp.full_name
 
   # ---------------------------------------------------------------------------
@@ -454,8 +461,10 @@ templates:
       FROM student_360 s
       JOIN student_profiles sp ON sp.id = s.student_id
       JOIN subjects sub ON sub.id = s.subject_id
+      JOIN academic_periods ap ON ap.id = s.academic_period_id
       WHERE sub.name = :subject
         AND s.mastery_percent < :threshold
+        AND ap.status = 'active'
         AND s.student_id IN (
           SELECT sse.student_id
           FROM student_subject_enrollments sse
@@ -508,7 +517,9 @@ templates:
       FROM student_360 s
       JOIN student_profiles sp ON sp.id = s.student_id
       JOIN subjects sub ON sub.id = s.subject_id
+      JOIN academic_periods ap ON ap.id = s.academic_period_id
       WHERE sub.name = :subject
+        AND ap.status = 'active'
         AND s.student_id IN (
           SELECT sse.student_id
           FROM student_subject_enrollments sse
@@ -670,8 +681,10 @@ templates:
     sql: |
       SELECT COUNT(DISTINCT s.student_id) AS students_doing_well
       FROM student_360 s
+      JOIN academic_periods ap ON ap.id = s.academic_period_id
       WHERE s.mastery_percent >= 70.00      -- ⚠ REQUIRES SIGN-OFF
         AND s.quizzes_passed > 0            -- ⚠ REQUIRES SIGN-OFF
+        AND ap.status = 'active'
         AND s.student_id IN (
           SELECT sse.student_id
           FROM student_subject_enrollments sse
@@ -728,8 +741,10 @@ templates:
       SELECT DISTINCT sp.full_name, s.mastery_percent, s.attendance_percent
       FROM student_360 s
       JOIN student_profiles sp ON sp.id = s.student_id
+      JOIN academic_periods ap ON ap.id = s.academic_period_id
       WHERE (s.mastery_percent < 50.00        -- ⚠ REQUIRES SIGN-OFF
              OR s.attendance_percent < 75.00) -- ⚠ REQUIRES SIGN-OFF (matches §6 POC rule)
+        AND ap.status = 'active'
         AND s.student_id IN (
           SELECT sse.student_id
           FROM student_subject_enrollments sse
@@ -792,7 +807,9 @@ templates:
       SELECT sp.full_name, s.attendance_percent
       FROM student_360 s
       JOIN student_profiles sp ON sp.id = s.student_id
+      JOIN academic_periods ap ON ap.id = s.academic_period_id
       WHERE s.attendance_percent < :threshold
+        AND ap.status = 'active'
         AND s.student_id IN (
           SELECT sse.student_id
           FROM student_subject_enrollments sse
@@ -807,7 +824,9 @@ templates:
     sql_count: |
       SELECT COUNT(DISTINCT s.student_id) AS student_count
       FROM student_360 s
+      JOIN academic_periods ap ON ap.id = s.academic_period_id
       WHERE s.attendance_percent < :threshold
+        AND ap.status = 'active'
         AND s.student_id IN (
           SELECT sse.student_id
           FROM student_subject_enrollments sse

@@ -111,6 +111,39 @@ must use `cmq.subtopic_id -> subtopics.id -> subtopics.topic_id -> topics.id`; t
 branch must use `cmq.topic_id -> topics.id` directly. A prompt example for only the first
 branch is insufficient because it teaches the model to assume `subtopic_id` is populated
 even for a `topic_mastery` quiz.
+
+Entity-vs-attempt ambiguity when the question needs a per-student score value alongside
+a count/list, and why the fix is "prefer `student_360`," not "pick one attempt by hand":
+a live production case ("how many of my students scored less than 60% in mathematics")
+got two different, both-wrong answers depending only on phrasing. "How many..." alone
+undercounted; adding "...mention their marks as well" made the model join `quiz_attempts`
+directly and return one row per *qualifying attempt*, not per student — the same student
+appeared multiple times (once per attempt below the threshold) with different scores, so
+a verified-correct 28-distinct-student answer came back as 15 duplicate-inflated rows.
+First fix attempt taught a hand-rolled "pick each student's latest attempt via a lateral
+join" pattern — that resolved the duplication (confirmed: 8 distinct rows, matching a
+verified-correct count for "most recent attempt per student"), but it was solving the
+wrong ambiguity. `schema_catalog.md` already has a settled, documented answer for
+*exactly* this shape — §6's glossary entry for "a student's mastery / average score in a
+subject" names `student_360.mastery_percent` specifically, and §5 says to "prefer
+querying this view over re-deriving the same joins/aggregates by hand whenever the
+question is about a student's overall standing in a subject." `mastery_percent` is
+`ROUND(AVG(quiz_attempts.score_percent), 2)` across all of a student's scored attempts in
+that subject (see the view's own migration) — a genuinely different number from "their
+latest attempt's score," and the one this schema has already decided is the canonical
+answer to "how well is this student doing in Mathematics." Ignoring that existing
+convention in favor of a fresh hand-rolled pattern is exactly how a *second*
+inconsistency appeared: a pre-existing template (`intent_router`'s
+`list_students_below_score_in_subject`-shaped match) already answers close phrasings of
+this same question via `student_360.mastery_percent`, so a hand-rolled "latest attempt"
+answer from the free-form path disagreed with the template's answer for a phrasing one
+word away, even after the duplication bug was fixed. The rule below teaches `student_360`
+first for any "score/mastery in a subject" question — one row per student per subject
+enrollment already, so the one-to-many join and the "which attempt" question never come
+up at all — and keeps the one-attempt-per-student lateral-join pattern only as a fallback
+for a question that is genuinely about a specific attempt (a particular quiz, "their most
+recent attempt's date," "did they retry"), where `student_360` has no column to answer
+from and picking one real `quiz_attempts` row is unavoidable.
 """
 
 from __future__ import annotations
@@ -161,6 +194,31 @@ tables only to check that a qualifying row exists — not to read a value specif
 that one row — add `DISTINCT` to your outer SELECT, or reformulate the join as an \
 `EXISTS (...)` subquery. Otherwise the same student can appear more than once in your \
 result, once per matching row, even though the answer should count or list them once.
+- A question about a student's **score, mastery, or standing in a subject** — including \
+"how many students scored less than X%", "what are their marks", "who is failing \
+Mathematics" — is a question `student_360` already answers directly: one row per \
+student per subject enrollment, with `mastery_percent` pre-computed as that student's \
+average score across all their scored attempts in that subject. Prefer \
+`student_360.mastery_percent` over joining `quiz_attempts` by hand for this shape, \
+always: there is no one-to-many join to reason about at all (the view already has \
+exactly one row per student), so this also avoids the DISTINCT/EXISTS question above \
+entirely. Example: "how many of my students scored less than 60% in Mathematics, and \
+what were their marks" becomes `SELECT sp.full_name, s.mastery_percent FROM student_360 s \
+JOIN student_profiles sp ON sp.id = s.student_id WHERE s.subject = 'Mathematics' AND \
+s.mastery_percent < 60` (plus your usual teacher/institution scoping) — never a hand-\
+rolled `JOIN quiz_attempts qa ON qa.student_subject_enrollment_id = sse.id WHERE \
+qa.score_percent < 60`, which returns one row per qualifying *attempt*, not per student, \
+and silently overstates how many distinct students are affected.
+- Only fall back to joining `quiz_attempts` directly when the question is genuinely about \
+a specific attempt — a particular quiz, "their most recent attempt's date", "did they \
+retry", "how many times did they attempt this quiz" — where `student_360` has no column \
+to answer from. Even then, if you need one attempt's value (not just to check a row \
+exists — the DISTINCT/EXISTS bullet above already covers that case), pick exactly one \
+qualifying row per entity via a lateral join ordered to pick the row you want, never a \
+plain join against the whole one-to-many table: `JOIN LATERAL (SELECT qa.score_percent \
+FROM quiz_attempts qa WHERE qa.student_subject_enrollment_id = sse.id ORDER BY \
+qa.submitted_at DESC NULLS LAST LIMIT 1) AS latest ON true`, defaulting to each student's \
+most recent submitted attempt unless the question asks for a specific one.
 - Prefer the simplest join path that actually answers the question. Only join through \
 curriculum-content tables when the question genuinely needs curriculum-specific data (a \
 topic name, a specific quiz's identity, a question bank count) that has no simpler \
@@ -253,6 +311,18 @@ async def generate_sql(state: TextToSQLState) -> TextToSQLState:
     if is_retry:
         retry_count += 1
 
+    # A retry means this call's own output is free-form LLM SQL, regardless of how the
+    # query that just got rejected was sourced. This matters specifically for a template
+    # match that failed validate_sql: intent_router set state["query_source"] = "template"
+    # and routed straight here past load_schema/link_schema, so schema_context is empty
+    # for this call — but apply_role_scope trusts query_source == "template" unconditionally
+    # and skips its entire row/institution-scoping rewrite (see that module's "template"
+    # branch). Leaving the stale "template" tag on a retry would let this call's real,
+    # unscoped LLM output execute with no role-based row scoping at all. Clearing it here,
+    # on every retry entry regardless of outcome, ensures a template-origin retry always
+    # falls through to the full free-form scoping rewrite once real generation happens.
+    query_source = None if is_retry else state.get("query_source")
+
     messages = _build_messages(
         question=state["question"],
         schema_context=state.get("schema_context") or "",
@@ -268,6 +338,7 @@ async def generate_sql(state: TextToSQLState) -> TextToSQLState:
         return {
             **state,
             "retry_count": retry_count,
+            "query_source": query_source,
             "error": format_error(LLM_ERROR, f"generate_sql: OpenRouter call failed: {exc}"),
         }
 
@@ -276,12 +347,14 @@ async def generate_sql(state: TextToSQLState) -> TextToSQLState:
         return {
             **state,
             "retry_count": retry_count,
+            "query_source": query_source,
             "error": format_error(LLM_ERROR, "generate_sql: model returned an empty query"),
         }
 
     return {
         **state,
         "retry_count": retry_count,
+        "query_source": query_source,
         "generated_sql": sql,
         "error": None,
     }

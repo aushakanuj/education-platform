@@ -170,6 +170,17 @@ def _local_aliases(tree: exp.Select) -> set[str]:
     `WITH recent AS (...) SELECT r.x FROM recent r` qualifies its columns with `r`, not
     `recent` — both need to resolve as "this is a CTE, not a real table" or `r.x` gets
     wrongly rejected as an unknown table alias (caught by testing this exact query).
+
+    A `JOIN LATERAL (...) AS alias ON true` derived table is its own case, not covered
+    by the `exp.Subquery` walk above: sqlglot parses it as an `exp.Lateral` node whose
+    *own* `.alias` carries the real name (`latest` in `JOIN LATERAL (...) AS latest ON
+    true`) — the `exp.Subquery` node it wraps is anonymous (`alias == ""`), confirmed
+    empirically. Missing this meant a lateral join's alias was never recognized as
+    local, so any column qualified by it (`latest.score_percent`) was wrongly rejected
+    as an unknown table alias — caught live: this is exactly the join shape
+    generate_sql's own system prompt now teaches for "one row per entity, picking a
+    specific attempt's value" questions (see that module's docstring), so rejecting it
+    here would silently defeat that fix.
     """
     aliases: set[str] = set()
     cte_names: set[str] = set()
@@ -180,6 +191,9 @@ def _local_aliases(tree: exp.Select) -> set[str]:
     for subq in tree.find_all(exp.Subquery):
         if subq.alias:
             aliases.add(subq.alias.lower())
+    for lateral in tree.find_all(exp.Lateral):
+        if lateral.alias:
+            aliases.add(lateral.alias.lower())
     for table_node in tree.find_all(exp.Table):
         if table_node.name.lower() in cte_names and table_node.alias:
             aliases.add(table_node.alias.lower())

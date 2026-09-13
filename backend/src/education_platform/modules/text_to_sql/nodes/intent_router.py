@@ -1,4 +1,30 @@
-"""Routes approved in-domain questions to governed YAML templates or free-form SQL."""
+"""Routes approved in-domain questions to governed YAML templates or free-form SQL.
+
+Role gate on template matching, enforced in code, not just in the router prompt:
+every one of `intent_templates.yaml`'s templates hand-authors its own row-scoping
+predicate against a *teacher* identity (`ta.teacher_user_id = :current_user_id`, or —
+for `list_school_subjects` — no per-user predicate at all, deliberately treated as
+teacher-only anyway per the API's own charter: see `router.py`'s module docstring on why
+student/admin/parent access is a separate, not-yet-made decision). `decision_rules` in
+the YAML already tells the classifier "Admin-, Student-, and Parent-scoped questions
+remain free_form," but that was, until now, the *only* enforcement of it — an LLM
+instruction, not a structural check. Today's sole caller (`router.py`'s `/text-to-sql/ask`
+endpoint) already hardcodes `state["user_role"] = "teacher"` and gates on
+`require_role("teacher")` before the graph even runs, so this has never been reachable
+with a different role in production — but `intent_router` is a pure function of `state`,
+not of who happens to call it today, and nothing stopped a future second caller (another
+endpoint reusing `build_text_to_sql_graph()`) from invoking it with `user_role` set to
+`"admin"`/`"student"`/`"parent"` and getting a template match anyway. The wrong role's
+`user_id` simply not matching any `teaching_assignments.teacher_user_id` row would still
+mean an empty result rather than a data leak — this was never a live vulnerability — but
+that safety is incidental to the schema, not a designed guarantee, unlike every other
+role boundary in this pipeline (`apply_role_scope`'s allowlists, `_ROLE_FORBIDDEN_TABLES`),
+which are all enforced in code. The check below closes that gap the same way: template
+matching is skipped entirely — falling through to `_free_form`, the same fallback an
+off-topic or ambiguous question already takes — for any role other than `"teacher"`,
+before the classifier LLM call even runs (a free efficiency win for a role that could
+never validly match anyway, not just a correctness fix).
+"""
 
 from __future__ import annotations
 
@@ -97,6 +123,19 @@ def _valid_parameters(template: dict[str, Any], parameters: dict[str, Any]) -> b
     return True
 
 
+def template_route_min_confidence() -> float:
+    """The configured confidence floor a template match must clear (`_select_template`'s
+    own threshold, exposed here so other nodes — `sanity_check`, to flag a borderline
+    match — read the same live value from `intent_templates.yaml` rather than a second,
+    driftable copy of the literal 0.90 default)."""
+    catalog = _load_catalog()
+    routing_policy = catalog.get("intent_router", {}).get("routing_policy", {})
+    threshold = routing_policy.get("template_route_min_confidence", 0.90)
+    if not isinstance(threshold, (int, float)) or not 0 <= threshold <= 1:
+        return 0.90
+    return float(threshold)
+
+
 def _select_template(
     decision: _RouterDecision, catalog: dict[str, Any]
 ) -> tuple[dict[str, Any], dict[str, Any]] | None:
@@ -137,6 +176,11 @@ def _free_form(state: TextToSQLState, decision: _RouterDecision | None = None) -
 
 
 async def intent_router(state: TextToSQLState) -> TextToSQLState:
+    # Every template is teacher-shaped by construction (see module docstring) — no
+    # non-teacher role can ever validly match one, so skip template matching (and the
+    # classifier call it would otherwise cost) entirely for any other role.
+    if state.get("user_role") != "teacher":
+        return _free_form(state)
     try:
         catalog = _load_catalog()
         settings = get_settings()
@@ -184,4 +228,4 @@ async def intent_router(state: TextToSQLState) -> TextToSQLState:
     }
 
 
-__all__ = ["intent_router"]
+__all__ = ["intent_router", "template_route_min_confidence"]

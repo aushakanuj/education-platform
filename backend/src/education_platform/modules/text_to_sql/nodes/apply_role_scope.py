@@ -545,8 +545,11 @@ def _cte_and_derived_aliases(tree: exp.Expr) -> set[str]:
     """Names that refer to a CTE or a derived (subquery-in-FROM) table anywhere in the
     query, not a real schema table — so a query that (oddly, but legally) names a CTE
     the same as a sensitive table isn't mistaken for actually touching that table.
-    Mirrors validate_sql._local_aliases's reasoning; computed globally since CTE names
-    are query-wide.
+    Mirrors validate_sql._local_aliases's reasoning (including that module's `exp.Lateral`
+    handling — sqlglot parses `JOIN LATERAL (...) AS alias ON true` as an `exp.Lateral`
+    node whose own `.alias` carries the real name, not as a named `exp.Subquery`; see
+    that function's docstring for how this was caught live); computed globally since CTE
+    names are query-wide.
     """
     aliases: set[str] = set()
     cte_names: set[str] = set()
@@ -557,6 +560,9 @@ def _cte_and_derived_aliases(tree: exp.Expr) -> set[str]:
     for subq in tree.find_all(exp.Subquery):
         if subq.alias:
             aliases.add(subq.alias.lower())
+    for lateral in tree.find_all(exp.Lateral):
+        if lateral.alias:
+            aliases.add(lateral.alias.lower())
     for table_node in tree.find_all(exp.Table):
         if table_node.name.lower() in cte_names and table_node.alias:
             aliases.add(table_node.alias.lower())
