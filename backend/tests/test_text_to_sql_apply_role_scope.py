@@ -1545,3 +1545,25 @@ async def test_institution_scoped_identity_columns_are_deliberately_reviewed() -
 # test_text_to_sql_apply_role_scope_integration.py
 # (test_role_violation_routes_to_honest_refusal_through_compiled_graph), which already has
 # the Postgres fixtures this file deliberately does not.
+
+
+async def test_same_named_cte_inner_base_table_still_gets_institution_scope() -> None:
+    """A CTE whose alias collides with a real table must not skip scoping on the
+    inner base-table reference — otherwise apply_role_scope emits unscoped SQL and
+    only RLS (which set_config can also defeat) stands in the way.
+    """
+    sql = (
+        "WITH student_profiles AS ("
+        " SELECT id, full_name, institution_id FROM student_profiles"
+        ") "
+        "SELECT id, full_name, institution_id FROM student_profiles"
+    )
+    validated = await _scoped(sql, role="teacher", user_id="teacher-1", institution_id="inst-1")
+    # Institution pin must appear on the *inner* real table, not be skipped by CTE aliasing.
+    assert "institution_id = 'inst-1'" in validated
+    # Outer FROM is the CTE — teacher taught-student predicate should still be present
+    # on the inner real student_profiles scan.
+    assert (
+        "teaching_assignments" in validated.lower()
+        or "student_subject_enrollments" in validated.lower()
+    )
