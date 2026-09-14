@@ -199,6 +199,9 @@ from typing import Final
 import sqlglot
 from sqlglot import exp
 
+from education_platform.modules.text_to_sql.nodes.validate_sql import (
+    is_cte_or_derived_table_ref,
+)
 from education_platform.modules.text_to_sql.state import (
     ROLE_VIOLATION,
     TextToSQLState,
@@ -547,6 +550,9 @@ def _cte_and_derived_aliases(tree: exp.Expr) -> set[str]:
     the same as a sensitive table isn't mistaken for actually touching that table.
     Mirrors validate_sql._local_aliases's reasoning; computed globally since CTE names
     are query-wide.
+
+    Aliases on a same-named *base-table* ref inside a non-RECURSIVE CTE body are omitted
+    — those name the real table (see `is_cte_or_derived_table_ref`).
     """
     aliases: set[str] = set()
     cte_names: set[str] = set()
@@ -558,8 +564,13 @@ def _cte_and_derived_aliases(tree: exp.Expr) -> set[str]:
         if subq.alias:
             aliases.add(subq.alias.lower())
     for table_node in tree.find_all(exp.Table):
-        if table_node.name.lower() in cte_names and table_node.alias:
-            aliases.add(table_node.alias.lower())
+        if not table_node.alias:
+            continue
+        if table_node.name.lower() not in cte_names:
+            continue
+        if not is_cte_or_derived_table_ref(table_node, cte_names):
+            continue  # alias of a real base table inside a same-named CTE body
+        aliases.add(table_node.alias.lower())
     return aliases
 
 
@@ -590,7 +601,7 @@ def _scoped_table_refs(
     refs: list[tuple[str, str]] = []
     for table_node in _direct_tables(select_node):
         name = table_node.name
-        if name.lower() in excluded_aliases:
+        if is_cte_or_derived_table_ref(table_node, excluded_aliases):
             continue  # a reference to a CTE/derived table by name, not a real table
         if name.lower() not in STUDENT_SCOPED_TABLES and name.lower() not in (
             INSTITUTION_SCOPED_TABLES
@@ -613,7 +624,7 @@ def _find_unscopable_table_reference(tree: exp.Expr, excluded_aliases: set[str])
     for select_node in tree.find_all(exp.Select):
         for table_node in _direct_tables(select_node):
             name = table_node.name.lower()
-            if name in excluded_aliases:
+            if is_cte_or_derived_table_ref(table_node, excluded_aliases):
                 continue
             if name in STUDENT_SCOPED_TABLES or name in INSTITUTION_SCOPED_TABLES:
                 continue
@@ -712,7 +723,7 @@ def _find_redacted_column_misuse(
         redacted_aliases = {
             table_node.alias or table_node.name: _REDACTED_IDENTITY_COLUMNS[table_node.name.lower()]
             for table_node in _direct_tables(select_node)
-            if table_node.name.lower() not in excluded_aliases
+            if not is_cte_or_derived_table_ref(table_node, excluded_aliases)
             and table_node.name.lower() in _REDACTED_IDENTITY_COLUMNS
         }
         if not redacted_aliases:
@@ -820,7 +831,7 @@ def _find_role_forbidden_table_reference(
     for select_node in tree.find_all(exp.Select):
         for table_node in _direct_tables(select_node):
             name = table_node.name.lower()
-            if name in excluded_aliases:
+            if is_cte_or_derived_table_ref(table_node, excluded_aliases):
                 continue
             if name in forbidden:
                 return (

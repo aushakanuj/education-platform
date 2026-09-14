@@ -301,6 +301,39 @@ async def test_existing_limit_is_preserved_not_overridden() -> None:
     assert f"LIMIT {DEFAULT_ROW_LIMIT}" not in validated
 
 
+async def test_oversized_explicit_limit_is_clamped_to_default() -> None:
+    validated = await _validated("SELECT id FROM quiz_attempts LIMIT 1000000")
+    assert f"LIMIT {DEFAULT_ROW_LIMIT}" in validated
+    assert "LIMIT 1000000" not in validated
+
+
+async def test_set_config_is_rejected_even_inside_cte() -> None:
+    error = await _rejected(
+        "WITH setup AS (SELECT set_config('app.current_user_role', 'admin', true) AS a) "
+        "SELECT id FROM subjects, setup WHERE setup.a IS NOT NULL"
+    )
+    assert "set_config" in error.lower()
+
+
+async def test_pg_advisory_lock_is_rejected() -> None:
+    error = await _rejected("SELECT pg_advisory_lock(1) FROM subjects LIMIT 1")
+    assert "pg_advisory_lock" in error.lower()
+
+
+async def test_select_into_is_rejected() -> None:
+    error = await _rejected("SELECT id, name INTO subjects FROM grades")
+    assert "into" in error.lower()
+
+
+async def test_same_named_cte_still_whitelists_inner_base_table() -> None:
+    # Inner FROM student_profiles is the real table (non-RECURSIVE CTE shadowing).
+    # It must remain whitelist-checked — an excluded table must still be caught.
+    error = await _rejected(
+        "WITH ingest_jobs AS (SELECT id FROM ingest_jobs) SELECT id FROM ingest_jobs"
+    )
+    assert "ingest_jobs" in error
+
+
 def test_default_row_limit_matches_insights_module_precedent() -> None:
     # Not testing insights.service directly (out of this module's business), just
     # documenting that the chosen cap isn't an arbitrary new number.
