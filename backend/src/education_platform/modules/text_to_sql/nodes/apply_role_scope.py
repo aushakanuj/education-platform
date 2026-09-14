@@ -297,7 +297,13 @@ _BLOCKED_COLUMN_TABLES: Final[dict[str, str]] = {
 # subqueries. Kept maximally distinctive (unlikely to be naturally generated, and never
 # validated/restricted by validate_sql, which only vets *schema* names, not aliases) so a
 # question crafted to make generate_sql alias a real table `ta`/`sse`/`sge`/`sp` can never
-# shadow — and thereby defeat — the injected predicate's own internal correlation.
+# shadow — and thereby defeat — the injected predicate's own internal correlation. That
+# reasoning alone only covers one direction: a real table *elsewhere* in the query
+# colliding with an alias one of the predicate builders below introduces. The mirror
+# direction — the table this file is about to scope being *itself* aliased with this
+# same reserved prefix — is refused outright by `_find_reserved_alias_collision`, called
+# before any alias here is trusted for anything; see that function's docstring for the
+# live exploit this closes.
 _ALIAS_PREFIX: Final[str] = "__ars_"
 
 
@@ -836,6 +842,56 @@ def _find_role_forbidden_table_reference(
     return None
 
 
+def _find_reserved_alias_collision(tree: exp.Expr) -> str | None:
+    """A table/subquery/lateral/CTE alias in the incoming query itself uses
+    `_ALIAS_PREFIX`'s reserved namespace (case-insensitive).
+
+    `_ALIAS_PREFIX`'s own docstring only reasoned about one direction of collision — a
+    real table elsewhere in the query aliased e.g. `ta`/`sse`/`gso` to shadow the
+    predicate builders' *internal* correlation aliases. It missed the mirror case: if
+    the table this file is about to scope is *itself* aliased with the reserved prefix
+    (e.g. `student_360 __ars_ta`), `_taught_offering_exists`/`_taught_period_grade_exists`
+    splice that exact alias into a correlated subquery that also introduces its own
+    inner table using that same literal alias (`FROM teaching_assignments __ars_ta`).
+    Inner scope shadows the outer correlation name, so the spliced-in "outer" column
+    reference silently resolves to the newly-introduced inner row instead — collapsing
+    the correlation into a self-tautology (`x = x`, always true for any row satisfying
+    the rest of the inner EXISTS) rather than raising an error. Confirmed live: a
+    teacher aliasing their FROM/JOIN table `__ars_ta` (student_360/attendance_records)
+    or `__ars_gso` (student_grade_enrollments) can read every row for their institution
+    instead of only their own taught students. Refusing any reserved-prefix alias
+    outright — rather than trying to rename around the collision — keeps this fail-
+    closed without having to reason about every current and future predicate builder's
+    own internal names one at a time.
+    """
+    prefix = _ALIAS_PREFIX.lower()
+    for table_node in tree.find_all(exp.Table):
+        if table_node.alias and table_node.alias.lower().startswith(prefix):
+            return (
+                f"table alias `{table_node.alias}` uses a reserved internal prefix and "
+                "cannot be used"
+            )
+    for subq in tree.find_all(exp.Subquery):
+        if subq.alias and subq.alias.lower().startswith(prefix):
+            return (
+                f"subquery alias `{subq.alias}` uses a reserved internal prefix and "
+                "cannot be used"
+            )
+    for lateral in tree.find_all(exp.Lateral):
+        if lateral.alias and lateral.alias.lower().startswith(prefix):
+            return (
+                f"lateral alias `{lateral.alias}` uses a reserved internal prefix and "
+                "cannot be used"
+            )
+    for cte in tree.find_all(exp.CTE):
+        if cte.alias and cte.alias.lower().startswith(prefix):
+            return (
+                f"CTE alias `{cte.alias}` uses a reserved internal prefix and cannot be "
+                "used"
+            )
+    return None
+
+
 def _self_student_subquery(user_id_literal: str) -> str:
     p = _ALIAS_PREFIX
     return f"(SELECT {p}sp.id FROM student_profiles {p}sp WHERE {p}sp.user_id = {user_id_literal})"
@@ -1284,6 +1340,18 @@ async def apply_role_scope(state: TextToSQLState) -> TextToSQLState:
                 "role_scope_applied": "template_builtin",
                 "scoped_by_user_id": user_id,
             },
+        }
+
+    # Runs before any alias is trusted for anything else below (excluded_aliases,
+    # _scoped_table_refs, the predicate builders' own splicing) — see
+    # _find_reserved_alias_collision's docstring for exactly why a reserved-prefix
+    # alias must be refused outright rather than allowed to reach the rewrite at all.
+    reserved_alias_collision = _find_reserved_alias_collision(tree)
+    if reserved_alias_collision is not None:
+        return {
+            **state,
+            "validated_sql": None,
+            "error": format_error(ROLE_VIOLATION, reserved_alias_collision),
         }
 
     excluded_aliases = _cte_and_derived_aliases(tree)
