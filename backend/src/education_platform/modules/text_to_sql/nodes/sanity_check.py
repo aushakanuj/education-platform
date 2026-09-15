@@ -31,12 +31,17 @@ below, reviewable in one place:
   to detect "this is a scalar answer" (deliberately reusing that same simple, existing
   result-shape check rather than adding fragile SQL-text/AST "is this an aggregate query"
   detection that nothing else in this pipeline needs), when that one value is a numeric
-  zero — not `NULL`, which is Task 9's separate, correctly-handled
-  "no data available" case (`compose_answer._single_scalar_answer`'s `value is None`
-  branch) and must keep going through that path untouched, never this one. Same "medium"
-  severity as `zero_rows`, for the identical reason: a genuine zero and a role-scoping
-  failure that silently returned nothing are indistinguishable from the result alone,
-  regardless of whether the query happened to be phrased as a count or a list.
+  zero **or `NULL`**. `NULL` used to be routed around this check entirely, on the
+  assumption `compose_answer._single_scalar_answer`'s "No `<label>` data is available for
+  that." text made the uncertainty visible on its own — confirmed live that it doesn't:
+  that function only ever affects the rendered *text*, never `state["confidence"]`, and
+  nothing else downgrades confidence for a `NULL` scalar (an `AVG()`-shaped query that
+  legitimately matches zero rows returns one row with a `NULL` value, not zero rows, so
+  `zero_rows` can't catch it either) — a query correctly excluded by a `WHERE` clause, or a
+  genuine data gap, was reading as full "high" confidence with an honest-sounding but
+  misleadingly-confident answer. Same "medium" severity as the zero-count case and as
+  `zero_rows`, for the identical reason: a genuine zero/no-data result and a role-scoping
+  or filter silently excluding everything are indistinguishable from the result alone.
 * **Row-cap truncation** (`row_cap_truncated`, low) — reads
   `state["audit_entry"]["row_cap_truncated"]`, the flag `execute_sql` (Task 7) sets when it
   had to truncate. Lower severity than the heuristic checks below: this isn't a guess, it's
@@ -199,16 +204,27 @@ def _zero_rows_trigger(row_count: int) -> tuple[str, str] | None:
 def _zero_valued_aggregate_trigger(rows: list[dict[str, Any]]) -> tuple[str, str] | None:
     # Same single-row/single-column shape compose_answer already treats as "this is a
     # scalar answer" (row_count==1 alone isn't enough — a single row from a multi-column
-    # SELECT isn't this shape at all). NULL is Task 9's separate "no data available"
-    # case — must not be treated as zero here. bool is excluded even though it's a
-    # subclass of int in Python: no aggregate this pipeline produces is boolean-valued,
-    # and treating False as "zero" would be answering a question this check was never
-    # meant to ask.
+    # SELECT isn't this shape at all). bool is excluded even though it's a subclass of
+    # int in Python: no aggregate this pipeline produces is boolean-valued, and treating
+    # False as "zero" would be answering a question this check was never meant to ask.
+    #
+    # NULL fires here too now, not just a literal 0 — see the module docstring's
+    # "Zero-valued aggregate" entry for why routing NULL around this check entirely was a
+    # real, confirmed-live bug (confidence stayed "high" for a legitimately-empty AVG()
+    # result), not a deliberate, correctly-handled split.
     if len(rows) != 1 or len(rows[0]) != 1:
         return None
     ((column, value),) = rows[0].items()
-    if value is None or isinstance(value, bool):
+    if isinstance(value, bool):
         return None
+    if value is None:
+        return (
+            "zero_valued_aggregate",
+            f"single-value result ({column}) is NULL — the same 'genuinely no data vs. "
+            "role-scoping/a filter silently excluded everything' ambiguity zero_rows "
+            "already flags for an empty row list, just in the scalar-aggregate form that "
+            "always returns one row (with a NULL value) instead of zero rows",
+        )
     try:
         numeric = float(value)
     except (TypeError, ValueError):

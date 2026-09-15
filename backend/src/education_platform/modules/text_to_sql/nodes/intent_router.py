@@ -91,6 +91,28 @@ def _normalize_parameters(parameters: dict[str, Any], catalog: dict[str, Any]) -
     return normalized
 
 
+def _matches_required_keywords(template: dict[str, Any], question: str) -> bool:
+    """A live incident (golden-eval row 25) showed the classifier can match a question to
+    a template whose own domain the question never mentions at all: "Do any of my students
+    have a mastery score of exactly 0?" was matched to `students_below_attendance_threshold`
+    at 0.9 confidence — a fabricated wrong-template match, not just a fabricated parameter
+    value (the number "0" genuinely appears in the question, so a numeric-presence check
+    alone would not have caught this; the mismatch is which *metric* that number belongs
+    to). `router.requires_keywords`, when a template declares it, is a small, explicit,
+    human-reviewed list of words the template's own domain is expected to be named by
+    (e.g. "attendance" for the attendance-threshold template) — at least one must appear
+    in the raw question, case-insensitively, or the match is refused here, before
+    confidence/parameter checks even run. Templates that don't declare this list are
+    unaffected (returns True) — this is an opt-in, additive safety net, not a retroactive
+    requirement on every template.
+    """
+    keywords = template.get("router", {}).get("requires_keywords")
+    if not keywords:
+        return True
+    lowered = question.lower()
+    return any(keyword.lower() in lowered for keyword in keywords)
+
+
 def _valid_parameters(template: dict[str, Any], parameters: dict[str, Any]) -> bool:
     definitions = template.get("parameters", {})
     router = template.get("router", {})
@@ -137,7 +159,7 @@ def template_route_min_confidence() -> float:
 
 
 def _select_template(
-    decision: _RouterDecision, catalog: dict[str, Any]
+    decision: _RouterDecision, catalog: dict[str, Any], question: str
 ) -> tuple[dict[str, Any], dict[str, Any]] | None:
     routing_policy = catalog.get("intent_router", {}).get("routing_policy", {})
     threshold = routing_policy.get("template_route_min_confidence", 0.90)
@@ -156,6 +178,8 @@ def _select_template(
         if template.get("requires_signoff") or router.get("requires_approved_policy"):
             return None
         if decision.operation not in router.get("supported_operations", []):
+            return None
+        if not _matches_required_keywords(template, question):
             return None
         parameters = _normalize_parameters(decision.parameters, catalog)
         if not _valid_parameters(template, parameters):
@@ -206,7 +230,7 @@ async def intent_router(state: TextToSQLState) -> TextToSQLState:
     except (OSError, ValueError, OpenRouterError, json.JSONDecodeError, TypeError, ValidationError):
         return _free_form(state)
 
-    selected = _select_template(decision, catalog)
+    selected = _select_template(decision, catalog, state.get("question") or "")
     if selected is None:
         return _free_form(state, decision)
 
