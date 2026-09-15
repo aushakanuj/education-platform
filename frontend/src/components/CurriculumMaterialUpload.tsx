@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type FormEvent } from "react";
 
 import {
-  pollMaterialVersionStatus,
+  watchMaterialVersionStatus,
   uploadSubtopicMaterial,
 } from "../api/adminIngest";
 import { ApiError, type MaterialVersionStatus } from "../api/types";
@@ -76,7 +76,7 @@ export function CurriculumMaterialUpload({
         failure_reason: null,
         chunk_count: 0,
       });
-      const settled = await pollMaterialVersionStatus(accepted.version_id, {
+      const settled = await watchMaterialVersionStatus(accepted.version_id, {
         signal: abort.signal,
       });
       setStatus(settled);

@@ -853,7 +853,7 @@ button:hover:not(:disabled),
   animation: route-page-in 0.5s ease-out both;
 }
 
-.route-motion__page:not(:has(.lesson-view, .subject-view, .topic-view, .policy-chat, .assistant-chat)) {
+.route-motion__page:not(:has(.lesson-view, .subject-view, .topic-view, .policy-chat, .assistant-chat, .admin-unit)) {
   max-width: var(--page-max);
   width: 100%;
 }
@@ -1765,6 +1765,7 @@ button.card {
   min-width: 0;
   display: flex;
   flex-direction: column;
+  overflow-y: auto;
 }
 
 @media (max-width: 860px) {
@@ -2626,12 +2627,14 @@ button.card {
   line-height: 1.65;
 }
 
-.markdown .katex-display {
+.markdown .katex-display,
+.markdown-content .katex-display {
   margin: 0.75rem 0;
   overflow-x: auto;
 }
 
 .markdown .katex,
+.markdown-content .katex,
 .question-prompt .katex,
 .option__text .katex {
   font-size: 1.05em;
@@ -2680,6 +2683,26 @@ button.card {
   padding: 0.85rem 1rem;
   border-radius: var(--radius-sm);
   overflow-x: auto;
+}
+
+.markdown-content .markdown-mermaid,
+.markdown .markdown-mermaid {
+  max-width: 100%;
+  overflow: auto;
+  margin: 0.75rem 0;
+}
+
+.markdown-content .markdown-mermaid svg,
+.markdown .markdown-mermaid svg {
+  max-width: 100%;
+  height: auto;
+  display: block;
+}
+
+.markdown-mermaid__error {
+  margin: 0;
+  color: var(--ink-muted);
+  font-size: 0.92rem;
 }
 
 .muted {
@@ -3001,6 +3024,221 @@ button.teacher-item-list__row:disabled {
   gap: 0.25rem;
 }
 
+.main:has(.admin-unit) {
+  min-height: 0;
+}
+
+.main__inner:has(.admin-unit),
+.route-motion__page:has(.admin-unit) {
+  max-width: none;
+  width: 100%;
+}
+
+.admin-unit {
+  width: 100%;
+  min-width: 0;
+  min-height: 0;
+  flex: 1 1 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 0.85rem;
+}
+
+.admin-unit__body {
+  width: 100%;
+  min-width: 0;
+  min-height: 0;
+  flex: 1 1 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.admin-unit .admin-upload,
+.admin-unit .qa-review,
+.admin-unit .outline-review {
+  width: 100%;
+  min-width: 0;
+}
+
+.admin-unit .qa-review .lesson-layout {
+  width: 100%;
+}
+
+.admin-unit__index {
+  margin-top: 0.5rem;
+  padding-top: 1rem;
+  border-top: 1px solid var(--border);
+}
+
+.admin-unit__index summary {
+  cursor: pointer;
+  font-weight: 650;
+  margin-bottom: 0.85rem;
+}
+
+.admin-generate {
+  display: grid;
+  gap: 0.75rem;
+}
+
+.admin-generate__title {
+  margin: 0;
+  font-size: 1.05rem;
+  letter-spacing: -0.02em;
+}
+
+.admin-generate__lede {
+  margin: 0;
+  color: var(--ink-muted);
+  max-width: 40rem;
+}
+
+.admin-generate__status {
+  display: grid;
+  gap: 0.35rem;
+  margin-top: 0.45rem;
+  justify-items: start;
+}
+
+.admin-generate__rounds {
+  color: var(--ink-muted);
+  font-size: 0.88rem;
+}
+
+.admin-generate__notes {
+  margin: 0;
+  font-size: 0.92rem;
+}
+
+.admin-published-material {
+  min-height: 0;
+}
+
+.admin-unit:has(.admin-published-material) .admin-unit__body {
+  overflow: hidden;
+}
+
+.admin-unit .admin-published-material.lesson-view {
+  flex: 1 1 auto;
+  min-height: 0;
+  height: auto;
+}
+
+.admin-unit .admin-published-material .lesson-layout {
+  width: 100%;
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.admin-unit .admin-published-material .lesson-layout__aside {
+  overflow-y: auto;
+  min-height: 0;
+}
+
+.admin-unit .admin-published-material .lesson-slides {
+  width: 100%;
+  min-height: 0;
+}
+
+.admin-published-quiz {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: grid;
+  gap: 0.95rem;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.admin-published-quiz__item {
+  display: grid;
+  gap: 0.45rem;
+}
+
+.admin-published-quiz__prompt {
+  margin: 0;
+  font-size: 0.92rem;
+}
+
+button.admin-published-row {
+  width: 100%;
+  text-align: left;
+  cursor: pointer;
+  color: inherit;
+  font: inherit;
+}
+
+.generation-run-history {
+  display: grid;
+  gap: 0.65rem;
+}
+
+.generation-run-history__title {
+  margin: 0;
+  font-size: 1rem;
+}
+
+.generation-run-history .list-item.is-selected {
+  outline: 2px solid var(--accent, var(--brand));
+  outline-offset: -2px;
+}
+
+.generation-stepper {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  width: 100%;
+}
+
+.generation-stepper__step {
+  flex: 1 1 8.5rem;
+  min-width: 0;
+  display: grid;
+  gap: 0.2rem;
+  padding: 0.65rem 0.75rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  color: var(--ink-muted);
+}
+
+.generation-stepper__label {
+  font-weight: 650;
+  color: inherit;
+}
+
+.generation-stepper__state {
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+}
+
+.generation-stepper__step.is-complete {
+  border-color: var(--success-border);
+  color: var(--ink);
+  background: color-mix(in srgb, var(--success-bg) 70%, var(--surface));
+}
+
+.generation-stepper__step.is-current {
+  border-color: var(--accent);
+  color: var(--ink);
+  box-shadow: var(--shadow);
+}
+
+.generation-stepper__step.is-failed {
+  border-color: var(--danger-border);
+  color: var(--danger);
+  background: var(--danger-bg);
+}
+
+.generation-stepper__step.is-pending {
+  opacity: 0.78;
+}
+
 .grade-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(min(100%, 9.5rem), 1fr));
@@ -3038,6 +3276,7 @@ button.teacher-item-list__row:disabled {
   gap: 0.35rem;
   margin: 0 0 1rem;
   padding: 0.25rem;
+  flex: none;
   background: var(--surface-2);
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
@@ -3081,6 +3320,11 @@ button.teacher-item-list__row:disabled {
   gap: 0.85rem;
 }
 
+.admin-upload form {
+  display: grid;
+  gap: 0.85rem;
+}
+
 .admin-upload--compact {
   gap: 0.7rem;
 }
@@ -3104,6 +3348,82 @@ button.teacher-item-list__row:disabled {
 
 .admin-upload__target {
   margin: 0 0 0.65rem;
+}
+
+.outline-review {
+  display: grid;
+  gap: 0.85rem;
+}
+
+.outline-review select,
+.outline-review textarea {
+  font: inherit;
+}
+
+.outline-review__nodes {
+  display: grid;
+  gap: 0.85rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.outline-review__node {
+  display: grid;
+  gap: 0.65rem;
+  padding: 0.85rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+}
+
+.outline-review__node-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.45rem;
+}
+
+.outline-review__sequence {
+  margin: 0;
+  font-weight: 600;
+}
+
+.outline-review__check {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  font-size: 0.9rem;
+}
+
+.outline-review__quota {
+  margin: 0;
+}
+
+.outline-review__meta,
+.outline-review__roster,
+.outline-review__outcomes,
+.outline-review__drafts {
+  margin: 0;
+  padding-left: 1.2rem;
+}
+
+.outline-review__request {
+  margin: 0;
+  font-size: 0.9rem;
+}
+
+.outline-review__composer,
+.outline-review__closer,
+.outline-review__assistant {
+  display: grid;
+  gap: 0.65rem;
+}
+
+.outline-review__assistant-reply {
+  margin: 0;
+  font-size: 0.9rem;
 }
 
 .list-item--with-actions {

@@ -24,7 +24,7 @@ export function AdminMaterialsSubjectsPage() {
       <header className="page-head">
         <p className="kicker">{grade?.name ?? "…"} · subjects</p>
         <h1>Subjects</h1>
-        <p>Open a subject to browse units (topics) and lesson or quiz status.</p>
+        <p>Open a subject to browse topics and lesson or quiz status.</p>
       </header>
 
       {loading && (
@@ -51,7 +51,7 @@ export function AdminMaterialsSubjectsPage() {
                 <p>{subject.blurb}</p>
                 <div className="meta-row">
                   <span className="chip">{subject.code}</span>
-                  <span className="badge badge--ok">{topicCount} published</span>
+                  <span className="badge badge--ok">{topicCount} topics</span>
                 </div>
               </Link>
             );

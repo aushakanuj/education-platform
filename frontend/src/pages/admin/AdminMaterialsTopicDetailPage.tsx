@@ -1,92 +1,401 @@
-import { useMemo, useState } from "react";
-import { Navigate, useParams } from "react-router-dom";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { Navigate, useParams, useSearchParams } from "react-router-dom";
 
-import { Crumbs } from "../../components/Crumbs";
-import { CurriculumMaterialUpload } from "../../components/CurriculumMaterialUpload";
-import type { PublishStatus } from "../../lib/adminCurriculumLive";
+import { listTopicGenerationRuns } from "../../api/generation";
+import { getSubtopicMaterial, getTopicMaterial } from "../../api/materials";
+import type { GenerationQaItem, GenerationRun, LessonMaterial, LessonSlide } from "../../api/types";
+import { Crumbs, type Crumb } from "../../components/Crumbs";
+import { LessonSlideFrame } from "../../components/LessonSlideFrame";
+import { PushButton } from "../../components/PushButton";
+import { SubtopicCurriculumGenerateList } from "../../components/SubtopicCurriculumGenerate";
+import { TopicGenerationUpload } from "../../components/TopicGenerationUpload";
+import { findSummarySlide, slidesForLessonView } from "../../lib/lessonSlides";
 import { useAdminDirectory } from "../../lib/useAdminDirectory";
 
-type TabId = "lessons" | "quizzes";
+type TabId = "upload" | "published";
+type PublishedView = "overview" | "slides";
 
-function StatusBadge({ status }: { status: PublishStatus }) {
-  return <span className="badge badge--ok">{status}</span>;
+async function loadPublishedLesson(
+  topicId: string,
+  subtopicId: string | null,
+  preferSubtopic: boolean,
+): Promise<LessonMaterial> {
+  if (preferSubtopic && subtopicId) {
+    try {
+      return await getSubtopicMaterial(subtopicId);
+    } catch {
+      return await getTopicMaterial(topicId);
+    }
+  }
+  try {
+    return await getTopicMaterial(topicId);
+  } catch (err) {
+    if (subtopicId) return await getSubtopicMaterial(subtopicId);
+    throw err;
+  }
+}
+
+function optionEntries(options: Record<string, string>): [string, string][] {
+  return Object.entries(options).sort(([left], [right]) => left.localeCompare(right));
+}
+
+function AdminPublishedQuiz({
+  items,
+  loading,
+}: {
+  items: GenerationQaItem[];
+  loading: boolean;
+}) {
+  const sorted = useMemo(
+    () => [...items].sort((left, right) => left.sequence - right.sequence),
+    [items],
+  );
+  const countLabel =
+    sorted.length === 1 ? "1 question" : `${sorted.length} questions`;
+
+  return (
+    <div className="lesson-quiz-panel">
+      <div className="lesson-quiz-panel__hero">
+        <div>
+          <h2 className="lesson-quiz-panel__title">Topic quiz</h2>
+          <div className="lesson-quiz-panel__meta">
+            <span className="badge badge--ok">Published</span>
+            <span className="lesson-toolbar__hint">
+              {loading
+                ? "Loading quiz…"
+                : sorted.length > 0
+                  ? `${countLabel} · read-only`
+                  : "No quiz linked"}
+            </span>
+          </div>
+        </div>
+      </div>
+      {loading ? (
+        <p className="lesson-toolbar__hint" role="status">
+          Loading published quiz…
+        </p>
+      ) : sorted.length === 0 ? (
+        <p className="lesson-toolbar__hint">No published quiz items on the latest run.</p>
+      ) : (
+        <ol className="admin-published-quiz">
+          {sorted.map((item) => (
+            <li key={item.question_id} className="admin-published-quiz__item">
+              <p className="admin-published-quiz__prompt">
+                <strong>Q{item.sequence}.</strong> {item.prompt}
+              </p>
+              <ul className="draft-options">
+                {optionEntries(item.options).map(([label, text]) => (
+                  <li
+                    key={label}
+                    className={
+                      label === item.correct_label ? "draft-option is-correct" : "draft-option"
+                    }
+                  >
+                    <span className="draft-option__label">{label}</span>
+                    <span>{text}</span>
+                  </li>
+                ))}
+              </ul>
+            </li>
+          ))}
+        </ol>
+      )}
+    </div>
+  );
+}
+
+function AdminPublishedSlides({
+  slides,
+  pane,
+  onOpenSlides,
+}: {
+  slides: LessonSlide[];
+  pane: "overview" | "slides";
+  onOpenSlides: () => void;
+}) {
+  const [slideIndex, setSlideIndex] = useState(0);
+  const summarySlide = findSummarySlide(slides);
+
+  useEffect(() => {
+    if (pane === "slides") {
+      setSlideIndex(0);
+    }
+  }, [pane]);
+
+  if (slides.length === 0) {
+    return (
+      <p className="muted" role="status">
+        No published topic lesson.
+      </p>
+    );
+  }
+
+  switch (pane) {
+    case "overview":
+      return (
+        <LessonSlideFrame
+          title={summarySlide?.title ?? "Lesson summary"}
+          content={summarySlide?.content ?? ""}
+          ariaLabel="Topic lesson"
+          footer={
+            <PushButton size="sm" onClick={onOpenSlides}>
+              Continue
+            </PushButton>
+          }
+        />
+      );
+    case "slides": {
+      const slide = slides[slideIndex] ?? slides[0];
+      const atEnd = slideIndex >= slides.length - 1;
+      return (
+        <div className="lesson-slides">
+          <LessonSlideFrame
+            title={slide.title}
+            content={slide.content}
+            ariaLabel="Topic lesson slides"
+            footer={
+              <>
+                <div className="slide-nav__controls">
+                  <PushButton
+                    variant="outline"
+                    size="sm"
+                    disabled={slideIndex === 0}
+                    onClick={() => setSlideIndex((index) => Math.max(0, index - 1))}
+                  >
+                    Previous
+                  </PushButton>
+                  <PushButton
+                    size="sm"
+                    disabled={atEnd}
+                    onClick={() =>
+                      setSlideIndex((index) => Math.min(slides.length - 1, index + 1))
+                    }
+                  >
+                    Next slide
+                  </PushButton>
+                </div>
+                <p className="slide-nav__status">
+                  Slide {slideIndex + 1} of {slides.length}
+                </p>
+              </>
+            }
+          />
+        </div>
+      );
+    }
+    default: {
+      const _never: never = pane;
+      void _never;
+      return null;
+    }
+  }
+}
+
+function AdminPublishedMaterial({
+  topicId,
+  subtopicId,
+  fallbackTitle,
+  hasLesson,
+  quizItems,
+  quizLoading,
+  pane,
+  preferSubtopic,
+  onOpenSlides,
+}: {
+  topicId: string;
+  subtopicId: string | null;
+  fallbackTitle: string;
+  hasLesson: boolean;
+  quizItems: GenerationQaItem[];
+  quizLoading: boolean;
+  pane: "overview" | "slides";
+  preferSubtopic: boolean;
+  onOpenSlides: () => void;
+}) {
+  const [lesson, setLesson] = useState<LessonMaterial | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!hasLesson) {
+      setLesson(null);
+      setError(null);
+      return;
+    }
+    let cancelled = false;
+    setLesson(null);
+    setError(null);
+    void (async () => {
+      try {
+        const data = await loadPublishedLesson(topicId, subtopicId, preferSubtopic);
+        if (!cancelled) setLesson(data);
+      } catch {
+        if (!cancelled) setError("Could not load the published lesson.");
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [topicId, subtopicId, hasLesson, preferSubtopic]);
+
+  const slides = useMemo(
+    () => (lesson ? slidesForLessonView({ ...lesson, title: lesson.title || fallbackTitle }) : []),
+    [lesson, fallbackTitle],
+  );
+
+  let main: ReactNode;
+  if (error) {
+    main = (
+      <p className="form__error" role="alert">
+        {error}
+      </p>
+    );
+  } else if (hasLesson && !lesson) {
+    main = (
+      <p className="muted" role="status">
+        Loading topic lesson…
+      </p>
+    );
+  } else {
+    main = (
+      <AdminPublishedSlides slides={slides} pane={pane} onOpenSlides={onOpenSlides} />
+    );
+  }
+
+  return (
+    <div className="lesson-view admin-published-material">
+      <div className="lesson-layout">
+        <section className="lesson-layout__main" aria-label="Published lesson">
+          {main}
+        </section>
+        <aside className="lesson-layout__aside" aria-label="Published quiz">
+          <AdminPublishedQuiz items={quizItems} loading={quizLoading} />
+        </aside>
+      </div>
+    </div>
+  );
 }
 
 export function AdminMaterialsTopicDetailPage() {
   const { gradeKey = "", subjectId = "", topicId = "" } = useParams();
-  const { grades, loading, error, getTopic } = useAdminDirectory();
+  const [searchParams] = useSearchParams();
+  const { grades, loading, error, reload, getTopic } = useAdminDirectory();
   const found = getTopic(gradeKey, subjectId, topicId);
-  const [tab, setTab] = useState<TabId>("lessons");
-  const [uploadSubtopicId, setUploadSubtopicId] = useState<string | null>(null);
+  const [tabOverride, setTabOverride] = useState<TabId | null>(null);
+  const [publishedView, setPublishedView] = useState<PublishedView>("overview");
+  const [publishedRun, setPublishedRun] = useState<GenerationRun | null>(null);
+  const [publishedRunLoading, setPublishedRunLoading] = useState(false);
 
-  const quizRows = useMemo(() => {
-    if (!found) return [];
-    const { topic } = found;
-    const rows: {
-      id: string;
-      title: string;
-      meta: string;
-      status: PublishStatus;
-    }[] = [];
-    for (const st of topic.subtopics) {
-      if (st.quiz) {
-        rows.push({
-          id: st.quiz.id,
-          title: st.quiz.title,
-          meta: `Subtopic check · ${st.title}`,
-          status: st.quiz.status,
-        });
+  const grade = found?.grade;
+  const subject = found?.subject;
+  const topic = found?.topic;
+  const requestedTab = searchParams.get("tab");
+  const unitId = searchParams.get("unit");
+  const requestedUnit = topic?.subtopics.find((row) => row.id === unitId) ?? null;
+  const tab: TabId =
+    tabOverride ??
+    (requestedTab === "published" || topic?.hasTopicLesson ? "published" : "upload");
+  const hasPublishedLesson = Boolean(
+    topic?.hasTopicLesson || topic?.subtopics.some((row) => row.lesson),
+  );
+  const lessonSubtopicId = requestedUnit?.id ?? topic?.subtopics.find((row) => row.lesson)?.id ?? null;
+  const preferSubtopicLesson = requestedUnit != null;
+
+  useEffect(() => {
+    setPublishedView("overview");
+    setTabOverride(null);
+  }, [topicId, unitId, requestedTab]);
+
+  useEffect(() => {
+    if (!topic) {
+      setPublishedRun(null);
+      setPublishedRunLoading(false);
+      return;
+    }
+    let cancelled = false;
+    setPublishedRunLoading(true);
+    void (async () => {
+      try {
+        const runs = await listTopicGenerationRuns(topic.id);
+        if (cancelled) return;
+        const latestPublished = runs.find((run) => run.phase === "published") ?? null;
+        setPublishedRun(latestPublished);
+      } catch {
+        if (!cancelled) setPublishedRun(null);
+      } finally {
+        if (!cancelled) setPublishedRunLoading(false);
       }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [topic]);
+
+  const crumbParts = useMemo(() => {
+    const parts: Crumb[] = [
+      { label: "Materials", to: "/admin/materials" },
+      {
+        label: grade?.name ?? "Grade",
+        to: grade ? `/admin/materials/grades/${grade.key}` : undefined,
+      },
+      {
+        label: subject?.name ?? "Subject",
+        to:
+          grade && subject
+            ? `/admin/materials/grades/${grade.key}/subjects/${subject.id}`
+            : undefined,
+      },
+      {
+        label: topic?.title ?? "Topic",
+        onClick:
+          tab === "published" && publishedView === "slides"
+            ? () => setPublishedView("overview")
+            : undefined,
+      },
+    ];
+    if (tab === "published" && publishedView === "slides") {
+      parts.push({ label: "Slides" });
     }
-    if (topic.masteryQuiz) {
-      rows.push({
-        id: topic.masteryQuiz.id,
-        title: topic.masteryQuiz.title,
-        meta: "Topic mastery",
-        status: topic.masteryQuiz.status,
-      });
-    }
-    return rows;
-  }, [found]);
+    return parts;
+  }, [grade, subject, topic, tab, publishedView]);
 
   if (!loading && !error && grades && !found) {
     return <Navigate to="/admin/materials" replace />;
   }
 
-  const grade = found?.grade;
-  const subject = found?.subject;
-  const topic = found?.topic;
-  const activeUpload = topic?.subtopics.find((st) => st.id === uploadSubtopicId) ?? null;
+  function openPublished(view: PublishedView) {
+    setTabOverride("published");
+    setPublishedView(view);
+  }
+
+  function renderPublished() {
+    if (!topic) return null;
+    switch (publishedView) {
+      case "overview":
+      case "slides":
+        return (
+          <AdminPublishedMaterial
+            topicId={topic.id}
+            subtopicId={lessonSubtopicId}
+            fallbackTitle={requestedUnit?.title ?? topic.title}
+            hasLesson={hasPublishedLesson}
+            quizItems={publishedRun?.qa_items ?? []}
+            quizLoading={publishedRunLoading}
+            pane={publishedView}
+            preferSubtopic={preferSubtopicLesson}
+            onOpenSlides={() => setPublishedView("slides")}
+          />
+        );
+      default: {
+        const _never: never = publishedView;
+        void _never;
+        return null;
+      }
+    }
+  }
 
   return (
-    <div className="admin-materials">
-      <Crumbs
-        parts={[
-          { label: "Materials", to: "/admin/materials" },
-          {
-            label: grade?.name ?? "Grade",
-            to: grade ? `/admin/materials/grades/${grade.key}` : undefined,
-          },
-          {
-            label: subject?.name ?? "Subject",
-            to:
-              grade && subject
-                ? `/admin/materials/grades/${grade.key}/subjects/${subject.id}`
-                : undefined,
-          },
-          { label: topic?.unitLabel ?? "Unit" },
-        ]}
-      />
-      <header className="page-head page-head--with-actions">
-        <div>
-          <p className="kicker">
-            {subject?.name ?? "…"} · {topic?.unitLabel ?? "…"}
-          </p>
-          <h1>{topic?.title ?? "Unit"}</h1>
-          <p>Browse lessons and quizzes. Upload a PDF under a subtopic to enqueue ingest.</p>
-        </div>
-        {topic && <StatusBadge status={topic.status} />}
-      </header>
+    <div className="admin-materials admin-unit">
+      <Crumbs parts={crumbParts} />
 
       {loading && (
         <p className="muted" role="status">
@@ -101,105 +410,67 @@ export function AdminMaterialsTopicDetailPage() {
 
       {topic && (
         <>
-          <div className="admin-tabs" role="tablist" aria-label="Unit content">
+          <div className="admin-tabs" role="tablist" aria-label="Topic content">
             <button
               type="button"
               role="tab"
-              id="tab-lessons"
-              aria-selected={tab === "lessons"}
-              aria-controls="panel-lessons"
-              className={`admin-tabs__tab ${tab === "lessons" ? "is-active" : ""}`}
-              onClick={() => setTab("lessons")}
+              id="tab-upload"
+              aria-selected={tab === "upload"}
+              aria-controls="panel-upload"
+              className={`admin-tabs__tab ${tab === "upload" ? "is-active" : ""}`}
+              onClick={() => {
+                setTabOverride("upload");
+                setPublishedView("overview");
+              }}
             >
-              Lessons
+              Upload
             </button>
             <button
               type="button"
               role="tab"
-              id="tab-quizzes"
-              aria-selected={tab === "quizzes"}
-              aria-controls="panel-quizzes"
-              className={`admin-tabs__tab ${tab === "quizzes" ? "is-active" : ""}`}
-              onClick={() => setTab("quizzes")}
+              id="tab-published"
+              aria-selected={tab === "published"}
+              aria-controls="panel-published"
+              className={`admin-tabs__tab ${tab === "published" ? "is-active" : ""}`}
+              onClick={() => {
+                setTabOverride("published");
+                setPublishedView("overview");
+              }}
             >
-              Quizzes
+              Published
             </button>
           </div>
 
-          {tab === "lessons" ? (
+          {tab === "upload" ? (
             <div
-              className="panel"
+              className="admin-unit__body"
               role="tabpanel"
-              id="panel-lessons"
-              aria-labelledby="tab-lessons"
+              id="panel-upload"
+              aria-labelledby="tab-upload"
             >
-              <ul className="list">
-                {topic.subtopics.map((st) => (
-                  <li key={st.id} className="list-item list-item--with-actions">
-                    <span className="list-item__num">{st.order}</span>
-                    <div>
-                      <p className="list-item__title">{st.title}</p>
-                      <p className="list-item__meta">
-                        {st.lesson ? st.lesson.title : "No lesson yet"}
-                      </p>
-                    </div>
-                    <div className="list-item__actions">
-                      {st.lesson ? (
-                        <StatusBadge status={st.lesson.status} />
-                      ) : (
-                        <span className="badge badge--locked">missing</span>
-                      )}
-                      <button
-                        type="button"
-                        className="btn btn--outline btn--sm"
-                        aria-expanded={uploadSubtopicId === st.id}
-                        onClick={() =>
-                          setUploadSubtopicId((cur) => (cur === st.id ? null : st.id))
-                        }
-                      >
-                        Upload
-                      </button>
-                    </div>
-                  </li>
-                ))}
-              </ul>
-              {activeUpload && (
-                <div className="admin-materials__upload admin-materials__upload--nested">
-                  <p className="admin-upload__target muted">
-                    Upload PDF for <strong>{activeUpload.title}</strong>
-                  </p>
-                  <CurriculumMaterialUpload
-                    key={activeUpload.id}
-                    subtopicId={activeUpload.id}
-                    defaultTitle={activeUpload.title}
-                    compact
-                  />
-                </div>
-              )}
+              <TopicGenerationUpload
+                topicId={topic.id}
+                defaultTitle={topic.title}
+                onPublished={() => {
+                  void reload();
+                  openPublished("overview");
+                }}
+              />
+              <SubtopicCurriculumGenerateList
+                subtopics={topic.subtopics}
+                onSucceeded={() => {
+                  void reload();
+                }}
+              />
             </div>
           ) : (
             <div
-              className="panel"
+              className="admin-unit__body"
               role="tabpanel"
-              id="panel-quizzes"
-              aria-labelledby="tab-quizzes"
+              id="panel-published"
+              aria-labelledby="tab-published"
             >
-              {quizRows.length === 0 ? (
-                <p className="muted">No quizzes in this unit.</p>
-              ) : (
-                <ul className="list">
-                  {quizRows.map((row, index) => (
-                    <li key={row.id} className="list-item">
-                      <span className="list-item__num">{index + 1}</span>
-                      <div>
-                        <p className="list-item__title">{row.title}</p>
-                        <p className="list-item__meta">{row.meta}</p>
-                      </div>
-                      <StatusBadge status={row.status} />
-                    </li>
-                  ))}
-                </ul>
-              )}
+              {renderPublished()}
             </div>
           )}
         </>

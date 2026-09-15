@@ -3,19 +3,38 @@
 from __future__ import annotations
 
 import hashlib
-from typing import Any
+from typing import Any, override
+
+from docling_core.transforms.chunker.hierarchical_chunker import (
+    ChunkingDocSerializer,
+    ChunkingSerializerProvider,
+)
+from docling_core.transforms.serializer.base import BaseDocSerializer, SerializationResult
+from docling_core.transforms.serializer.common import create_ser_result
+from docling_core.transforms.serializer.markdown import (
+    MarkdownTableSerializer,
+    MarkdownTextSerializer,
+)
+from docling_core.types.doc.document import DoclingDocument
+from docling_core.types.doc.items.text import TextItem
 
 from education_platform.modules.rag.contracts import TextChunk
 
 SECTION_HEADING_MAX_LEN = 500
 EMBEDDING_TOKENIZER_MODEL = "sentence-transformers/all-MiniLM-L6-v2"
+FORMULA_NOT_DECODED = "<!-- formula-not-decoded -->"
 
 __all__ = [
+    "FORMULA_NOT_DECODED",
+    "FormulaAwareChunkingSerializerProvider",
+    "FormulaOrigMarkdownTextSerializer",
     "SECTION_HEADING_MAX_LEN",
     "TextChunk",
     "chunk_docling_document",
     "content_hash",
     "estimate_token_count",
+    "promote_formula_orig_text",
+    "replace_formula_not_decoded",
 ]
 
 
@@ -50,12 +69,105 @@ def _section_heading_from_meta(meta: Any) -> str | None:
     return joined[:SECTION_HEADING_MAX_LEN]
 
 
+def _is_blank_or_undecoded_formula(value: str) -> bool:
+    stripped = value.strip()
+    return not stripped or stripped == FORMULA_NOT_DECODED
+
+
+def _is_formula_item(item: Any) -> bool:
+    if type(item).__name__ == "FormulaItem":
+        return True
+    label = getattr(item, "label", None)
+    if label is None:
+        return False
+    raw = getattr(label, "value", label)
+    return str(raw).lower() == "formula"
+
+
+def replace_formula_not_decoded(serialized: str, orig: str, *, is_inline_scope: bool) -> str:
+    """Swap Docling's undecoded-formula comment for orig wrapped as math."""
+    if FORMULA_NOT_DECODED not in serialized:
+        return serialized
+    cleaned = orig.strip()
+    if _is_blank_or_undecoded_formula(cleaned):
+        return serialized.replace(FORMULA_NOT_DECODED, "").strip()
+    wrapped = f"${cleaned}$" if is_inline_scope else f"$${cleaned}$$"
+    return serialized.replace(FORMULA_NOT_DECODED, wrapped)
+
+
+class FormulaOrigMarkdownTextSerializer(MarkdownTextSerializer):
+    """Serialize undecoded formulas as ``$orig$`` / ``$$orig$$``, never the HTML comment."""
+
+    @override
+    def serialize(
+        self,
+        *,
+        item: TextItem,
+        doc_serializer: BaseDocSerializer,
+        doc: DoclingDocument,
+        is_inline_scope: bool = False,
+        visited: set[str] | None = None,
+        **kwargs: Any,
+    ) -> SerializationResult:
+        result = super().serialize(
+            item=item,
+            doc_serializer=doc_serializer,
+            doc=doc,
+            is_inline_scope=is_inline_scope,
+            visited=visited,
+            **kwargs,
+        )
+        orig = str(getattr(item, "orig", "") or "")
+        replacement = replace_formula_not_decoded(
+            result.text, orig, is_inline_scope=is_inline_scope
+        )
+        if replacement == result.text:
+            return result
+        return create_ser_result(text=replacement, span_source=item)
+
+
+class FormulaAwareChunkingSerializerProvider(ChunkingSerializerProvider):
+    """HybridChunker provider that never indexes ``<!-- formula-not-decoded -->``."""
+
+    @override
+    def get_serializer(self, doc: DoclingDocument) -> BaseDocSerializer:
+        return ChunkingDocSerializer(
+            doc=doc,
+            text_serializer=FormulaOrigMarkdownTextSerializer(),
+            table_serializer=MarkdownTableSerializer(),
+        )
+
+
+def promote_formula_orig_text(document: Any) -> None:
+    """Copy PDF-layer formula text into ``item.text`` when LaTeX is missing.
+
+    Docling's markdown serializer emits ``<!-- formula-not-decoded -->`` when a
+    FORMULA item has empty ``text``. Curriculum PDFs often still have a usable
+    ``orig`` string (for example ``x + 2 = 5``); promoting it means HybridChunker
+    wraps that as math instead of indexing the HTML comment.
+    """
+    iterate = getattr(document, "iterate_items", None)
+    if iterate is None:
+        return
+    for item, _level in iterate():
+        if not _is_formula_item(item):
+            continue
+        text = str(getattr(item, "text", "") or "")
+        orig = str(getattr(item, "orig", "") or "").strip()
+        if not _is_blank_or_undecoded_formula(text):
+            continue
+        if _is_blank_or_undecoded_formula(orig):
+            continue
+        item.text = orig
+
+
 def chunk_docling_document(document: Any) -> list[TextChunk]:
     """Chunk a DoclingDocument with HybridChunker (MiniLM tokenizer).
 
     Stored text is ``chunker.contextualize(chunk)`` so embeddings include heading
     context. Table markdown is preserved (no normalize + word-split flatten).
     """
+    promote_formula_orig_text(document)
     from docling_core.transforms.chunker.hybrid_chunker import HybridChunker
     from docling_core.transforms.chunker.tokenizer.huggingface import HuggingFaceTokenizer
     from transformers import AutoTokenizer
@@ -69,6 +181,7 @@ def chunk_docling_document(document: Any) -> list[TextChunk]:
         tokenizer=tokenizer,
         merge_peers=True,
         repeat_table_header=True,
+        serializer_provider=FormulaAwareChunkingSerializerProvider(),
     )
 
     chunks: list[TextChunk] = []

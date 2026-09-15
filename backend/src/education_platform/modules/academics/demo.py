@@ -75,22 +75,27 @@ async def bootstrap_demo(session: AsyncSession, principal: Principal) -> DemoBoo
     if subject is None:
         raise DomainError("Subject not found", status_code=404)
 
-    topic = await session.scalar(
-        select(Topic)
-        .where(Topic.grade_subject_offering_id == enrollment.grade_subject_offering_id)
-        .order_by(Topic.sequence, Topic.slug)
-        .limit(1)
-    )
-    if topic is None:
-        raise DomainError("No topics seeded", status_code=404)
-
-    subtopics = (
+    topics = (
         await session.scalars(
-            select(Subtopic)
-            .where(Subtopic.topic_id == topic.id)
-            .order_by(Subtopic.sequence, Subtopic.slug)
+            select(Topic)
+            .where(Topic.grade_subject_offering_id == enrollment.grade_subject_offering_id)
+            .order_by(Topic.sequence, Topic.slug)
         )
     ).all()
+    if not topics:
+        raise DomainError("No topics seeded", status_code=404)
+
+    subtopics: list[Subtopic] = []
+    for topic in topics:
+        subtopics.extend(
+            (
+                await session.scalars(
+                    select(Subtopic)
+                    .where(Subtopic.topic_id == topic.id)
+                    .order_by(Subtopic.sequence, Subtopic.slug)
+                )
+            ).all()
+        )
     if not subtopics:
         raise DomainError("No subtopics seeded", status_code=404)
 
@@ -99,14 +104,14 @@ async def bootstrap_demo(session: AsyncSession, principal: Principal) -> DemoBoo
         await _complete_lesson(session, enrollment.id, subtopic.id, now)
         await _pass_subtopic_quiz(session, student_id, enrollment.id, subtopic.id, now)
 
+    first = topics[0]
     await session.flush()
     return DemoBootstrapOut(
         subject_id=subject.id,
-        topic_id=topic.id,
-        topic_title=topic.name,
+        topic_id=first.id,
+        topic_title=first.name,
         message=(
-            "All subtopics are marked complete with quiz history, "
-            "so the overall topic quiz is unlocked."
+            "All unit lessons are marked complete with quiz history, so each unit quiz is unlocked."
         ),
     )
 

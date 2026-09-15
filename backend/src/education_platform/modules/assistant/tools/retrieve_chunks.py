@@ -25,6 +25,8 @@ from education_platform.modules.rag.models import (
 )
 from education_platform.modules.rag.vector_store import SimilarChunk, search_similar
 
+RETRIEVE_CHUNK_EXCERPT_MAX = 4000
+
 
 def _load_chunk_payloads(hits: list[SimilarChunk]) -> list[RetrievedChunk]:
     if not hits:
@@ -65,7 +67,7 @@ def _load_chunk_payloads(hits: list[SimilarChunk]) -> list[RetrievedChunk]:
                     RetrievedChunk(
                         id=str(hit.chunk_id),
                         label=label,
-                        excerpt=excerpt[:500],
+                        excerpt=excerpt[:RETRIEVE_CHUNK_EXCERPT_MAX],
                         page_number=page_number,
                         doc_kind=hit.doc_kind,
                         doc_id=str(hit.doc_id),

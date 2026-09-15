@@ -1471,6 +1471,17 @@ _REVIEWED_IDENTITY_COLUMNS: Final[dict[str, dict[str, object]]] = {
             "3 review, not a live leak."
         ),
     },
+    "source_material_versions": {
+        "columns": {"submitted_by_user_id"},
+        "status": (
+            "incidental audit metadata for who uploaded a topic PDF, not the "
+            "row's core meaning (the version blob and status). Institution pin "
+            "only — same readership as the rest of source_material_versions. Not "
+            "self-restricted: hiding the row because someone else submitted it "
+            "would also hide the intake teachers review. Found when topic "
+            "generation added the submitter column, not a live leak."
+        ),
+    },
 }
 
 

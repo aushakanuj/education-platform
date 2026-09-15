@@ -26,8 +26,8 @@ from education_platform.modules.academics.models import (
 from education_platform.modules.auth.models import Institution, InstitutionStatus
 
 
-def ensure_curriculum_root(session: Session) -> Topic:
-    """Return the parent Topic that holds approved-material subtopics."""
+def ensure_curriculum_root(session: Session) -> Topic | None:
+    """Return the Approved Materials topic, or None when chapters already exist as topics."""
     institution = session.scalar(
         select(Institution).where(Institution.name == POC_INSTITUTION_NAME)
     )
@@ -113,13 +113,21 @@ def ensure_curriculum_root(session: Session) -> Topic:
             Topic.slug == POC_TOPIC_SLUG,
         )
     )
-    if topic is None:
-        topic = Topic(
-            grade_subject_offering_id=offering.id,
-            name="Approved Materials",
-            slug=POC_TOPIC_SLUG,
-            sequence=1,
-        )
-        session.add(topic)
-        session.flush()
+    if topic is not None:
+        return topic
+
+    already_seeded = session.scalar(
+        select(Topic.id).where(Topic.grade_subject_offering_id == offering.id).limit(1)
+    )
+    if already_seeded is not None:
+        return None
+
+    topic = Topic(
+        grade_subject_offering_id=offering.id,
+        name="Approved Materials",
+        slug=POC_TOPIC_SLUG,
+        sequence=1,
+    )
+    session.add(topic)
+    session.flush()
     return topic

@@ -10,7 +10,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from education_platform.core.config import get_settings
 from education_platform.core.errors import DomainError
-from education_platform.modules.assistant.graph import run_assistant_turn
 from education_platform.modules.assistant.models import (
     ChatConversation,
     ChatMessage,
@@ -24,6 +23,12 @@ from education_platform.modules.assistant.schemas import (
     ConversationSummaryOut,
     CreateConversationOut,
     PostMessageOut,
+)
+from education_platform.modules.assistant.strategy import (
+    AssistantKind,
+    ChatTurn,
+    PolicyAssistantContext,
+    graph_for,
 )
 from education_platform.modules.assistant.tokens import context_percent, estimate_tokens
 from education_platform.modules.authorization.principal import Principal
@@ -222,6 +227,14 @@ async def post_message(
         limit_tokens=settings.chat_context_limit_tokens,
         reserve=estimate_tokens(text) + 800,
     )
+    history_turns: list[ChatTurn] = []
+    for turn in trimmed:
+        role = turn.get("role")
+        content = turn.get("content", "")
+        if role == "user":
+            history_turns.append(ChatTurn(role="user", content=content))
+        elif role == "assistant":
+            history_turns.append(ChatTurn(role="assistant", content=content))
 
     user_msg = ChatMessage(
         conversation_id=conv.id,
@@ -233,15 +246,20 @@ async def post_message(
     session.add(user_msg)
     await session.flush()
 
-    result = await run_assistant_turn(
+    reply = await graph_for(AssistantKind.POLICY).run_turn(
+        session=session,
         principal=principal,
-        user_message=text,
-        history=trimmed,
-        settings=settings,
+        context=PolicyAssistantContext(kind="policy", institution_id=principal.institution_id),
+        history=tuple(history_turns),
+        message=text,
     )
-    assistant_text = str(result.get("assistant_content") or "")
-    citations_raw = result.get("citations") or []
-    prompt_tokens = int(result.get("prompt_tokens") or 0)
+    assistant_text = reply.content
+    citations_raw = [
+        {"id": item.id, "label": item.label, "excerpt": item.excerpt} for item in reply.citations
+    ]
+    prompt_tokens = estimate_tokens(text) + sum(
+        estimate_tokens(turn.content) for turn in history_turns
+    )
 
     assistant_msg = ChatMessage(
         conversation_id=conv.id,

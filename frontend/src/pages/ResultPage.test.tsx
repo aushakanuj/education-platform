@@ -159,4 +159,162 @@ describe("ResultPage", () => {
     await user.click(screen.getByRole("button", { name: "Stay here" }));
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
   });
+
+  it("does not claim the overall quiz just unlocked after a subtopic pass when a topic lesson exists", async () => {
+    fetchLearningDirectory.mockResolvedValue({
+      subjects: [
+        {
+          id: "subj-1",
+          code: "MATH",
+          name: "Mathematics",
+          grade_name: "Grade 8",
+          academic_period_name: "2026-27",
+          progress_percent: 100,
+          topics: [
+            {
+              id: "topic-1",
+              title: "Approved Materials",
+              slug: "approved_materials",
+              sequence: 1,
+              progress_percent: 100,
+              complete: false,
+              objectives: [],
+              has_topic_lesson: true,
+              topic_source_material_version_id: "ver-topic-1",
+              overall_quiz: {
+                id: "overall-1",
+                title: "Overall",
+                scope: "topic_mastery",
+                available: true,
+                unlocked: true,
+                locked_reason: null,
+                pass_threshold_percent: 70,
+                attempt_count: 0,
+                best_score_percent: null,
+                passed: false,
+                in_progress_attempt_id: null,
+                recent_attempts: [],
+              },
+              subtopics: [
+                {
+                  id: "st-1",
+                  title: "Properties of Rectangles and Squares",
+                  slug: "rectangles_squares_properties",
+                  sequence: 1,
+                  has_lesson: true,
+                  lesson_completed: true,
+                  progress_percent: 100,
+                  quiz: {
+                    id: "quiz-1",
+                    title: "Quiz",
+                    scope: "subtopic_mastery",
+                    available: true,
+                    unlocked: true,
+                    locked_reason: null,
+                    pass_threshold_percent: 70,
+                    attempt_count: 1,
+                    best_score_percent: 100,
+                    passed: true,
+                    in_progress_attempt_id: null,
+                    recent_attempts: [],
+                  },
+                },
+              ],
+            },
+          ],
+        },
+      ],
+    });
+
+    render(
+      <MemoryRouter
+        initialEntries={["/attempts/att-1"]}
+        future={{ v7_startTransition: true, v7_relativeSplatPath: true }}
+      >
+        <Routes>
+          <Route path="/attempts/:attemptId" element={<ResultPage />} />
+        </Routes>
+      </MemoryRouter>,
+    );
+
+    expect(await screen.findByText("Your score")).toBeInTheDocument();
+    expect(
+      screen.queryByText(/All subtopic quizzes passed. The overall topic quiz is now unlocked./),
+    ).not.toBeInTheDocument();
+    expect(screen.queryByRole("dialog", { name: "Overall quiz unlocked" })).not.toBeInTheDocument();
+    expect(screen.queryByText(/correct_rationale/i)).not.toBeInTheDocument();
+  });
+
+  it("reviews a topic mastery attempt back to the published topic lesson", async () => {
+    getAttempt.mockResolvedValue({
+      ...result,
+      id: "att-topic",
+      quiz_id: "overall-1",
+      target_id: "topic-1",
+      scope: "topic_mastery",
+    });
+    fetchLearningDirectory.mockResolvedValue({
+      subjects: [
+        {
+          id: "subj-1",
+          code: "MATH",
+          name: "Mathematics",
+          grade_name: "Grade 8",
+          academic_period_name: "2026-27",
+          progress_percent: 100,
+          topics: [
+            {
+              id: "topic-1",
+              title: "Approved Materials",
+              slug: "approved_materials",
+              sequence: 1,
+              progress_percent: 100,
+              complete: false,
+              objectives: [],
+              has_topic_lesson: true,
+              topic_source_material_version_id: "ver-topic-1",
+              overall_quiz: {
+                id: "overall-1",
+                title: "Overall",
+                scope: "topic_mastery",
+                available: true,
+                unlocked: true,
+                locked_reason: null,
+                pass_threshold_percent: 70,
+                attempt_count: 1,
+                best_score_percent: 100,
+                passed: true,
+                in_progress_attempt_id: null,
+                recent_attempts: [],
+              },
+              subtopics: [],
+            },
+          ],
+        },
+      ],
+    });
+
+    render(
+      <MemoryRouter
+        initialEntries={["/attempts/att-topic"]}
+        future={{ v7_startTransition: true, v7_relativeSplatPath: true }}
+      >
+        <Routes>
+          <Route path="/attempts/:attemptId" element={<ResultPage />} />
+        </Routes>
+      </MemoryRouter>,
+    );
+
+    expect(await screen.findByText("Your score")).toBeInTheDocument();
+    expect(screen.getByText(/overall quiz/i)).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Review lesson" })).toHaveAttribute(
+      "href",
+      "/subjects/subj-1/topics/topic-1/lesson",
+    );
+    expect(screen.getByRole("link", { name: "Topic lesson" })).toHaveAttribute(
+      "href",
+      "/subjects/subj-1/topics/topic-1/lesson",
+    );
+    expect(screen.getByText(/Correct answer keys stay hidden/)).toBeInTheDocument();
+  });
 });

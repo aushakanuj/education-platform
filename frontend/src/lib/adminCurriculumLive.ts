@@ -34,6 +34,7 @@ export type AdminTopic = {
   unitLabel: string;
   order: number;
   status: PublishStatus;
+  hasTopicLesson: boolean;
   subtopics: AdminSubtopic[];
   masteryQuiz: AdminQuiz | null;
 };
@@ -109,6 +110,7 @@ function mapTopic(topic: TopicNode): AdminTopic {
     unitLabel: `Unit ${topic.sequence}`,
     order: topic.sequence,
     status: "published",
+    hasTopicLesson: Boolean(topic.has_topic_lesson),
     subtopics,
     masteryQuiz: topic.overall_quiz
       ? {
@@ -194,6 +196,71 @@ export function getAdminTopic(
   const topic = found.subject.topics.find((t) => t.id === topicId);
   if (!topic) return undefined;
   return { ...found, topic };
+}
+
+export type AdminUnitCard = {
+  key: string;
+  title: string;
+  topicId: string;
+  /** Subtopic id when this card is a chapter under a parent topic. */
+  unitId: string | null;
+  hasLesson: boolean;
+  quizTitle: string | null;
+};
+
+function publishedLessonSubtopics(topic: AdminTopic): AdminSubtopic[] {
+  return topic.subtopics.filter((subtopic) => subtopic.lesson != null);
+}
+
+/** Chapter cards: published subtopic lessons, or one topic card when none exist. */
+export function subjectUnitCards(subject: AdminSubject): AdminUnitCard[] {
+  const cards: AdminUnitCard[] = [];
+  for (const topic of subject.topics) {
+    const lessonUnits = publishedLessonSubtopics(topic);
+    if (lessonUnits.length > 0) {
+      for (const subtopic of lessonUnits) {
+        cards.push({
+          key: subtopic.id,
+          title: subtopic.title,
+          topicId: topic.id,
+          unitId: subtopic.id,
+          hasLesson: true,
+          quizTitle: subtopic.quiz?.title ?? topic.masteryQuiz?.title ?? null,
+        });
+      }
+      continue;
+    }
+    cards.push({
+      key: topic.id,
+      title: topic.title,
+      topicId: topic.id,
+      unitId: null,
+      hasLesson: topic.hasTopicLesson,
+      quizTitle: topic.masteryQuiz?.title ?? null,
+    });
+  }
+  return cards;
+}
+
+/** Parent topics with a published topic lesson and published subtopic lesson cards. */
+export function subjectTopicLessonTopics(subject: AdminSubject): AdminTopic[] {
+  return subject.topics.filter(
+    (topic) => topic.hasTopicLesson && publishedLessonSubtopics(topic).length > 0,
+  );
+}
+
+export function adminTopicPath(
+  gradeKey: string,
+  subjectId: string,
+  topicId: string,
+  options?: { published?: boolean; unitId?: string | null },
+): string {
+  const path = `/admin/materials/grades/${gradeKey}/subjects/${subjectId}/topics/${topicId}`;
+  const params = new URLSearchParams();
+  if (options?.published) params.set("tab", "published");
+  if (options?.unitId) params.set("unit", options.unitId);
+  const query = params.toString();
+  return query ? `${path}?${query}` : path;
 }
 
 export function countTopics(subject: AdminSubject): number {

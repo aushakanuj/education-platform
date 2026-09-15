@@ -123,6 +123,9 @@ export type TopicNode = {
   objectives: string[];
   subtopics: SubtopicNode[];
   overall_quiz: QuizSummary | null;
+  has_topic_lesson?: boolean;
+  topic_lesson_completed?: boolean;
+  topic_source_material_version_id?: string | null;
 };
 
 export type SubjectNode = {
@@ -250,6 +253,395 @@ export type IngestLifecycleStatus =
   | "failed"
   | "superseded"
   | "archived";
+
+export type RunPhase =
+  | "indexing"
+  | "outlining"
+  | "outline_review"
+  | "generating"
+  | "qa_review"
+  | "published"
+  | "failed"
+  | "discarded";
+
+export type GenerationJobStatus = {
+  kind: string;
+  status: string;
+};
+
+export type CurriculumGenerationStatus = "queued" | "running" | "succeeded" | "failed";
+
+export type CurriculumGenerationJob = {
+  id: string;
+  subtopic_id: string;
+  status: CurriculumGenerationStatus;
+  round_count: number;
+  reviewer_notes: string | null;
+  error: string | null;
+  source_material_version_id: string | null;
+  quiz_version_id: string | null;
+};
+
+export type GenerationOutlineNode = {
+  id: string;
+  parent_id: string | null;
+  slug: string;
+  title: string;
+  token_mass: number;
+  prerequisite_score: string;
+  centrality: string;
+  weight: string;
+  quota: number | null;
+  matched_subtopic_id: string | null;
+  force_create: boolean;
+  accepted_subtopic_id: string | null;
+  proposed_outcomes: string[];
+  sequence: number;
+};
+
+export type GenerationOutline = {
+  target_item_count: number;
+  nodes: GenerationOutlineNode[];
+};
+
+export type OutlineNodeEdit = {
+  id: string;
+  parent_id: string | null;
+  slug: string;
+  title: string;
+  weight: string;
+  matched_subtopic_id: string | null;
+  force_create: boolean;
+  proposed_outcomes: string[];
+  sequence: number;
+};
+
+export type OutlinePatch = {
+  target_item_count?: number;
+  nodes: OutlineNodeEdit[];
+};
+
+export type ChangeKind =
+  | "curriculum_alignment"
+  | "factual_accuracy"
+  | "pedagogy"
+  | "structure"
+  | "assessment_validity"
+  | "answer_key"
+  | "accessibility"
+  | "other";
+
+export type OutlineField =
+  | "whole_node"
+  | "title"
+  | "parent"
+  | "weight"
+  | "proposed_outcomes"
+  | "subtopic_match"
+  | "outline_structure";
+
+export type LessonField = "whole_section" | "heading" | "body" | "order";
+
+export type QuizField =
+  | "whole_item"
+  | "prompt"
+  | "options"
+  | "answer_key"
+  | "rationales"
+  | "order";
+
+export type ReviewerStateKind = "pending" | "approved" | "changes_requested" | "abstained";
+
+export type OutlineNodeSnapshot = {
+  node_key: string;
+  parent_node_key: string | null;
+  slug: string;
+  title: string;
+  token_mass: number;
+  prerequisite_score: string;
+  centrality: string;
+  weight: string;
+  matched_subtopic_id: string | null;
+  force_create: boolean;
+  proposed_outcomes: string[];
+  sequence: number;
+};
+
+export type OutlineSnapshot = {
+  target_item_count: number;
+  nodes: OutlineNodeSnapshot[];
+};
+
+export type ActorStamp = {
+  user_id?: string | null;
+  display_name: string;
+  job_id?: string | null;
+  model?: string | null;
+  occurred_at: string;
+};
+
+export type OutlineRevision = {
+  stage: "outline";
+  id: string;
+  run_id: string;
+  number: number;
+  parent_id: string | null;
+  origin: string;
+  snapshot_hash: string;
+  created_at: string;
+  created_by: ActorStamp;
+  snapshot: OutlineSnapshot;
+};
+
+export type LessonSectionSnapshot = {
+  section_key: string;
+  heading: string;
+  markdown: string;
+  sequence: number;
+};
+
+export type QuizItemSnapshot = {
+  item_key: string;
+  question_id: string;
+  question_version_id: string;
+  subtopic_id: string;
+  prompt: string;
+  options: Record<string, string>;
+  correct_label: string;
+  correct_rationale: string;
+  distractor_rationales: Record<string, string>;
+  sequence: number;
+};
+
+export type ContentSnapshot = {
+  rendered_lesson_markdown: string;
+  lesson_sections: LessonSectionSnapshot[];
+  quiz_version_id: string;
+  quiz_items: QuizItemSnapshot[];
+};
+
+export type ContentRevision = {
+  stage: "qa";
+  id: string;
+  run_id: string;
+  number: number;
+  parent_id: string | null;
+  origin: string;
+  snapshot_hash: string;
+  created_at: string;
+  created_by: ActorStamp;
+  snapshot: ContentSnapshot;
+};
+
+export type FrozenRevision = OutlineRevision | ContentRevision;
+
+export type ReviewRound = {
+  id: string;
+  run_id: string;
+  revision_id: string;
+  stage: string;
+  number: number;
+  opened_at: string;
+  due_at: string;
+  sealed_at: string | null;
+};
+
+export type ChangeRequest = {
+  id: string;
+  decision_id: string;
+  revision_id: string;
+  author: ActorStamp;
+  target_kind: "outline_node" | "outline_document" | "lesson_section" | "quiz_item";
+  node_key: string | null;
+  section_key?: string | null;
+  item_key?: string | null;
+  field: OutlineField | LessonField | QuizField;
+  kind: ChangeKind;
+  comment: string;
+};
+
+export type TeacherDecision = {
+  id: string;
+  round_id: string;
+  revision_id: string;
+  verdict: "approve" | "changes_requested";
+  reviewer: ActorStamp;
+  requests: ChangeRequest[];
+};
+
+export type ReviewerState = {
+  reviewer_user_id: string;
+  display_name: string;
+  state: ReviewerStateKind;
+  decision: TeacherDecision | null;
+};
+
+export type RequestThread = {
+  change_request: ChangeRequest;
+  target_title: string | null;
+};
+
+export type RoundCloseRecord = {
+  id: string;
+  round_id: string;
+  base_revision_id: string;
+  action: string;
+  actor: ActorStamp;
+  collated_request_ids: string[];
+  rationale: string | null;
+};
+
+export type OutlineNodeDelta = {
+  node_key: string;
+  before: OutlineNodeSnapshot | null;
+  after: OutlineNodeSnapshot | null;
+};
+
+export type OutlineRevisionDiff = {
+  kind: "outline";
+  from_revision_id: string;
+  to_revision_id: string;
+  target_item_count: { before: number | null; after: number | null };
+  nodes: OutlineNodeDelta[];
+};
+
+export type ContentRevisionDiff = {
+  kind: "content";
+  from_revision_id: string;
+  to_revision_id: string;
+  sections: {
+    section_key: string;
+    before: LessonSectionSnapshot | null;
+    after: LessonSectionSnapshot | null;
+  }[];
+  quiz_items: {
+    item_key: string;
+    before: QuizItemSnapshot | null;
+    after: QuizItemSnapshot | null;
+  }[];
+};
+
+export type ReviewWorkspace = {
+  run_id: string;
+  topic_id: string;
+  phase: RunPhase;
+  published_locked: boolean;
+  viewer_is_closer: boolean;
+  active_revision: FrozenRevision;
+  diff_from_parent: OutlineRevisionDiff | ContentRevisionDiff | null;
+  open_round: ReviewRound | null;
+  reviewer_states: ReviewerState[];
+  request_threads: RequestThread[];
+  history: RoundCloseRecord[];
+};
+
+export type DraftChangeRequest =
+  | {
+      target: { kind: "outline_node"; node_key: string } | { kind: "outline_document" };
+      field: OutlineField;
+      kind: ChangeKind;
+      comment: string;
+    }
+  | {
+      target: { kind: "lesson_section"; section_key: string };
+      field: LessonField;
+      kind: ChangeKind;
+      comment: string;
+    }
+  | {
+      target: { kind: "quiz_item"; item_key: string };
+      field: QuizField;
+      kind: ChangeKind;
+      comment: string;
+    };
+
+export type GenerationAssistantTurn = {
+  revision_id: string;
+  message: string;
+  target?: DraftChangeRequest["target"];
+};
+
+export type GenerationAssistantReply = {
+  content: string;
+  citations: { id: string; label: string; excerpt: string }[];
+  draft_change_request: DraftChangeRequest | null;
+};
+
+export type TeacherDecisionCommand =
+  | { revision_id: string; verdict: "approve"; snapshot_hash?: string }
+  | {
+      revision_id: string;
+      verdict: "changes_requested";
+      snapshot_hash?: string;
+      requests: DraftChangeRequest[];
+    };
+
+export type CloseRoundCommand =
+  | { revision_id: string; action: "rewrite"; snapshot_hash?: string }
+  | { revision_id: string; action: "accept_current"; snapshot_hash?: string }
+  | {
+      revision_id: string;
+      action: "override_and_accept";
+      snapshot_hash?: string;
+      rationale: string;
+      replacement: OutlineSnapshot;
+    }
+  | { revision_id: string; action: "discard"; snapshot_hash?: string; rationale?: string };
+
+export type CloseRoundResult = {
+  kind: "rewrite_queued" | "outline_accepted" | "content_accepted" | "run_discarded";
+  job_id?: string | null;
+  run_id?: string | null;
+  accepted_revision_id?: string | null;
+};
+
+export type AcceptedGenerationRun = {
+  run_id: string;
+  topic_id: string;
+  phase: RunPhase;
+};
+
+export type BloomLevel = "remember" | "understand" | "apply" | "analyze";
+
+export type GenerationQaItem = {
+  question_id: string;
+  question_version_id: string;
+  prompt: string;
+  options: Record<string, string>;
+  correct_label: string;
+  correct_rationale: string;
+  distractor_rationales: Record<string, string>;
+  subtopic_id: string;
+  sequence: number;
+  bloom?: BloomLevel | null;
+  misconception_labels?: string[];
+};
+
+export type PublishedTopic = {
+  run_id: string;
+  topic_id: string;
+  lesson_version_id: string;
+  quiz_version_id: string;
+  item_count: number;
+};
+
+export type GenerationRun = {
+  id: string;
+  topic_id: string;
+  title: string;
+  phase: RunPhase;
+  target_item_count: number;
+  submitted_by_user_id: string;
+  intake_version_id: string | null;
+  failure_reason: string | null;
+  outline: GenerationOutline | null;
+  draft_lesson_markdown: string | null;
+  published_lesson_version_id?: string | null;
+  published_quiz_version_id?: string | null;
+  qa_items?: GenerationQaItem[];
+  jobs: GenerationJobStatus[];
+  created_at: string;
+};
 
 export type MaterialIngestAccepted = {
   source_material_id: string;

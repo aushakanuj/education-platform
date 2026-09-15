@@ -1,5 +1,4 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
-import userEvent from "@testing-library/user-event";
+import { render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -20,14 +19,6 @@ vi.mock("../../api/materials", () => ({
   fetchLearningDirectory: vi.fn(),
 }));
 
-vi.mock("../../api/adminIngest", () => ({
-  uploadSubtopicMaterial: vi.fn(),
-  pollMaterialVersionStatus: vi.fn(),
-  isTerminalIngestStatus: (status: string) =>
-    status === "ready" || status === "failed" || status === "published",
-}));
-
-import { pollMaterialVersionStatus, uploadSubtopicMaterial } from "../../api/adminIngest";
 import { fetchLearningDirectory } from "../../api/materials";
 
 const mockDirectory: LearningDirectory = {
@@ -72,8 +63,6 @@ describe("AdminMaterialsGradesPage", () => {
     authState.isDevMockSession = false;
     vi.mocked(fetchLearningDirectory).mockReset();
     vi.mocked(fetchLearningDirectory).mockResolvedValue(mockDirectory);
-    vi.mocked(uploadSubtopicMaterial).mockReset();
-    vi.mocked(pollMaterialVersionStatus).mockReset();
   });
 
   it("smoke-renders grade materials grid from live directory", async () => {
@@ -84,7 +73,7 @@ describe("AdminMaterialsGradesPage", () => {
     );
 
     expect(screen.getByRole("heading", { level: 1, name: "Materials" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Upload" })).toBeEnabled();
+    expect(screen.queryByRole("button", { name: "Upload" })).not.toBeInTheDocument();
 
     await waitFor(() => {
       expect(screen.getByRole("list")).toBeInTheDocument();
@@ -102,26 +91,7 @@ describe("AdminMaterialsGradesPage", () => {
     expect(fetchLearningDirectory).toHaveBeenCalled();
   });
 
-  it("enables upload and posts the curriculum ingest form", async () => {
-    const user = userEvent.setup();
-    vi.mocked(uploadSubtopicMaterial).mockResolvedValue({
-      source_material_id: "mat-1",
-      version_id: "ver-1",
-      version_number: 1,
-      title: "Place value",
-      lifecycle_status: "processing",
-      ingest_job_id: "job-1",
-    });
-    vi.mocked(pollMaterialVersionStatus).mockResolvedValue({
-      id: "ver-1",
-      source_material_id: "mat-1",
-      version_number: 1,
-      title: "Place value",
-      lifecycle_status: "ready",
-      failure_reason: null,
-      chunk_count: 3,
-    });
-
+  it("does not show the index-only curriculum ingest panel", async () => {
     render(
       <MemoryRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
         <AdminMaterialsGradesPage />
@@ -131,28 +101,8 @@ describe("AdminMaterialsGradesPage", () => {
     await waitFor(() => {
       expect(screen.getByRole("list")).toBeInTheDocument();
     });
-
-    await user.click(screen.getByRole("button", { name: "Upload" }));
-    expect(screen.getByLabelText(/subtopic/i)).toBeInTheDocument();
-
-    await user.selectOptions(screen.getByLabelText(/subtopic/i), "st-1-uuid");
-    await user.clear(screen.getByLabelText(/^title$/i));
-    await user.type(screen.getByLabelText(/^title$/i), "Place value PDF");
-
-    const file = new File(["%PDF-1.4"], "place-value.pdf", { type: "application/pdf" });
-    fireEvent.change(screen.getByLabelText(/pdf file/i), { target: { files: [file] } });
-    await user.click(screen.getByRole("button", { name: /upload pdf/i }));
-
-    await waitFor(() => {
-      expect(uploadSubtopicMaterial).toHaveBeenCalled();
-    });
-
-    const [subtopicId, uploadedFile, title] = vi.mocked(uploadSubtopicMaterial).mock.calls[0]!;
-    expect(subtopicId).toBe("st-1-uuid");
-    expect(uploadedFile).toBeInstanceOf(File);
-    expect(title).toBe("Place value PDF");
-    expect(pollMaterialVersionStatus).toHaveBeenCalledWith("ver-1", expect.any(Object));
-    expect(await screen.findByText(/ready/i)).toBeInTheDocument();
+    expect(screen.queryByLabelText(/subtopic/i)).not.toBeInTheDocument();
+    expect(screen.queryByLabelText(/pdf file/i)).not.toBeInTheDocument();
   });
 
   it("shows a clear error for fixture mock sessions without JWT", async () => {

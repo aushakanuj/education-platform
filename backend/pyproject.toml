@@ -10,9 +10,11 @@ dependencies = [
   "docling>=2.30",
   "email-validator>=2.2",
   "fastapi>=0.115",
+  "google-adk>=1.15.0",
   "httpx>=0.28",
   "langchain-core>=1.5.5",
   "langgraph>=1.2.11",
+  "litellm>=1.70.0",
   "openai>=3.1.0",
   "pgvector>=0.3",
   "pyyaml>=6.0",
@@ -72,8 +74,12 @@ packages = ["education_platform"]
 
 [[tool.mypy.overrides]]
 module = [
+  "asyncpg",
+  "asyncpg.*",
   "docling",
   "docling.*",
+  "docling_core",
+  "docling_core.*",
   "pgvector",
   "pgvector.*",
   "sentence_transformers",
@@ -84,6 +90,14 @@ module = [
   "langchain_core.*",
   "tiktoken",
   "tiktoken.*",
+  "torch",
+  "torch.*",
+  "google.adk",
+  "google.adk.*",
+  "google.genai",
+  "google.genai.*",
+  "litellm",
+  "litellm.*",
 ]
 ignore_missing_imports = true
 

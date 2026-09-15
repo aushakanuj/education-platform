@@ -8,14 +8,18 @@ from typing import Any
 from sqlalchemy import JSON, Enum, Index, text
 
 
-def str_enum(enum_cls: type[enum.Enum], name: str) -> Enum:
+def str_enum(enum_cls: type[enum.Enum], name: str, *, length: int | None = None) -> Enum:
     """Store enums as VARCHAR values (portable; avoids native Postgres enums)."""
+    kwargs: dict[str, Any] = {}
+    if length is not None:
+        kwargs["length"] = length
     return Enum(
         enum_cls,
         name=name,
         values_callable=lambda members: [item.value for item in members],
         native_enum=False,
         validate_strings=True,
+        **kwargs,
     )
 
 

@@ -53,7 +53,10 @@ from education_platform.modules.materials.models import (
     SourceMaterialVersionStatus,
     StudentMaterialProgress,
 )
-from education_platform.modules.materials.queries import subtopic_by_slug
+from education_platform.modules.materials.queries import (
+    published_topic_material_version,
+    subtopic_by_slug,
+)
 
 
 async def _released_quiz_version_by_quiz_id(
@@ -190,7 +193,9 @@ async def start_attempt(
                 session, subtopic_id=node.subtopic.id, enrollment_id=enrollment_id
             )
     else:
-        await _ensure_subtopic_quizzes_passed(session, student_id, node.topic.id)
+        topic_lesson = await published_topic_material_version(session, node.topic.id)
+        if topic_lesson is None:
+            await _ensure_subtopic_quizzes_passed(session, student_id, node.topic.id)
     release = await open_release_for_quiz_version(session, quiz_version.id)
     if release is None:
         raise DomainError("Quiz is not open", status_code=403)

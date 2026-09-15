@@ -184,6 +184,12 @@ describe("SubjectMaterialsPage", () => {
     expect(screen.getByRole("button", { name: /Fractions/ })).toBeInTheDocument();
   });
 
+  it("links the active unit to the teacher generation review route", async () => {
+    renderPage();
+    const link = await screen.findByRole("link", { name: "Review generation" });
+    expect(link).toHaveAttribute("href", "/teacher/topics/topic-1/generation");
+  });
+
   it("opens a published lesson from the live material GET", async () => {
     const user = userEvent.setup();
     renderPage();

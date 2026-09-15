@@ -1,0 +1,122 @@
+.qa-review {
+  display: flex;
+  flex-direction: column;
+  gap: 0.85rem;
+  width: 100%;
+  min-width: 0;
+  min-height: 0;
+}
+
+.qa-review.lesson-view {
+  height: auto;
+}
+
+.qa-review .lesson-layout {
+  width: 100%;
+  flex: 1 1 auto;
+  min-height: min(28rem, 70vh);
+  max-height: min(80vh, 52rem);
+  overflow: hidden;
+}
+
+.qa-review .lesson-layout__main,
+.qa-review .lesson-layout__aside {
+  overflow-y: auto;
+  min-height: 0;
+}
+
+.qa-review__slides {
+  display: grid;
+  gap: 0.85rem;
+  min-height: 0;
+}
+
+.qa-review .lesson-overview {
+  flex: none;
+  overflow: visible;
+}
+
+.qa-review .lesson-overview__scroll {
+  overflow: visible;
+  flex: none;
+}
+
+.qa-review .lesson-quiz-panel {
+  min-height: 100%;
+}
+
+.qa-review__table-wrap {
+  overflow-x: auto;
+  width: 100%;
+}
+
+.qa-review__table {
+  border-collapse: collapse;
+  width: 100%;
+  font-size: 0.9rem;
+}
+
+.qa-review__table th,
+.qa-review__table td {
+  text-align: left;
+  vertical-align: top;
+  padding: 0.55rem 0.7rem;
+  border-bottom: 1px solid var(--border);
+}
+
+.qa-review__table th {
+  font-size: 0.78rem;
+  font-weight: 650;
+  color: var(--ink-muted);
+  white-space: nowrap;
+}
+
+.qa-review__bloom {
+  display: inline-block;
+  font-size: 0.78rem;
+  font-weight: 650;
+  text-transform: capitalize;
+}
+
+.qa-review__misconceptions {
+  margin: 0;
+  max-width: 12rem;
+}
+
+.qa-review__prompt,
+.qa-review__rationale {
+  margin: 0;
+  white-space: normal;
+  max-width: none;
+}
+
+.qa-review__options {
+  margin: 0;
+  padding-left: 1.1rem;
+}
+
+.qa-review__option--correct {
+  font-weight: 650;
+}
+
+.qa-review__key {
+  display: inline-block;
+  margin-right: 0.35rem;
+  font-weight: 700;
+}
+
+.qa-review__published {
+  margin: 0;
+  padding: 0.65rem 0.85rem;
+  border: 1px solid var(--success-border);
+  border-radius: var(--radius-sm);
+  background: var(--success-bg);
+  color: var(--success);
+}
+
+.qa-review__select {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  font-size: 0.9rem;
+}

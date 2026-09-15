@@ -2,28 +2,42 @@
 
 from __future__ import annotations
 
+import sys
 from pathlib import Path
+from types import SimpleNamespace
 from uuid import UUID, uuid4
 
 import pytest
+from docling_core.transforms.chunker.hierarchical_chunker import ChunkingDocSerializer
+from docling_core.transforms.chunker.tokenizer.base import BaseTokenizer
+from docling_core.transforms.serializer.markdown import MarkdownTableSerializer
+from docling_core.types.doc.document import DoclingDocument, TableCell, TableData
 from fastapi.testclient import TestClient
+from PIL import Image
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from education_platform.core.config import get_settings
+from education_platform.core.config import Settings, get_settings
+from education_platform.core.llm import chat_completion_vision_sync
 from education_platform.modules.academics.models import Subtopic
+from education_platform.modules.generation.models import ContentGenerationRun
 from education_platform.modules.materials.models import (
     SourceChunk,
     SourceMaterialVersion,
     SourceMaterialVersionStatus,
 )
 from education_platform.modules.rag.chunking import (
+    FORMULA_NOT_DECODED,
     SECTION_HEADING_MAX_LEN,
+    FormulaAwareChunkingSerializerProvider,
+    FormulaOrigMarkdownTextSerializer,
     TextChunk,
     _page_number_from_meta,
     _section_heading_from_meta,
     chunk_docling_document,
     content_hash,
+    promote_formula_orig_text,
+    replace_formula_not_decoded,
 )
 from education_platform.modules.rag.models import (
     IngestJob,
@@ -40,7 +54,13 @@ from education_platform.modules.rag.vector_store import (
     search_similar,
     upsert_rows,
 )
-from education_platform.workers.ingest import process_ingest_job_sync
+from education_platform.workers.ingest import (
+    apply_formula_pipeline_options,
+    convert_pdf_with_docling,
+    docling_accelerator_device,
+    enrich_formulas_with_openrouter,
+    process_ingest_job_sync,
+)
 from education_platform.workers.runner import claim_next_job, poll_once
 
 TINY_PDF = (
@@ -189,6 +209,7 @@ def test_admin_curriculum_upload_enqueues(
     version = seeded_db.get(SourceMaterialVersion, version_id)
     assert version is not None
     assert version.lifecycle_status == SourceMaterialVersionStatus.PROCESSING
+    assert version.submitted_by_user_id is None
     assert version.blob_object_key
     blob_path = get_settings().upload_dir / version.blob_object_key
     assert blob_path.is_file()
@@ -323,6 +344,453 @@ def test_chunk_docling_document_preserves_tables_and_dedupes(
     assert len({c.content_hash for c in chunks}) == 2
 
 
+def test_formula_aware_provider_uses_markdown_table_serializer() -> None:
+    doc = DoclingDocument(name="provider")
+    serializer = FormulaAwareChunkingSerializerProvider().get_serializer(doc)
+    assert isinstance(serializer.table_serializer, MarkdownTableSerializer)
+    assert isinstance(serializer.text_serializer, FormulaOrigMarkdownTextSerializer)
+
+
+def _policy_table_data() -> TableData:
+    return TableData(
+        num_rows=2,
+        num_cols=2,
+        table_cells=[
+            TableCell(
+                text="Offence",
+                start_row_offset_idx=0,
+                end_row_offset_idx=1,
+                start_col_offset_idx=0,
+                end_col_offset_idx=1,
+                column_header=True,
+            ),
+            TableCell(
+                text="Action",
+                start_row_offset_idx=0,
+                end_row_offset_idx=1,
+                start_col_offset_idx=1,
+                end_col_offset_idx=2,
+                column_header=True,
+            ),
+            TableCell(
+                text="Late",
+                start_row_offset_idx=1,
+                end_row_offset_idx=2,
+                start_col_offset_idx=0,
+                end_col_offset_idx=1,
+            ),
+            TableCell(
+                text="Warning",
+                start_row_offset_idx=1,
+                end_row_offset_idx=2,
+                start_col_offset_idx=1,
+                end_col_offset_idx=2,
+            ),
+        ],
+    )
+
+
+def test_chunk_docling_document_serializes_table_item_as_markdown(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _patch_chunker_tokenizer(monkeypatch)
+    doc = DoclingDocument(name="policy-table")
+    doc.add_table(data=_policy_table_data())
+    chunks = chunk_docling_document(doc)
+    joined = "\n".join(chunk.text for chunk in chunks)
+    assert chunks
+    assert "|" in joined
+    assert "Offence" in joined
+    assert "Action" in joined
+    assert "Late" in joined
+    assert "Warning" in joined
+    assert "Offence, Action = " not in joined
+
+
+class FormulaItem:
+    def __init__(self, text: str, orig: str, *, label: str = "formula") -> None:
+        self.text = text
+        self.orig = orig
+        self.label = SimpleNamespace(value=label)
+
+
+class _FormulaDoc:
+    def __init__(self, items: list[object]) -> None:
+        self.items = items
+
+    def iterate_items(self) -> list[tuple[object, int]]:
+        return [(item, 0) for item in self.items]
+
+
+def test_promote_formula_orig_text_fills_empty_and_placeholder_latex() -> None:
+    empty = FormulaItem(text="", orig="x + 2 = 5")
+    placeholder = FormulaItem(text=FORMULA_NOT_DECODED, orig="2x - 3 = 7")
+    decoded = FormulaItem(text="x^2=4", orig="ignored")
+    prose = SimpleNamespace(text="", orig="not a formula", label="paragraph")
+    promote_formula_orig_text(_FormulaDoc([empty, placeholder, decoded, prose]))
+    assert empty.text == "x + 2 = 5"
+    assert placeholder.text == "2x - 3 = 7"
+    assert decoded.text == "x^2=4"
+    assert prose.text == ""
+
+
+def test_promote_formula_orig_text_skips_missing_orig_and_iterate() -> None:
+    item = FormulaItem(text="", orig=FORMULA_NOT_DECODED)
+    promote_formula_orig_text(_FormulaDoc([item]))
+    assert item.text == ""
+    promote_formula_orig_text(object())
+
+
+def test_replace_formula_not_decoded_wraps_orig_as_math() -> None:
+    assert (
+        replace_formula_not_decoded(FORMULA_NOT_DECODED, "x + 2 = 5", is_inline_scope=False)
+        == "$$x + 2 = 5$$"
+    )
+    assert (
+        replace_formula_not_decoded(FORMULA_NOT_DECODED, "x + 2 = 5", is_inline_scope=True)
+        == "$x + 2 = 5$"
+    )
+    assert replace_formula_not_decoded("keep", "x + 2 = 5", is_inline_scope=False) == "keep"
+    assert replace_formula_not_decoded(FORMULA_NOT_DECODED, "", is_inline_scope=False) == ""
+    assert (
+        replace_formula_not_decoded(FORMULA_NOT_DECODED, FORMULA_NOT_DECODED, is_inline_scope=False)
+        == ""
+    )
+
+
+def test_formula_serializer_emits_orig_math_not_html_comment() -> None:
+    doc = DoclingDocument(name="formula-orig")
+    item = doc.add_formula(text="", orig="x + 2 = 5")
+    default = ChunkingDocSerializer(doc=doc).serialize(item=item)
+    assert default.text == FORMULA_NOT_DECODED
+
+    result = ChunkingDocSerializer(
+        doc=doc, text_serializer=FormulaOrigMarkdownTextSerializer()
+    ).serialize(item=item)
+    assert FORMULA_NOT_DECODED not in result.text
+    assert "x + 2 = 5" in result.text
+    assert "$$" in result.text
+
+    decoded = doc.add_formula(text=r"\frac{x}{2}", orig="ignored")
+    kept = ChunkingDocSerializer(
+        doc=doc, text_serializer=FormulaOrigMarkdownTextSerializer()
+    ).serialize(item=decoded)
+    assert r"\frac{x}{2}" in kept.text
+    assert FORMULA_NOT_DECODED not in kept.text
+
+
+def _patch_chunker_tokenizer(monkeypatch: pytest.MonkeyPatch) -> None:
+    class _FakeTokenizer(BaseTokenizer):
+        def count_tokens(self, text: str) -> int:
+            return len(text.split())
+
+        def get_max_tokens(self) -> int:
+            return 256
+
+        def get_tokenizer(self) -> object:
+            return object()
+
+    monkeypatch.setattr(
+        "docling_core.transforms.chunker.tokenizer.huggingface.HuggingFaceTokenizer",
+        lambda **_kwargs: _FakeTokenizer(),
+    )
+    monkeypatch.setattr(
+        "transformers.AutoTokenizer.from_pretrained",
+        lambda *_args, **_kwargs: object(),
+    )
+
+
+def test_chunk_empty_formula_text_uses_orig_never_html_comment(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        "education_platform.modules.rag.chunking.promote_formula_orig_text",
+        lambda _document: None,
+    )
+    _patch_chunker_tokenizer(monkeypatch)
+
+    doc = DoclingDocument(name="formula-chunk")
+    doc.add_formula(text="", orig="0.25(4 f - 3) = 0.05(10 f - 9)")
+    chunks = chunk_docling_document(doc)
+    joined = "\n".join(chunk.text for chunk in chunks)
+    assert chunks
+    assert FORMULA_NOT_DECODED not in joined
+    assert "0.25(4 f - 3) = 0.05(10 f - 9)" in joined
+
+
+class _VisionFormulaItem:
+    def __init__(self, text: str, orig: str) -> None:
+        self.text = text
+        self.orig = orig
+        self.label = SimpleNamespace(value="formula")
+
+    def get_image(self, document: object, prov_index: int = 0) -> Image.Image:
+        _ = document, prov_index
+        return Image.new("RGB", (8, 8), "white")
+
+
+def test_enrich_formulas_with_openrouter_writes_latex(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    item = _VisionFormulaItem(text="", orig="x/2")
+    called: list[object] = []
+
+    def _vision(messages: list[dict[str, object]], **_kwargs: object) -> str:
+        called.append(messages)
+        return r"$$\frac{x}{2}$$"
+
+    monkeypatch.setattr(
+        "education_platform.workers.ingest.chat_completion_vision_sync",
+        _vision,
+    )
+    enrich_formulas_with_openrouter(
+        _FormulaDoc([item]),
+        settings=Settings(openrouter_api_key="test-key"),
+    )
+    assert item.text == r"\frac{x}{2}"
+    assert called
+
+
+def test_enrich_formulas_skips_api_when_key_missing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    item = _VisionFormulaItem(text="", orig="x + 2 = 5")
+
+    def _boom(*_args: object, **_kwargs: object) -> str:
+        raise AssertionError("must not call OpenRouter when the key is missing")
+
+    monkeypatch.setattr(
+        "education_platform.workers.ingest.chat_completion_vision_sync",
+        _boom,
+    )
+    enrich_formulas_with_openrouter(
+        _FormulaDoc([item]),
+        settings=Settings(openrouter_api_key=""),
+    )
+    assert item.text == ""
+    _patch_chunker_tokenizer(monkeypatch)
+    doc = DoclingDocument(name="formula-orig-fallback")
+    doc.add_formula(text=item.text, orig=item.orig)
+    chunks = chunk_docling_document(doc)
+    joined = "\n".join(chunk.text for chunk in chunks)
+    assert "x + 2 = 5" in joined
+    assert FORMULA_NOT_DECODED not in joined
+
+
+def test_enrich_formulas_keeps_orig_when_crop_or_call_fails(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class _NoCrop:
+        def __init__(self) -> None:
+            self.text = FORMULA_NOT_DECODED
+            self.orig = "a^2"
+            self.label = SimpleNamespace(value="formula")
+
+        def get_image(self, document: object, prov_index: int = 0) -> None:
+            _ = document, prov_index
+            return None
+
+    no_crop = _NoCrop()
+    boom = _VisionFormulaItem(text="", orig="b^2")
+
+    def _fail(*_args: object, **_kwargs: object) -> str:
+        raise RuntimeError("OpenRouter down")
+
+    monkeypatch.setattr(
+        "education_platform.workers.ingest.chat_completion_vision_sync",
+        _fail,
+    )
+    enrich_formulas_with_openrouter(
+        _FormulaDoc([no_crop, boom]),
+        settings=Settings(openrouter_api_key="test-key"),
+    )
+    assert no_crop.text == FORMULA_NOT_DECODED
+    assert boom.text == ""
+
+
+def test_chat_completion_vision_sync_sends_image_part(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured: dict[str, object] = {}
+
+    class _Completions:
+        def create(self, **kwargs: object) -> object:
+            captured.update(kwargs)
+            return SimpleNamespace(
+                choices=[SimpleNamespace(message=SimpleNamespace(content=r"\frac{1}{2}"))]
+            )
+
+    class _Client:
+        def __init__(self) -> None:
+            self.chat = SimpleNamespace(completions=_Completions())
+
+    monkeypatch.setattr(
+        "education_platform.core.llm.build_openrouter_sync_client",
+        lambda _settings=None: _Client(),
+    )
+    messages: list[dict[str, object]] = [
+        {
+            "role": "user",
+            "content": [
+                {"type": "text", "text": "one LaTeX expression"},
+                {
+                    "type": "image_url",
+                    "image_url": {"url": "data:image/png;base64,AAAA"},
+                },
+            ],
+        }
+    ]
+    out = chat_completion_vision_sync(
+        messages,
+        settings=Settings(openrouter_api_key="test-key"),
+    )
+    assert out == r"\frac{1}{2}"
+    assert captured["model"] == "openai/gpt-4o-mini"
+    assert captured["messages"] == messages
+
+
+def test_apply_formula_pipeline_options_disables_local_codeformula() -> None:
+    options = SimpleNamespace(
+        do_formula_enrichment=True,
+        generate_page_images=False,
+        do_table_structure=False,
+    )
+    apply_formula_pipeline_options(options)
+    assert options.do_formula_enrichment is False
+    assert options.generate_page_images is True
+    assert options.do_table_structure is True
+    assert options.accelerator_options.device in {"mps", "cpu"}
+
+
+def test_apply_formula_pipeline_options_sets_mps_when_available(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        "education_platform.workers.ingest.mps_is_available",
+        lambda: True,
+    )
+    options = SimpleNamespace(
+        do_formula_enrichment=False,
+        accelerator_options=SimpleNamespace(device="auto"),
+    )
+    apply_formula_pipeline_options(options)
+    assert options.accelerator_options.device == "mps"
+    assert docling_accelerator_device() == "mps"
+
+
+def test_apply_formula_pipeline_options_sets_cpu_when_mps_unavailable(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        "education_platform.workers.ingest.mps_is_available",
+        lambda: False,
+    )
+    options = SimpleNamespace(
+        do_formula_enrichment=False,
+        accelerator_options=SimpleNamespace(device="auto"),
+    )
+    apply_formula_pipeline_options(options)
+    assert options.accelerator_options.device == "cpu"
+    assert docling_accelerator_device() == "cpu"
+
+
+def test_allow_mps_patch_lets_auto_select_metal_when_available() -> None:
+    from docling.datamodel.accelerator_options import AcceleratorDevice
+    from docling.models.inference_engines.vlm import transformers_engine as te
+
+    from education_platform.workers import ingest as ingest_mod
+
+    ingest_mod._CODEFORMULA_MPS_PATCHED = False
+    ingest_mod._allow_mps_on_codeformula_transformers()
+    device = te.decide_device(
+        "auto",
+        supported_devices=[
+            AcceleratorDevice.CPU,
+            AcceleratorDevice.CUDA,
+            AcceleratorDevice.XPU,
+        ],
+    )
+    if ingest_mod.mps_is_available():
+        assert device == "mps"
+    else:
+        assert device == "cpu"
+
+
+def test_convert_pdf_with_docling_disables_formula_enrichment(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    captured: dict[str, object] = {}
+    mps_patch_calls = {"n": 0}
+    monkeypatch.setattr(
+        "education_platform.workers.ingest.mps_is_available",
+        lambda: True,
+    )
+    monkeypatch.setattr(
+        "education_platform.workers.ingest._allow_mps_on_codeformula_transformers",
+        lambda: mps_patch_calls.__setitem__("n", mps_patch_calls["n"] + 1),
+    )
+    monkeypatch.setattr(
+        "education_platform.workers.ingest.enrich_formulas_with_openrouter",
+        lambda _document: None,
+    )
+
+    class FakePipelineOptions:
+        def __init__(self) -> None:
+            self.do_formula_enrichment = True
+            self.generate_page_images = False
+            self.do_table_structure = False
+            self.images_scale = 1.0
+            self.accelerator_options = SimpleNamespace(device="auto")
+
+    class FakePdfFormatOption:
+        def __init__(self, *, pipeline_options: FakePipelineOptions) -> None:
+            captured["pipeline_options"] = pipeline_options
+
+    class FakeConverter:
+        def __init__(self, format_options: object = None) -> None:
+            captured["format_options"] = format_options
+
+        def convert(self, source: str) -> object:
+            captured["source"] = source
+            return SimpleNamespace(document="decoded-doc")
+
+    fake_pdf = SimpleNamespace(PDF="pdf")
+    for name in ("docling", "docling.datamodel"):
+        if name not in sys.modules:
+            monkeypatch.setitem(sys.modules, name, SimpleNamespace())
+    monkeypatch.setitem(
+        sys.modules,
+        "docling.datamodel.pipeline_options",
+        SimpleNamespace(PdfPipelineOptions=FakePipelineOptions),
+    )
+    monkeypatch.setitem(
+        sys.modules,
+        "docling.datamodel.base_models",
+        SimpleNamespace(InputFormat=fake_pdf),
+    )
+    monkeypatch.setitem(
+        sys.modules,
+        "docling.document_converter",
+        SimpleNamespace(DocumentConverter=FakeConverter, PdfFormatOption=FakePdfFormatOption),
+    )
+
+    pdf = tmp_path / "exercise.pdf"
+    pdf.write_bytes(TINY_PDF)
+    document = convert_pdf_with_docling(pdf)
+    assert document == "decoded-doc"
+    assert mps_patch_calls["n"] == 0
+    options = captured["pipeline_options"]
+    assert isinstance(options, FakePipelineOptions)
+    assert options.do_formula_enrichment is False
+    assert options.generate_page_images is True
+    assert options.do_table_structure is True
+    assert options.images_scale == 1.0
+    assert options.accelerator_options.device == "mps"
+    format_options = captured["format_options"]
+    assert isinstance(format_options, dict)
+    assert fake_pdf.PDF in format_options
+
+
 def test_pgvector_upsert_delete_and_search(clean_db: str) -> None:
     _ = clean_db
     get_settings.cache_clear()
@@ -425,7 +893,7 @@ def test_claim_loop_processes_queued_job(
     seeded_db.expire_all()
     done = seeded_db.get(IngestJob, job.id)
     assert done is not None
-    assert done.status == IngestJobStatus.SUCCEEDED
+    assert done.status == IngestJobStatus.SUCCEEDED, done.error
     refreshed = seeded_db.get(SourceMaterialVersion, version.id)
     assert refreshed is not None
     assert refreshed.lifecycle_status == SourceMaterialVersionStatus.READY
@@ -533,8 +1001,16 @@ def test_worker_happy_path_source_material(
     assert chunks[0].section_heading == SAMPLE_SECTION
     done = seeded_db.get(IngestJob, job.id)
     assert done is not None
-    assert done.status == IngestJobStatus.SUCCEEDED
+    assert done.status == IngestJobStatus.SUCCEEDED, done.error
     assert count_for_version(version.id) >= 1
+    assert (
+        seeded_db.scalar(
+            select(ContentGenerationRun).where(
+                ContentGenerationRun.intake_source_material_version_id == version.id
+            )
+        )
+        is None
+    )
     get_settings.cache_clear()
 
 
@@ -601,7 +1077,7 @@ def test_worker_happy_path_knowledge_document(
     assert chunks[0].section_heading == SAMPLE_SECTION
     done = seeded_db.get(IngestJob, job.id)
     assert done is not None
-    assert done.status == IngestJobStatus.SUCCEEDED
+    assert done.status == IngestJobStatus.SUCCEEDED, done.error
     assert count_for_version(version.id) >= 1
     get_settings.cache_clear()
 
