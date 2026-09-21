@@ -315,6 +315,29 @@ async def test_set_config_is_rejected_even_inside_cte() -> None:
     assert "set_config" in error.lower()
 
 
+async def test_quoted_set_config_is_rejected() -> None:
+    # sqlglot stores double-quoted function names as Identifier, not str — the
+    # blocklist must still catch them or RLS GUCs remain attacker-writable.
+    error = await _rejected(
+        'SELECT id, "set_config"(\'app.current_user_role\', \'admin\', true) '
+        "FROM subjects"
+    )
+    assert "set_config" in error.lower()
+
+
+async def test_schema_qualified_quoted_set_config_is_rejected() -> None:
+    error = await _rejected(
+        'SELECT pg_catalog."set_config"(\'app.current_institution_id\', '
+        "'00000000-0000-0000-0000-000000000099', true) FROM subjects"
+    )
+    assert "set_config" in error.lower()
+
+
+async def test_quoted_pg_sleep_is_rejected() -> None:
+    error = await _rejected('SELECT "pg_sleep"(1) FROM subjects')
+    assert "pg_sleep" in error.lower()
+
+
 async def test_pg_advisory_lock_is_rejected() -> None:
     error = await _rejected("SELECT pg_advisory_lock(1) FROM subjects LIMIT 1")
     assert "pg_advisory_lock" in error.lower()
@@ -330,6 +353,19 @@ async def test_same_named_cte_still_whitelists_inner_base_table() -> None:
     # It must remain whitelist-checked — an excluded table must still be caught.
     error = await _rejected(
         "WITH ingest_jobs AS (SELECT id FROM ingest_jobs) SELECT id FROM ingest_jobs"
+    )
+    assert "ingest_jobs" in error
+
+
+async def test_recursive_same_named_cte_schema_qualified_still_whitelists() -> None:
+    # RECURSIVE + same alias + public.<table> is a real base-table scan in Postgres.
+    # It must remain whitelist-checked (and later role-scoped), not skipped as a CTE ref.
+    error = await _rejected(
+        "WITH RECURSIVE ingest_jobs AS ("
+        " SELECT id FROM public.ingest_jobs"
+        " UNION ALL"
+        " SELECT id FROM ingest_jobs WHERE false"
+        ") SELECT id FROM ingest_jobs"
     )
     assert "ingest_jobs" in error
 

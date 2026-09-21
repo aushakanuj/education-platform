@@ -133,7 +133,15 @@ def is_cte_or_derived_table_ref(table_node: exp.Table, local_aliases: set[str]) 
     CTE alias would skip whitelist / role-scope checks on the real table — the exact
     gap a same-named CTE can use to defeat apply_role_scope. Recursive CTE self-refs
     remain CTE refs (Postgres binds them to the CTE).
+
+    Schema-/catalog-qualified names (`public.student_profiles`, `pg_catalog.pg_roles`)
+    are never CTE refs — Postgres resolves them to the real relation even inside a
+    RECURSIVE CTE whose alias collides with that table. Treating those as CTE aliases
+    would skip whitelist and apply_role_scope on the real scan (and combine with a
+    session-mutator bypass into a full RLS escalation).
     """
+    if table_node.db or table_node.catalog:
+        return False
     name = table_node.name.lower()
     if name not in local_aliases:
         return False
@@ -278,11 +286,27 @@ def _check_columns(
     return None
 
 
+def _anonymous_function_name(node: exp.Anonymous) -> str | None:
+    """Normalize sqlglot's function-name payload to a lowercase bare name.
+
+    Unquoted `set_config(...)` stores the name as a plain `str`. Double-quoted
+    `"set_config"(...)` (and `pg_catalog."set_config"(...)`) store an
+    `exp.Identifier` instead — comparing only `isinstance(raw, str)` would miss
+    the quoted form and let a session mutator through validate_sql.
+    """
+    raw = node.this
+    if isinstance(raw, str):
+        return raw.lower()
+    if isinstance(raw, exp.Identifier):
+        return raw.name.lower()
+    return None
+
+
 def _find_blocked_function(tree: exp.Expr) -> str | None:
     for node in tree.find_all(exp.Anonymous):
-        raw = node.this
-        if isinstance(raw, str) and raw.lower() in _BLOCKED_FUNCTIONS:
-            return raw.lower()
+        name = _anonymous_function_name(node)
+        if name is not None and name in _BLOCKED_FUNCTIONS:
+            return name
     return None
 
 
