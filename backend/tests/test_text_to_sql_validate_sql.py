@@ -319,15 +319,14 @@ async def test_quoted_set_config_is_rejected() -> None:
     # sqlglot stores double-quoted function names as Identifier, not str — the
     # blocklist must still catch them or RLS GUCs remain attacker-writable.
     error = await _rejected(
-        'SELECT id, "set_config"(\'app.current_user_role\', \'admin\', true) '
-        "FROM subjects"
+        "SELECT id, \"set_config\"('app.current_user_role', 'admin', true) FROM subjects"
     )
     assert "set_config" in error.lower()
 
 
 async def test_schema_qualified_quoted_set_config_is_rejected() -> None:
     error = await _rejected(
-        'SELECT pg_catalog."set_config"(\'app.current_institution_id\', '
+        "SELECT pg_catalog.\"set_config\"('app.current_institution_id', "
         "'00000000-0000-0000-0000-000000000099', true) FROM subjects"
     )
     assert "set_config" in error.lower()
