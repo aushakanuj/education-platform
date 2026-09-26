@@ -1567,3 +1567,24 @@ async def test_same_named_cte_inner_base_table_still_gets_institution_scope() ->
         "teaching_assignments" in validated.lower()
         or "student_subject_enrollments" in validated.lower()
     )
+
+
+async def test_recursive_same_named_cte_schema_qualified_still_gets_institution_scope() -> None:
+    """RECURSIVE CTE alias colliding with a real table + schema-qualified base scan
+    must still receive institution/row predicates — otherwise apply_role_scope is a
+    no-op and a quoted set_config (or any future RLS GUC mutator) escalates freely.
+    """
+    sql = (
+        "WITH RECURSIVE student_profiles AS ("
+        " SELECT id, full_name, institution_id FROM public.student_profiles"
+        " UNION ALL"
+        " SELECT id, full_name, institution_id FROM student_profiles WHERE false"
+        ") "
+        "SELECT id, full_name, institution_id FROM student_profiles"
+    )
+    validated = await _scoped(sql, role="teacher", user_id="teacher-1", institution_id="inst-1")
+    assert "institution_id = 'inst-1'" in validated
+    assert (
+        "teaching_assignments" in validated.lower()
+        or "student_subject_enrollments" in validated.lower()
+    )
