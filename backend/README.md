@@ -157,7 +157,7 @@ Environment variables (see `.env.example`):
 | `OPENROUTER_API_KEY` | unset | Required for live LLM stages (Policy assistant, ADK generation) |
 | `OPENROUTER_BASE_URL` | `https://openrouter.ai/api/v1` | OpenRouter API base |
 | `OPENROUTER_MODEL` | `openai/gpt-4o-mini` | Chat model id |
-| `ADK_MODEL` | `openrouter/openai/gpt-4o` | Google ADK LiteLlm model id |
+| `ADK_MODEL` | `openrouter/openai/gpt-4o-mini` | Google ADK LiteLlm model id |
 | `ADK_MAX_REVIEW_ROUNDS` | `4` | Writer/reviewer loop cap |
 | `CHAT_CONTEXT_LIMIT_TOKENS` | `20000` | Context meter denominator |
 | `CHAT_RETRIEVAL_LIMIT` | `6` | Default `retrieve_chunks` top-k |

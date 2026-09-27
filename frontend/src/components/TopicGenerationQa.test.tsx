@@ -143,4 +143,44 @@ describe("TopicGenerationQa", () => {
     expect(screen.getByText("A")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Publish to students" })).not.toBeInTheDocument();
   });
+
+  it("shows a key-disputed badge and keeps reject available", async () => {
+    const user = userEvent.setup();
+    const onRejectSelected = vi.fn();
+    render(
+      <TopicGenerationQa
+        items={[
+          item({ key_disputed: false, blind_answer: "A" }),
+          item({
+            question_id: "q-2",
+            sequence: 2,
+            prompt: "Which fraction is larger?",
+            key_disputed: true,
+            blind_answer: "C",
+          }),
+          item({
+            question_id: "q-3",
+            sequence: 3,
+            prompt: "Solver errored",
+            key_disputed: false,
+            blind_answer: null,
+          }),
+        ]}
+        draftLessonMarkdown="# Lesson"
+        phase="qa_review"
+        busy={false}
+        canPublish
+        canReject
+        onRejectSelected={onRejectSelected}
+        onRequestPublish={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByText("Key disputed - solver chose C")).toBeInTheDocument();
+    expect(screen.getAllByText(/Key disputed/)).toHaveLength(1);
+    expect(screen.queryByText("Key disputed - solver chose A")).not.toBeInTheDocument();
+    await user.click(screen.getByRole("checkbox", { name: "Select item 2" }));
+    await user.click(screen.getByRole("button", { name: "Reject selected items" }));
+    expect(onRejectSelected).toHaveBeenCalledWith(["q-2"]);
+  });
 });

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import sys
 from pathlib import Path
 from types import SimpleNamespace
@@ -11,7 +12,7 @@ import pytest
 from docling_core.transforms.chunker.hierarchical_chunker import ChunkingDocSerializer
 from docling_core.transforms.chunker.tokenizer.base import BaseTokenizer
 from docling_core.transforms.serializer.markdown import MarkdownTableSerializer
-from docling_core.types.doc.document import DoclingDocument, TableCell, TableData
+from docling_core.types.doc.document import DoclingDocument, PictureItem, TableCell, TableData
 from fastapi.testclient import TestClient
 from PIL import Image
 from sqlalchemy import select
@@ -27,6 +28,7 @@ from education_platform.modules.materials.models import (
     SourceMaterialVersionStatus,
 )
 from education_platform.modules.rag.chunking import (
+    DIAGRAM_PLACEHOLDER,
     FORMULA_NOT_DECODED,
     SECTION_HEADING_MAX_LEN,
     FormulaAwareChunkingSerializerProvider,
@@ -34,6 +36,7 @@ from education_platform.modules.rag.chunking import (
     TextChunk,
     _page_number_from_meta,
     _section_heading_from_meta,
+    assign_numbered_heading_levels,
     chunk_docling_document,
     content_hash,
     promote_formula_orig_text,
@@ -59,6 +62,7 @@ from education_platform.workers.ingest import (
     convert_pdf_with_docling,
     docling_accelerator_device,
     enrich_formulas_with_openrouter,
+    parse_pdf_with_docling,
     process_ingest_job_sync,
 )
 from education_platform.workers.runner import claim_next_job, poll_once
@@ -349,6 +353,7 @@ def test_formula_aware_provider_uses_markdown_table_serializer() -> None:
     serializer = FormulaAwareChunkingSerializerProvider().get_serializer(doc)
     assert isinstance(serializer.table_serializer, MarkdownTableSerializer)
     assert isinstance(serializer.text_serializer, FormulaOrigMarkdownTextSerializer)
+    assert serializer.params.image_placeholder == DIAGRAM_PLACEHOLDER
 
 
 def _policy_table_data() -> TableData:
@@ -518,6 +523,68 @@ def test_chunk_empty_formula_text_uses_orig_never_html_comment(
     assert "0.25(4 f - 3) = 0.05(10 f - 9)" in joined
 
 
+def test_chunk_keeps_formula_and_diagram_from_distributive_page(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """hegp106-style page: a figure plus the identity must both survive chunking."""
+    _patch_chunker_tokenizer(monkeypatch)
+    doc = DoclingDocument(name="hegp106-diagram")
+    doc.add_title(text="Increments in Products")
+    doc.add_text(
+        label="paragraph",
+        text="This property can be visualised nicely using a diagram:",
+    )
+    doc.add_picture()
+    doc.add_formula(text="", orig="a(b + c) = ab + ac")
+
+    chunks = chunk_docling_document(doc)
+    joined = "\n".join(chunk.text for chunk in chunks)
+    assert chunks
+    assert "This property can be visualised nicely using a diagram:" in joined
+    assert DIAGRAM_PLACEHOLDER in joined
+    assert "a(b + c) = ab + ac" in joined
+    assert FORMULA_NOT_DECODED not in joined
+
+
+def test_chunk_rebuilds_numbered_section_paths_from_flat_docling_headings(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """hegp106: Docling puts every heading at level 1, so 6.1 was shadowed and lost."""
+    _patch_chunker_tokenizer(monkeypatch)
+    doc = DoclingDocument(name="hegp106-levels")
+    doc.add_heading(text="6.1 Some Properties of Multiplication", level=1)
+    doc.add_heading(text="Increments in Products", level=1)
+    doc.add_text(label="paragraph", text="Consider 23 × 27.")
+    doc.add_heading(text="6.2 Special Cases of the Distributive Property", level=1)
+    doc.add_heading(text="Pattern 1", level=1)
+    doc.add_text(label="paragraph", text="Square numbers ending in 5.")
+    doc.add_heading(text="SUMMARY", level=1)
+    doc.add_text(label="paragraph", text="We extended the distributive property.")
+
+    headings = [chunk.section_heading for chunk in chunk_docling_document(doc)]
+    assert headings == [
+        "6.1 Some Properties of Multiplication > Increments in Products",
+        "6.2 Special Cases of the Distributive Property > Pattern 1",
+        "SUMMARY",
+    ]
+
+
+def test_assign_numbered_heading_levels_leaves_unnumbered_documents() -> None:
+    doc = DoclingDocument(name="flat")
+    first = doc.add_heading(text="Squares", level=1)
+    second = doc.add_heading(text="Triangles", level=1)
+    assign_numbered_heading_levels(doc)
+    assert (first.level, second.level) == (1, 1)
+    assign_numbered_heading_levels(object())
+
+    nested = DoclingDocument(name="nested")
+    top = nested.add_heading(text="2.1 Angles", level=1)
+    deep = nested.add_heading(text="2.1.3 Exterior angles", level=1)
+    child = nested.add_heading(text="Try this", level=1)
+    assign_numbered_heading_levels(nested)
+    assert (top.level, deep.level, child.level) == (1, 2, 3)
+
+
 class _VisionFormulaItem:
     def __init__(self, text: str, orig: str) -> None:
         self.text = text
@@ -532,7 +599,7 @@ class _VisionFormulaItem:
 def test_enrich_formulas_with_openrouter_writes_latex(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    item = _VisionFormulaItem(text="", orig="x/2")
+    item = _VisionFormulaItem(text="", orig="")
     called: list[object] = []
 
     def _vision(messages: list[dict[str, object]], **_kwargs: object) -> str:
@@ -549,6 +616,170 @@ def test_enrich_formulas_with_openrouter_writes_latex(
     )
     assert item.text == r"\frac{x}{2}"
     assert called
+
+
+def test_enrich_formulas_skips_vision_when_text_layer_present(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    item = _VisionFormulaItem(text="", orig="x + 2 = 5")
+
+    def _boom(*_args: object, **_kwargs: object) -> str:
+        raise AssertionError("text-layer formulas must not call OpenRouter")
+
+    monkeypatch.setattr(
+        "education_platform.workers.ingest.chat_completion_vision_sync",
+        _boom,
+    )
+    enrich_formulas_with_openrouter(
+        _FormulaDoc([item]),
+        settings=Settings(openrouter_api_key="test-key"),
+    )
+    assert item.text == ""
+
+
+def test_enrich_formulas_repairs_damaged_text_layer(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    clean = _VisionFormulaItem(text="", orig="x + 2 = 5")
+    split_letter = _VisionFormulaItem(text="", orig="a 2")
+    split_number = _VisionFormulaItem(text="", orig="65 2")
+    split_group = _VisionFormulaItem(text="", orig="(a+b) 2")
+    callout = _VisionFormulaItem(
+        text="",
+        orig="Increase a ( b + 1) = ab × a",
+    )
+    called: list[list[dict[str, object]]] = []
+
+    def _vision(messages: list[dict[str, object]], **_kwargs: object) -> str:
+        called.append(messages)
+        return json.dumps([r"a^{2}", r"65^{2}", r"(a+b)^{2}", r"a(b+1)=ab\times a"])
+
+    monkeypatch.setattr(
+        "education_platform.workers.ingest.chat_completion_vision_sync",
+        _vision,
+    )
+    enrich_formulas_with_openrouter(
+        _FormulaDoc([clean, split_letter, split_number, split_group, callout]),
+        settings=Settings(openrouter_api_key="test-key"),
+    )
+    assert clean.text == ""
+    assert split_letter.text == r"a^{2}"
+    assert split_number.text == r"65^{2}"
+    assert split_group.text == r"(a+b)^{2}"
+    assert callout.text == r"a(b+1)=ab\times a"
+    assert len(called) == 1
+    content = called[0][0]["content"]
+    assert isinstance(content, list)
+    images = [part for part in content if part.get("type") == "image_url"]
+    assert len(images) == 4
+
+
+def _picture_crop(self: object, document: object, prov_index: int = 0) -> Image.Image:
+    _ = self, document, prov_index
+    return Image.new("RGB", (8, 8), "white")
+
+
+def _vision_image_count(messages: list[dict[str, object]]) -> int:
+    content = messages[0]["content"]
+    assert isinstance(content, list)
+    return len([part for part in content if part.get("type") == "image_url"])
+
+
+def test_enrich_method_picture_keeps_diagram_when_vision_is_empty(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    doc = DoclingDocument(name="method-picture")
+    doc.add_heading(text="Increments in Products", level=1)
+    area = doc.add_picture()
+    doc.add_heading(text="Method 1", level=1)
+    method = doc.add_picture()
+    doc.add_heading(text="6.3 Mind the Mistake, Mend the Mistake", level=1)
+    mistake = doc.add_picture()
+    called: list[list[dict[str, object]]] = []
+
+    def _vision(messages: list[dict[str, object]], **_kwargs: object) -> str:
+        called.append(messages)
+        return json.dumps([""] * _vision_image_count(messages))
+
+    monkeypatch.setattr(PictureItem, "get_image", _picture_crop)
+    monkeypatch.setattr(
+        "education_platform.workers.ingest.chat_completion_vision_sync",
+        _vision,
+    )
+    enrich_formulas_with_openrouter(
+        doc,
+        settings=Settings(openrouter_api_key="test-key"),
+    )
+    assert len(called) == 1
+    content = called[0][0]["content"]
+    assert isinstance(content, list)
+    prompt = content[0]
+    assert isinstance(prompt, dict)
+    assert "geometric figure" in str(prompt.get("text"))
+    assert _vision_image_count(called[0]) == 2
+    assert area in doc.pictures
+    assert method in doc.pictures
+    assert mistake in doc.pictures
+    _patch_chunker_tokenizer(monkeypatch)
+    chunks = chunk_docling_document(doc)
+    joined = "\n".join(chunk.text for chunk in chunks)
+    assert DIAGRAM_PLACEHOLDER in joined
+
+
+def test_enrich_method_picture_stores_algebra_latex(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    doc = DoclingDocument(name="method-algebra")
+    doc.add_heading(text="Method 2", level=1)
+    picture = doc.add_picture()
+
+    def _vision(messages: list[dict[str, object]], **_kwargs: object) -> str:
+        assert _vision_image_count(messages) == 1
+        return json.dumps([r"a^{2}"])
+
+    monkeypatch.setattr(PictureItem, "get_image", _picture_crop)
+    monkeypatch.setattr(
+        "education_platform.workers.ingest.chat_completion_vision_sync",
+        _vision,
+    )
+    enrich_formulas_with_openrouter(
+        doc,
+        settings=Settings(openrouter_api_key="test-key"),
+    )
+    assert picture not in doc.pictures
+    _patch_chunker_tokenizer(monkeypatch)
+    chunks = chunk_docling_document(doc)
+    joined = "\n".join(chunk.text for chunk in chunks)
+    assert r"a^{2}" in joined
+    assert DIAGRAM_PLACEHOLDER not in joined
+
+
+def test_enrich_formulas_batches_scans(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    first = _VisionFormulaItem(text="", orig="")
+    second = _VisionFormulaItem(text=FORMULA_NOT_DECODED, orig="")
+    called: list[list[dict[str, object]]] = []
+
+    def _vision(messages: list[dict[str, object]], **_kwargs: object) -> str:
+        called.append(messages)
+        return json.dumps([r"\frac{1}{2}", r"a^{2}"])
+
+    monkeypatch.setattr(
+        "education_platform.workers.ingest.chat_completion_vision_sync",
+        _vision,
+    )
+    enrich_formulas_with_openrouter(
+        _FormulaDoc([first, second]),
+        settings=Settings(openrouter_api_key="test-key"),
+    )
+    assert first.text == r"\frac{1}{2}"
+    assert second.text == r"a^{2}"
+    assert len(called) == 1
+    content = called[0][0]["content"]
+    assert isinstance(content, list)
+    images = [part for part in content if part.get("type") == "image_url"]
+    assert len(images) == 2
 
 
 def test_enrich_formulas_skips_api_when_key_missing(
@@ -591,7 +822,8 @@ def test_enrich_formulas_keeps_orig_when_crop_or_call_fails(
             return None
 
     no_crop = _NoCrop()
-    boom = _VisionFormulaItem(text="", orig="b^2")
+    no_crop.orig = ""
+    boom = _VisionFormulaItem(text="", orig="")
 
     def _fail(*_args: object, **_kwargs: object) -> str:
         raise RuntimeError("OpenRouter down")
@@ -659,12 +891,28 @@ def test_apply_formula_pipeline_options_disables_local_codeformula() -> None:
     assert options.do_formula_enrichment is False
     assert options.generate_page_images is True
     assert options.do_table_structure is True
-    assert options.accelerator_options.device in {"mps", "cpu"}
+    assert options.accelerator_options.device == docling_accelerator_device()
+    assert options.accelerator_options.device in {"cuda", "mps", "cpu"}
+
+
+def test_apply_formula_pipeline_options_prefers_cuda(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr("education_platform.workers.ingest.cuda_is_available", lambda: True)
+    monkeypatch.setattr("education_platform.workers.ingest.mps_is_available", lambda: True)
+    options = SimpleNamespace(
+        do_formula_enrichment=False,
+        accelerator_options=SimpleNamespace(device="auto"),
+    )
+    apply_formula_pipeline_options(options)
+    assert options.accelerator_options.device == "cuda"
+    assert docling_accelerator_device() == "cuda"
 
 
 def test_apply_formula_pipeline_options_sets_mps_when_available(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    monkeypatch.setattr("education_platform.workers.ingest.cuda_is_available", lambda: False)
     monkeypatch.setattr(
         "education_platform.workers.ingest.mps_is_available",
         lambda: True,
@@ -681,6 +929,7 @@ def test_apply_formula_pipeline_options_sets_mps_when_available(
 def test_apply_formula_pipeline_options_sets_cpu_when_mps_unavailable(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    monkeypatch.setattr("education_platform.workers.ingest.cuda_is_available", lambda: False)
     monkeypatch.setattr(
         "education_platform.workers.ingest.mps_is_available",
         lambda: False,
@@ -713,7 +962,8 @@ def test_allow_mps_patch_lets_auto_select_metal_when_available() -> None:
     if ingest_mod.mps_is_available():
         assert device == "mps"
     else:
-        assert device == "cpu"
+        # AUTO still prefers CUDA/XPU when MPS is absent (Linux GPU hosts).
+        assert device == "cpu" or device.startswith("cuda") or device.startswith("xpu")
 
 
 def test_convert_pdf_with_docling_disables_formula_enrichment(
@@ -721,6 +971,8 @@ def test_convert_pdf_with_docling_disables_formula_enrichment(
 ) -> None:
     captured: dict[str, object] = {}
     mps_patch_calls = {"n": 0}
+    enrich_calls = {"n": 0}
+    monkeypatch.setattr("education_platform.workers.ingest.cuda_is_available", lambda: True)
     monkeypatch.setattr(
         "education_platform.workers.ingest.mps_is_available",
         lambda: True,
@@ -731,7 +983,7 @@ def test_convert_pdf_with_docling_disables_formula_enrichment(
     )
     monkeypatch.setattr(
         "education_platform.workers.ingest.enrich_formulas_with_openrouter",
-        lambda _document: None,
+        lambda _document: enrich_calls.__setitem__("n", enrich_calls["n"] + 1),
     )
 
     class FakePipelineOptions:
@@ -779,16 +1031,48 @@ def test_convert_pdf_with_docling_disables_formula_enrichment(
     document = convert_pdf_with_docling(pdf)
     assert document == "decoded-doc"
     assert mps_patch_calls["n"] == 0
+    assert enrich_calls["n"] == 0
     options = captured["pipeline_options"]
     assert isinstance(options, FakePipelineOptions)
     assert options.do_formula_enrichment is False
     assert options.generate_page_images is True
     assert options.do_table_structure is True
     assert options.images_scale == 1.0
-    assert options.accelerator_options.device == "mps"
+    assert options.accelerator_options.device == "cuda"
     format_options = captured["format_options"]
     assert isinstance(format_options, dict)
     assert fake_pdf.PDF in format_options
+
+
+def test_parse_pdf_with_docling_enriches_before_chunk(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    order: list[str] = []
+
+    def _convert(_path: Path) -> str:
+        order.append("convert")
+        return "doc"
+
+    def _enrich(document: str) -> None:
+        assert document == "doc"
+        order.append("enrich")
+
+    def _chunk(document: str) -> list[str]:
+        assert document == "doc"
+        order.append("chunk")
+        return [r"$\frac{1}{2}$"]
+
+    monkeypatch.setattr("education_platform.workers.ingest.convert_pdf_with_docling", _convert)
+    monkeypatch.setattr(
+        "education_platform.workers.ingest.enrich_formulas_with_openrouter",
+        _enrich,
+    )
+    monkeypatch.setattr("education_platform.workers.ingest.chunk_docling_document", _chunk)
+    pdf = tmp_path / "exercise.pdf"
+    pdf.write_bytes(TINY_PDF)
+    chunks = parse_pdf_with_docling(pdf)
+    assert order == ["convert", "enrich", "chunk"]
+    assert chunks == [r"$\frac{1}{2}$"]
 
 
 def test_pgvector_upsert_delete_and_search(clean_db: str) -> None:

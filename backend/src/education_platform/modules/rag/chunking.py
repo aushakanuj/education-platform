@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import re
 from typing import Any, override
 
 from docling_core.transforms.chunker.hierarchical_chunker import (
@@ -12,9 +13,11 @@ from docling_core.transforms.chunker.hierarchical_chunker import (
 from docling_core.transforms.serializer.base import BaseDocSerializer, SerializationResult
 from docling_core.transforms.serializer.common import create_ser_result
 from docling_core.transforms.serializer.markdown import (
+    MarkdownParams,
     MarkdownTableSerializer,
     MarkdownTextSerializer,
 )
+from docling_core.types.doc.base import ImageRefMode
 from docling_core.types.doc.document import DoclingDocument
 from docling_core.types.doc.items.text import TextItem
 
@@ -23,13 +26,17 @@ from education_platform.modules.rag.contracts import TextChunk
 SECTION_HEADING_MAX_LEN = 500
 EMBEDDING_TOKENIZER_MODEL = "sentence-transformers/all-MiniLM-L6-v2"
 FORMULA_NOT_DECODED = "<!-- formula-not-decoded -->"
+DIAGRAM_PLACEHOLDER = "[Diagram]"
+_NUMBERED_HEADING = re.compile(r"^\s*\d+(?:\.\d+)+\.?\s+\S")
 
 __all__ = [
+    "DIAGRAM_PLACEHOLDER",
     "FORMULA_NOT_DECODED",
     "FormulaAwareChunkingSerializerProvider",
     "FormulaOrigMarkdownTextSerializer",
     "SECTION_HEADING_MAX_LEN",
     "TextChunk",
+    "assign_numbered_heading_levels",
     "chunk_docling_document",
     "content_hash",
     "estimate_token_count",
@@ -135,6 +142,12 @@ class FormulaAwareChunkingSerializerProvider(ChunkingSerializerProvider):
             doc=doc,
             text_serializer=FormulaOrigMarkdownTextSerializer(),
             table_serializer=MarkdownTableSerializer(),
+            params=MarkdownParams(
+                image_mode=ImageRefMode.PLACEHOLDER,
+                image_placeholder=DIAGRAM_PLACEHOLDER,
+                escape_underscores=False,
+                escape_html=False,
+            ),
         )
 
 
@@ -161,6 +174,39 @@ def promote_formula_orig_text(document: Any) -> None:
         item.text = orig
 
 
+def _is_section_header(item: Any) -> bool:
+    label = getattr(item, "label", None)
+    return str(getattr(label, "value", label)).lower() == "section_header"
+
+
+def assign_numbered_heading_levels(document: Any) -> None:
+    """Rebuild heading depth from section numbers.
+
+    Docling gives every section header level 1, so "6.1 Some Properties" is
+    shadowed by the next subheading and never reaches chunk metadata. When the
+    document numbers its sections, "6.1" is level 1, "6.1.2" level 2, an
+    all-caps heading (SUMMARY) level 1, and any other heading sits one level
+    below the numbered section before it.
+    """
+    iterate = getattr(document, "iterate_items", None)
+    if iterate is None:
+        return
+    headers = [item for item, _level in iterate() if _is_section_header(item)]
+    if not any(_NUMBERED_HEADING.match(str(item.text)) for item in headers):
+        return
+    current = 0
+    for item in headers:
+        text = str(item.text).strip()
+        if _NUMBERED_HEADING.match(text):
+            current = text.split()[0].rstrip(".").count(".")
+            item.level = max(1, current)
+        elif text.isupper():
+            current = 1
+            item.level = 1
+        else:
+            item.level = current + 1
+
+
 def chunk_docling_document(document: Any) -> list[TextChunk]:
     """Chunk a DoclingDocument with HybridChunker (MiniLM tokenizer).
 
@@ -168,6 +214,7 @@ def chunk_docling_document(document: Any) -> list[TextChunk]:
     context. Table markdown is preserved (no normalize + word-split flatten).
     """
     promote_formula_orig_text(document)
+    assign_numbered_heading_levels(document)
     from docling_core.transforms.chunker.hybrid_chunker import HybridChunker
     from docling_core.transforms.chunker.tokenizer.huggingface import HuggingFaceTokenizer
     from transformers import AutoTokenizer

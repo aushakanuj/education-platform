@@ -4,8 +4,10 @@ from __future__ import annotations
 
 import base64
 import io
+import json
 import logging
-from collections.abc import Callable
+import re
+from collections.abc import Callable, Sequence
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -42,6 +44,7 @@ from education_platform.modules.rag.chunking import (
     TextChunk,
     _is_blank_or_undecoded_formula,
     _is_formula_item,
+    _is_section_header,
     chunk_docling_document,
 )
 from education_platform.modules.rag.contracts import IngestJobClaim
@@ -61,10 +64,28 @@ logger = logging.getLogger(__name__)
 ParsePdfFn = Callable[[Path], list[TextChunk]]
 
 _CODEFORMULA_MPS_PATCHED = False
-FORMULA_VISION_PROMPT = (
-    "Return one LaTeX expression only for the mathematical formula in this image. "
-    "Do not wrap it in $ or $$ fences. Do not add any prose."
+FORMULA_VISION_BATCH_SIZE = 8
+FORMULA_VISION_BATCH_PROMPT = (
+    "Each image is one mathematical formula whose PDF text layer was empty. "
+    "Return a JSON array of LaTeX strings, one per image, in the same order. "
+    "Do not wrap expressions in $ or $$ fences. Do not add any prose."
 )
+PICTURE_VISION_BATCH_PROMPT = (
+    "Each image is one textbook figure. "
+    "Return a JSON array of strings, one per image, in the same order. "
+    "If the image is algebra, return its LaTeX. "
+    "If the image is a geometric figure, return an empty string. "
+    "Do not wrap expressions in $ or $$ fences. Do not add any prose."
+)
+_MISTAKE_SECTION = "6.3 Mind the Mistake, Mend the Mistake"
+_METHOD_HEADING = re.compile(r"^Method \d+$")
+_CALLOUT_WORD = re.compile(r"\bIncrease\b")
+_SPLIT_POWER = re.compile(r"(?:[A-Za-z]|\d+|\([^)]+\))\s+\d+")
+
+
+def cuda_is_available() -> bool:
+    """True when PyTorch can run on an NVIDIA GPU."""
+    return bool(torch.cuda.is_available())
 
 
 def mps_is_available() -> bool:
@@ -73,8 +94,15 @@ def mps_is_available() -> bool:
 
 
 def docling_accelerator_device() -> str:
-    """Docling ``AcceleratorOptions.device``: MPS on Apple Silicon, else CPU."""
-    return "mps" if mps_is_available() else "cpu"
+    """Docling layout device: CUDA, then MPS, then CPU.
+
+    MPS must not win while CUDA is present. Layout on CPU is the ingest spike.
+    """
+    if cuda_is_available():
+        return "cuda"
+    if mps_is_available():
+        return "mps"
+    return "cpu"
 
 
 def _allow_mps_on_codeformula_transformers() -> None:
@@ -111,12 +139,15 @@ def _allow_mps_on_codeformula_transformers() -> None:
 
 
 def apply_formula_pipeline_options(options: Any) -> Any:
-    """Keep table structure and page images; never load local CodeFormula.
+    """Keep page images for formula crops. Never load local CodeFormula.
 
-    ``do_formula_enrichment`` would download and run CodeFormulaV2 (tens of
-    minutes on CPU/MPS). Instead we keep rendered page images so
-    ``FormulaItem.get_image`` can crop after convert and OpenRouter vision can
-    fill LaTeX. TableFormer stays on so policy tables survive as markdown.
+    ``do_formula_enrichment`` would download CodeFormulaV2 and was slower than
+    the vision loop on CPU. Page images exist so ``FormulaItem.get_image`` can
+    crop formulas whose PDF text layer is empty or damaged, and selected
+    pictures; ``enrich_formulas_with_openrouter`` writes that LaTeX onto the
+    item before chunking. A clean formula text layer skips vision and is copied
+    into the chunk as math. TableFormer stays on so policy tables survive as
+    markdown.
     """
     options.do_formula_enrichment = False
     options.generate_page_images = True
@@ -156,19 +187,131 @@ def _latex_from_vision_response(raw: str) -> str:
     return cleaned
 
 
-def _formula_vision_messages(image_png_base64: str) -> list[dict[str, Any]]:
-    return [
-        {
-            "role": "user",
-            "content": [
-                {"type": "text", "text": FORMULA_VISION_PROMPT},
-                {
-                    "type": "image_url",
-                    "image_url": {"url": f"data:image/png;base64,{image_png_base64}"},
-                },
-            ],
-        }
-    ]
+def _formula_text_layer(item: Any) -> str:
+    return str(getattr(item, "orig", "") or "").strip()
+
+
+def _formula_layer_is_damaged(orig: str) -> bool:
+    """True when the PDF text layer is a callout or a power split off its base."""
+    return _CALLOUT_WORD.search(orig) is not None or _SPLIT_POWER.search(orig) is not None
+
+
+def _picture_heading_needs_vision(heading: str) -> bool:
+    return heading == _MISTAKE_SECTION or _METHOD_HEADING.fullmatch(heading) is not None
+
+
+def _is_picture_item(item: Any) -> bool:
+    if type(item).__name__ == "PictureItem":
+        return True
+    label = getattr(item, "label", None)
+    if label is None:
+        return False
+    raw = getattr(label, "value", label)
+    return str(raw).lower() == "picture"
+
+
+def _replace_picture_with_formula(document: Any, picture: Any, latex: str) -> None:
+    document.insert_formula(picture, latex)
+    document.delete_items(node_items=[picture])
+
+
+def _formula_vision_batch_messages(
+    images_png_base64: Sequence[str],
+    *,
+    prompt: str,
+) -> list[dict[str, Any]]:
+    content: list[dict[str, Any]] = [{"type": "text", "text": prompt}]
+    for encoded in images_png_base64:
+        content.append(
+            {
+                "type": "image_url",
+                "image_url": {"url": f"data:image/png;base64,{encoded}"},
+            }
+        )
+    return [{"role": "user", "content": content}]
+
+
+def _latex_list_from_vision_response(raw: str, *, expected: int) -> list[str]:
+    cleaned = raw.strip()
+    if cleaned.startswith("```"):
+        cleaned = cleaned.strip("`")
+        if cleaned.lower().startswith("json"):
+            cleaned = cleaned[4:]
+        elif cleaned.lower().startswith("latex"):
+            cleaned = cleaned[5:]
+        cleaned = cleaned.strip()
+    parsed: object
+    try:
+        parsed = json.loads(cleaned)
+    except json.JSONDecodeError:
+        parsed = None
+    if isinstance(parsed, list):
+        values = [_latex_from_vision_response(str(item)) for item in parsed]
+        if len(values) < expected:
+            values.extend([""] * (expected - len(values)))
+        return values[:expected]
+    if expected == 1:
+        return [_latex_from_vision_response(cleaned)]
+    return [""] * expected
+
+
+def _store_formula_latex(item: Any, latex: str) -> None:
+    item.text = latex
+
+
+def _run_vision_batches(
+    document: Any,
+    pending: Sequence[Any],
+    *,
+    settings: Settings,
+    prompt: str,
+    store: Callable[[Any, str], None],
+) -> tuple[int, int]:
+    """Crop ``pending`` items and store returned LaTeX. Never raises."""
+    enriched = 0
+    skipped = 0
+    for start in range(0, len(pending), FORMULA_VISION_BATCH_SIZE):
+        batch = pending[start : start + FORMULA_VISION_BATCH_SIZE]
+        encoded_batch: list[str] = []
+        items: list[Any] = []
+        for item in batch:
+            try:
+                encoded = _png_base64(item.get_image(document))
+            except Exception:
+                logger.exception("OpenRouter vision crop failed; keeping the item")
+                skipped += 1
+                continue
+            if not encoded:
+                skipped += 1
+                continue
+            encoded_batch.append(encoded)
+            items.append(item)
+        if not encoded_batch:
+            continue
+        try:
+            latexes = _latex_list_from_vision_response(
+                chat_completion_vision_sync(
+                    _formula_vision_batch_messages(encoded_batch, prompt=prompt),
+                    settings=settings,
+                ),
+                expected=len(encoded_batch),
+            )
+        except Exception:
+            logger.exception("OpenRouter vision failed; keeping the item")
+            skipped += len(items)
+            continue
+        for item, latex in zip(items, latexes, strict=True):
+            if not latex or latex == FORMULA_NOT_DECODED:
+                skipped += 1
+                continue
+            try:
+                store(item, latex)
+            except Exception:
+                logger.exception("OpenRouter vision result was not stored; keeping the item")
+                skipped += 1
+                continue
+            enriched += 1
+    return enriched, skipped
 
 
 def enrich_formulas_with_openrouter(
@@ -176,10 +319,21 @@ def enrich_formulas_with_openrouter(
     *,
     settings: Settings | None = None,
 ) -> None:
-    """Fill empty / undecoded FormulaItem.text with OpenRouter vision LaTeX.
+    """Write LaTeX onto empty or damaged formulas, and onto selected pictures.
 
-    Missing key, failed crops, and API errors leave orig in place. Ingest must
-    not fail the PDF.
+    ``parse_pdf_with_docling`` calls this before chunking. A clean text layer
+    such as ``x + 2 = 5`` is left alone and chunking copies it. An empty layer,
+    a callout such as ``Increase``, or a split power such as ``a 2`` is cropped
+    and sent to OpenRouter.
+
+    Pictures whose current section heading is ``Method N`` or
+    ``6.3 Mind the Mistake, Mend the Mistake`` are sent with a prompt that
+    returns LaTeX for algebra and an empty string for a geometric figure.
+    An empty result leaves the picture, so chunking keeps the diagram
+    placeholder. Other pictures are not sent.
+
+    A missing key, a failed crop, or an API error leaves the item in place
+    and does not fail the PDF.
     """
     cfg = settings or get_settings()
     if not cfg.openrouter_configured:
@@ -187,36 +341,49 @@ def enrich_formulas_with_openrouter(
     iterate = getattr(document, "iterate_items", None)
     if iterate is None:
         return
-    enriched = 0
+    pending: list[Any] = []
+    pictures: list[Any] = []
     skipped = 0
+    current_heading = ""
     for item, _level in iterate():
-        if not _is_formula_item(item):
+        if _is_section_header(item):
+            current_heading = str(getattr(item, "text", "") or "").strip()
             continue
-        text = str(getattr(item, "text", "") or "")
-        if not _is_blank_or_undecoded_formula(text):
-            continue
-        try:
-            crop = item.get_image(document)
-            encoded = _png_base64(crop)
-            if not encoded:
+        if _is_formula_item(item):
+            text = str(getattr(item, "text", "") or "")
+            if not _is_blank_or_undecoded_formula(text):
+                continue
+            layer = _formula_text_layer(item)
+            if not _is_blank_or_undecoded_formula(layer) and not _formula_layer_is_damaged(layer):
                 skipped += 1
                 continue
-            latex = _latex_from_vision_response(
-                chat_completion_vision_sync(
-                    _formula_vision_messages(encoded),
-                    settings=cfg,
-                )
-            )
-            if not latex or latex == FORMULA_NOT_DECODED:
-                skipped += 1
-                continue
-            item.text = latex
-            enriched += 1
-        except Exception:
-            logger.exception("OpenRouter formula vision failed; keeping orig")
-            skipped += 1
+            pending.append(item)
             continue
-    logger.info("OpenRouter formula vision: enriched=%s skipped=%s", enriched, skipped)
+        if _is_picture_item(item) and _picture_heading_needs_vision(current_heading):
+            pictures.append(item)
+
+    def store_picture_latex(picture: Any, latex: str) -> None:
+        _replace_picture_with_formula(document, picture, latex)
+
+    enriched, formula_skipped = _run_vision_batches(
+        document,
+        pending,
+        settings=cfg,
+        prompt=FORMULA_VISION_BATCH_PROMPT,
+        store=_store_formula_latex,
+    )
+    picture_enriched, picture_skipped = _run_vision_batches(
+        document,
+        pictures,
+        settings=cfg,
+        prompt=PICTURE_VISION_BATCH_PROMPT,
+        store=store_picture_latex,
+    )
+    logger.info(
+        "OpenRouter formula vision: enriched=%s skipped=%s",
+        enriched + picture_enriched,
+        skipped + formula_skipped + picture_skipped,
+    )
 
 
 def convert_pdf_with_docling(path: Path) -> Any:
@@ -227,9 +394,10 @@ def convert_pdf_with_docling(path: Path) -> Any:
 
     pipeline_options = apply_formula_pipeline_options(PdfPipelineOptions())
     logger.info(
-        "Docling convert accelerator_options.device=%s mps_available=%s "
+        "Docling convert accelerator_options.device=%s cuda_available=%s mps_available=%s "
         "do_formula_enrichment=%s generate_page_images=%s do_table_structure=%s",
         pipeline_options.accelerator_options.device,
+        cuda_is_available(),
         mps_is_available(),
         pipeline_options.do_formula_enrichment,
         pipeline_options.generate_page_images,
@@ -239,14 +407,13 @@ def convert_pdf_with_docling(path: Path) -> Any:
         format_options={InputFormat.PDF: PdfFormatOption(pipeline_options=pipeline_options)}
     )
     result = converter.convert(str(path))
-    document = result.document
-    enrich_formulas_with_openrouter(document)
-    return document
+    return result.document
 
 
 def parse_pdf_with_docling(path: Path) -> list[TextChunk]:
-    """Parse a PDF with Docling and chunk via HybridChunker."""
+    """Parse a PDF, fill scan formulas, then chunk so the LaTeX is indexed."""
     document = convert_pdf_with_docling(path)
+    enrich_formulas_with_openrouter(document)
     return chunk_docling_document(document)
 
 
@@ -297,6 +464,27 @@ def _fail_source_ingest(
     _mark_source_failed(session, version, reason)
     fail_run_for_intake(session, version.id, reason)
     _fail_job(session, job, reason)
+
+
+def fail_exhausted_ingest_job(session: Session, job_id: UUID) -> None:
+    """Fail a job the worker lost, including any run still waiting on this intake."""
+    job = session.get(IngestJob, job_id)
+    if job is None:
+        return
+    reason = f"Worker lost this job {job.attempts} times"
+    if job.source_material_version_id is not None:
+        version = session.get(SourceMaterialVersion, job.source_material_version_id)
+        if version is not None:
+            _fail_source_ingest(session, job, version, reason)
+            return
+    if job.knowledge_document_version_id is not None:
+        version_k = session.get(KnowledgeDocumentVersion, job.knowledge_document_version_id)
+        if version_k is not None:
+            _mark_knowledge_failed(session, version_k, reason)
+    job.status = IngestJobStatus.FAILED
+    job.error = reason[:2000]
+    _wake_ingest(session, job)
+    session.commit()
 
 
 def _institution_for_material(session: Session, material: SourceMaterial) -> UUID | None:

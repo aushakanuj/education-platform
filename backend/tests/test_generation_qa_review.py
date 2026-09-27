@@ -388,12 +388,13 @@ def test_qa_discard_and_publish_still_work(
 
     publish_id = _accept_two_node_run(client, admin_headers, seeded_topic_id, seeded_db)
     process_generation_job_sync(
-        _job(seeded_db, publish_id, GenerationJobKind.ITEMS).id,
-        write_items=_items_from_request,
-    )
-    process_generation_job_sync(
         _job(seeded_db, publish_id, GenerationJobKind.LESSON).id,
         write_lesson=_section_from_request,
+    )
+    seeded_db.expire_all()
+    process_generation_job_sync(
+        _job(seeded_db, publish_id, GenerationJobKind.ITEMS).id,
+        write_items=_items_from_request,
     )
     published = client.post(
         f"/api/v1/teaching/generation-runs/{publish_id}/publish",

@@ -7,8 +7,8 @@ import type { GenerationQaItem, GenerationRun, LessonMaterial, LessonSlide } fro
 import { Crumbs, type Crumb } from "../../components/Crumbs";
 import { LessonSlideFrame } from "../../components/LessonSlideFrame";
 import { PushButton } from "../../components/PushButton";
-import { SubtopicCurriculumGenerateList } from "../../components/SubtopicCurriculumGenerate";
 import { TopicGenerationUpload } from "../../components/TopicGenerationUpload";
+import { TopicItemStats } from "../../components/TopicItemStats";
 import { findSummarySlide, slidesForLessonView } from "../../lib/lessonSlides";
 import { useAdminDirectory } from "../../lib/useAdminDirectory";
 
@@ -269,6 +269,7 @@ function AdminPublishedMaterial({
         </section>
         <aside className="lesson-layout__aside" aria-label="Published quiz">
           <AdminPublishedQuiz items={quizItems} loading={quizLoading} />
+          <TopicItemStats topicId={topicId} />
         </aside>
       </div>
     </div>
@@ -454,12 +455,6 @@ export function AdminMaterialsTopicDetailPage() {
                 onPublished={() => {
                   void reload();
                   openPublished("overview");
-                }}
-              />
-              <SubtopicCurriculumGenerateList
-                subtopics={topic.subtopics}
-                onSucceeded={() => {
-                  void reload();
                 }}
               />
             </div>

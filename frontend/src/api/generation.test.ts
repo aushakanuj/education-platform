@@ -10,24 +10,21 @@ import {
   askGenerationAssistant,
   closeReviewRound,
   discardGenerationRun,
-  enqueueCurriculumGeneration,
-  getCurriculumGenerationJob,
   getGenerationReview,
   getGenerationRun,
-  isInFlightCurriculumGenerationStatus,
   isInFlightGenerationPhase,
-  isTerminalCurriculumGenerationStatus,
   isTerminalGenerationPhase,
   listTopicGenerationRuns,
-  pollCurriculumGenerationJob,
+  fetchTopicItemStats,
   publishGenerationRun,
   rejectGenerationItems,
+  deleteUnpublishedTopic,
   retryGenerationRun,
   submitReviewDecision,
   submitSubjectGenerationRun,
   submitTopicGenerationRun,
 } from "./generation";
-import type { CurriculumGenerationJob, GenerationRun } from "./types";
+import type { GenerationRun } from "./types";
 
 function runFixture(over: Partial<GenerationRun> = {}): GenerationRun {
   return {
@@ -43,22 +40,6 @@ function runFixture(over: Partial<GenerationRun> = {}): GenerationRun {
     draft_lesson_markdown: null,
     jobs: [],
     created_at: "2026-09-09T00:00:00Z",
-    ...over,
-  };
-}
-
-function curriculumJob(
-  over: Partial<CurriculumGenerationJob> = {},
-): CurriculumGenerationJob {
-  return {
-    id: "job-1",
-    subtopic_id: "st-1",
-    status: "queued",
-    round_count: 0,
-    reviewer_notes: null,
-    error: null,
-    source_material_version_id: null,
-    quiz_version_id: null,
     ...over,
   };
 }
@@ -240,6 +221,12 @@ describe("generation helpers", () => {
     });
   });
 
+  it("deletes an unpublished topic", async () => {
+    vi.mocked(apiRequest).mockResolvedValueOnce(undefined);
+    await deleteUnpublishedTopic("topic-2");
+    expect(apiRequest).toHaveBeenCalledWith("/admin/topics/topic-2", { method: "DELETE" });
+  });
+
   it("posts publish and reject-items on the teaching run paths", async () => {
     vi.mocked(apiRequest)
       .mockResolvedValueOnce({
@@ -265,65 +252,16 @@ describe("generation helpers", () => {
     });
   });
 
-  it("treats queued and running curriculum jobs as in flight", () => {
-    expect(isInFlightCurriculumGenerationStatus("queued")).toBe(true);
-    expect(isInFlightCurriculumGenerationStatus("running")).toBe(true);
-    expect(isTerminalCurriculumGenerationStatus("succeeded")).toBe(true);
-    expect(isTerminalCurriculumGenerationStatus("failed")).toBe(true);
-    expect(isTerminalCurriculumGenerationStatus("queued")).toBe(false);
-    expect(isInFlightCurriculumGenerationStatus("ready" as never)).toBe(false);
-  });
+  it("loads topic item stats from the admin topic path", async () => {
+    const payload = {
+      topic_id: "topic-1",
+      quiz_version_id: "quiz-1",
+      minimum_n: 20,
+      items: [],
+    };
+    vi.mocked(apiRequest).mockResolvedValue(payload);
 
-  it("posts generate-curriculum on the admin subtopic path", async () => {
-    vi.mocked(apiRequest).mockResolvedValue(curriculumJob());
-
-    const job = await enqueueCurriculumGeneration("st-1");
-
-    expect(job.id).toBe("job-1");
-    expect(apiRequest).toHaveBeenCalledTimes(1);
-    const [path, options] = vi.mocked(apiRequest).mock.calls[0]!;
-    expect(path).toBe("/admin/subtopics/st-1/generate-curriculum");
-    expect(options?.method).toBe("POST");
-    expect(options?.body).toBeUndefined();
-  });
-
-  it("loads a curriculum generation job by id", async () => {
-    vi.mocked(apiRequest).mockResolvedValue(
-      curriculumJob({ status: "running", round_count: 2, reviewer_notes: "Add a worked example." }),
-    );
-
-    const job = await getCurriculumGenerationJob("job-1");
-
-    expect(job.round_count).toBe(2);
-    expect(job.reviewer_notes).toBe("Add a worked example.");
-    expect(apiRequest).toHaveBeenCalledWith("/admin/generation-jobs/job-1");
-  });
-
-  it("polls a curriculum job until it succeeds", async () => {
-    const updates: string[] = [];
-    vi.mocked(apiRequest)
-      .mockResolvedValueOnce(curriculumJob({ status: "queued" }))
-      .mockResolvedValueOnce(curriculumJob({ status: "running", round_count: 1 }))
-      .mockResolvedValueOnce(
-        curriculumJob({
-          status: "succeeded",
-          round_count: 2,
-          reviewer_notes: "Approved.",
-          source_material_version_id: "mv-1",
-          quiz_version_id: "qv-1",
-        }),
-      );
-
-    const settled = await pollCurriculumGenerationJob("job-1", {
-      intervalMs: 0,
-      onUpdate: (job) => updates.push(job.status),
-    });
-
-    expect(settled.status).toBe("succeeded");
-    expect(settled.quiz_version_id).toBe("qv-1");
-    expect(updates).toEqual(["queued", "running", "succeeded"]);
-    expect(apiRequest).toHaveBeenCalledTimes(3);
-    expect(apiRequest).toHaveBeenNthCalledWith(1, "/admin/generation-jobs/job-1");
-    expect(apiRequest).toHaveBeenNthCalledWith(3, "/admin/generation-jobs/job-1");
+    await expect(fetchTopicItemStats("topic 1")).resolves.toEqual(payload);
+    expect(apiRequest).toHaveBeenCalledWith("/admin/topics/topic%201/item-stats");
   });
 });

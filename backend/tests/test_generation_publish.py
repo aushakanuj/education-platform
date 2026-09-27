@@ -98,12 +98,13 @@ def _reach_qa_review(
     _silence_embed(monkeypatch, tmp_path)
     run_id = _accept_two_node_run(client, admin_headers, seeded_topic_id, seeded_db)
     process_generation_job_sync(
-        _job(seeded_db, run_id, GenerationJobKind.ITEMS).id,
-        write_items=_items_from_request,
-    )
-    process_generation_job_sync(
         _job(seeded_db, run_id, GenerationJobKind.LESSON).id,
         write_lesson=_section_from_request,
+    )
+    seeded_db.expire_all()
+    process_generation_job_sync(
+        _job(seeded_db, run_id, GenerationJobKind.ITEMS).id,
+        write_items=_items_from_request,
     )
     seeded_db.expire_all()
     run = seeded_db.get(ContentGenerationRun, run_id)
@@ -130,8 +131,8 @@ def test_publish_requires_qa_review_and_both_drafts(
     assert too_early.status_code == 409, too_early.text
 
     process_generation_job_sync(
-        _job(seeded_db, run_id, GenerationJobKind.ITEMS).id,
-        write_items=_items_from_request,
+        _job(seeded_db, run_id, GenerationJobKind.LESSON).id,
+        write_lesson=_section_from_request,
     )
     still_generating = client.post(
         f"/api/v1/teaching/generation-runs/{run_id}/publish",

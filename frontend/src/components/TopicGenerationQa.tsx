@@ -45,6 +45,13 @@ function misconceptionText(item: GenerationQaItem): string {
   return labels.join(" · ");
 }
 
+function disputedBadge(item: GenerationQaItem): string | null {
+  if (item.key_disputed !== true || item.blind_answer == null || item.blind_answer === "") {
+    return null;
+  }
+  return `Key disputed - solver chose ${item.blind_answer}`;
+}
+
 function optionEntries(options: Record<string, string>): [string, string][] {
   return Object.entries(options).sort(([left], [right]) => left.localeCompare(right));
 }
@@ -246,6 +253,11 @@ export function TopicGenerationQa({
                         <td>{item.sequence}</td>
                         <td>
                           <p className="qa-review__prompt">{item.prompt}</p>
+                          {disputedBadge(item) ? (
+                            <p className="qa-review__disputed">
+                              <span className="badge badge--warn">{disputedBadge(item)}</span>
+                            </p>
+                          ) : null}
                         </td>
                         <td>
                           <span className="qa-review__bloom">{bloomLabel(item.bloom)}</span>

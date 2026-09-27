@@ -4,8 +4,6 @@ import type {
   AcceptedGenerationRun,
   CloseRoundCommand,
   CloseRoundResult,
-  CurriculumGenerationJob,
-  CurriculumGenerationStatus,
   GenerationAssistantReply,
   GenerationAssistantTurn,
   GenerationRun,
@@ -14,9 +12,8 @@ import type {
   RunPhase,
   TeacherDecision,
   TeacherDecisionCommand,
+  TopicItemStats,
 } from "./types";
-
-export const CURRICULUM_GENERATION_POLL_MS = 1500;
 
 export function isInFlightGenerationPhase(phase: RunPhase): boolean {
   switch (phase) {
@@ -36,85 +33,6 @@ export function isInFlightGenerationPhase(phase: RunPhase): boolean {
       return false;
     }
   }
-}
-
-export function isInFlightCurriculumGenerationStatus(
-  status: CurriculumGenerationStatus,
-): boolean {
-  switch (status) {
-    case "queued":
-    case "running":
-      return true;
-    case "succeeded":
-    case "failed":
-      return false;
-    default: {
-      const _never: never = status;
-      void _never;
-      return false;
-    }
-  }
-}
-
-export function isTerminalCurriculumGenerationStatus(
-  status: CurriculumGenerationStatus,
-): boolean {
-  return !isInFlightCurriculumGenerationStatus(status);
-}
-
-function waitForPoll(ms: number, signal?: AbortSignal): Promise<void> {
-  return new Promise((resolve, reject) => {
-    if (signal?.aborted) {
-      reject(new DOMException("Aborted", "AbortError"));
-      return;
-    }
-    const onAbort = () => {
-      window.clearTimeout(timer);
-      reject(new DOMException("Aborted", "AbortError"));
-    };
-    const timer = window.setTimeout(() => {
-      signal?.removeEventListener("abort", onAbort);
-      resolve();
-    }, ms);
-    signal?.addEventListener("abort", onAbort, { once: true });
-  });
-}
-
-export async function enqueueCurriculumGeneration(
-  subtopicId: string,
-): Promise<CurriculumGenerationJob> {
-  return apiRequest<CurriculumGenerationJob>(
-    `/admin/subtopics/${encodeURIComponent(subtopicId)}/generate-curriculum`,
-    { method: "POST" },
-  );
-}
-
-export async function getCurriculumGenerationJob(
-  jobId: string,
-): Promise<CurriculumGenerationJob> {
-  return apiRequest<CurriculumGenerationJob>(
-    `/admin/generation-jobs/${encodeURIComponent(jobId)}`,
-  );
-}
-
-export async function pollCurriculumGenerationJob(
-  jobId: string,
-  options: {
-    signal?: AbortSignal;
-    intervalMs?: number;
-    onUpdate?: (job: CurriculumGenerationJob) => void;
-  } = {},
-): Promise<CurriculumGenerationJob> {
-  const intervalMs = options.intervalMs ?? CURRICULUM_GENERATION_POLL_MS;
-  while (!options.signal?.aborted) {
-    const job = await getCurriculumGenerationJob(jobId);
-    options.onUpdate?.(job);
-    if (isTerminalCurriculumGenerationStatus(job.status)) {
-      return job;
-    }
-    await waitForPoll(intervalMs, options.signal);
-  }
-  throw new DOMException("Aborted", "AbortError");
 }
 
 export function isTerminalGenerationPhase(phase: RunPhase): boolean {
@@ -235,6 +153,12 @@ export async function discardGenerationRun(runId: string): Promise<GenerationRun
   );
 }
 
+export async function deleteUnpublishedTopic(topicId: string): Promise<void> {
+  await apiRequest<void>(`/admin/topics/${encodeURIComponent(topicId)}`, {
+    method: "DELETE",
+  });
+}
+
 export async function retryGenerationRun(runId: string): Promise<GenerationRun> {
   return apiRequest<GenerationRun>(
     `/teaching/generation-runs/${encodeURIComponent(runId)}/retry`,
@@ -249,6 +173,12 @@ export async function rejectGenerationItems(
   return apiRequest<GenerationRun>(
     `/teaching/generation-runs/${encodeURIComponent(runId)}/reject-items`,
     { method: "POST", body: { question_ids: questionIds } },
+  );
+}
+
+export async function fetchTopicItemStats(topicId: string): Promise<TopicItemStats> {
+  return apiRequest<TopicItemStats>(
+    `/admin/topics/${encodeURIComponent(topicId)}/item-stats`,
   );
 }
 

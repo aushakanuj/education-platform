@@ -216,6 +216,74 @@ type OutlineReviewBoardProps = {
   onDiscard: () => void;
 };
 
+type OutlineTreeEntry = {
+  node: OutlineNodeSnapshot;
+  children: OutlineTreeEntry[];
+};
+
+function outlineTree(nodes: OutlineNodeSnapshot[]): OutlineTreeEntry[] {
+  const byParent = new Map<string | null, OutlineNodeSnapshot[]>();
+  for (const node of nodes) {
+    const siblings = byParent.get(node.parent_node_key) ?? [];
+    siblings.push(node);
+    byParent.set(node.parent_node_key, siblings);
+  }
+  const build = (parentKey: string | null): OutlineTreeEntry[] =>
+    (byParent.get(parentKey) ?? [])
+      .sort((left, right) => left.sequence - right.sequence)
+      .map((node) => ({ node, children: build(node.node_key) }));
+  return build(null);
+}
+
+function questionCount(entry: OutlineTreeEntry): number {
+  if (entry.children.length === 0) return entry.node.quota;
+  return entry.children.reduce((sum, child) => sum + questionCount(child), 0);
+}
+
+function OutlineTreeNode({
+  entry,
+  workspace,
+}: {
+  entry: OutlineTreeEntry;
+  workspace: ReviewWorkspace;
+}) {
+  const { node, children } = entry;
+  const threads = requestsForNode(workspace, node.node_key);
+  const questions = questionCount(entry);
+  return (
+    <li className="outline-review__node">
+      <div className="outline-review__node-head">
+        <p className="outline-review__sequence">
+          Sequence {node.sequence}: {node.title}
+        </p>
+      </div>
+      <p className="muted">
+        {node.token_mass} tokens · {questions} {questions === 1 ? "question" : "questions"}
+      </p>
+      {node.proposed_outcomes.length > 0 ? (
+        <ul className="outline-review__outcomes">
+          {node.proposed_outcomes.map((outcome) => (
+            <li key={outcome}>{outcome}</li>
+          ))}
+        </ul>
+      ) : null}
+      {threads.map((thread) => (
+        <p key={thread.change_request.id} className="outline-review__request">
+          {thread.change_request.author.display_name} · {kindLabel(thread.change_request.kind)} ·{" "}
+          {fieldLabel(thread.change_request.field)}: {thread.change_request.comment}
+        </p>
+      ))}
+      {children.length > 0 ? (
+        <ul className="outline-review__children">
+          {children.map((child) => (
+            <OutlineTreeNode key={child.node.node_key} entry={child} workspace={workspace} />
+          ))}
+        </ul>
+      ) : null}
+    </li>
+  );
+}
+
 function OutlineReviewBoard({
   workspace,
   revision,
@@ -284,31 +352,9 @@ function OutlineReviewBoard({
         <p className="muted">No assigned teachers on this offering yet. An administrator can still close.</p>
       )}
       <ul className="outline-review__nodes">
-        {nodes.map((node) => {
-          const threads = requestsForNode(workspace, node.node_key);
-          return (
-            <li key={node.node_key} className="outline-review__node">
-              <div className="outline-review__node-head">
-                <p className="outline-review__sequence">
-                  Sequence {node.sequence}: {node.title}
-                </p>
-              </div>
-              <p className="muted">Slug {node.slug} · Weight {node.weight}</p>
-              <ul className="outline-review__outcomes">
-                {node.proposed_outcomes.map((outcome) => (
-                  <li key={outcome}>{outcome}</li>
-                ))}
-              </ul>
-              {threads.map((thread) => (
-                <p key={thread.change_request.id} className="outline-review__request">
-                  {thread.change_request.author.display_name} ·{" "}
-                  {kindLabel(thread.change_request.kind)} · {fieldLabel(thread.change_request.field)}:{" "}
-                  {thread.change_request.comment}
-                </p>
-              ))}
-            </li>
-          );
-        })}
+        {outlineTree(nodes).map((entry) => (
+          <OutlineTreeNode key={entry.node.node_key} entry={entry} workspace={workspace} />
+        ))}
       </ul>
       {canDecide ? (
         <div className="outline-review__composer">
@@ -326,7 +372,7 @@ function OutlineReviewBoard({
             >
               {nodes.map((node) => (
                 <option key={node.node_key} value={node.node_key}>
-                  {node.title}
+                  {node.parent_node_key === null ? node.title : `— ${node.title}`}
                 </option>
               ))}
             </select>

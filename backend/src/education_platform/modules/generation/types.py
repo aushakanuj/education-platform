@@ -227,15 +227,17 @@ class QaItem:
     sequence: int
     bloom: BloomLevel | None = None
     misconception_labels: tuple[str, ...] = ()
+    blind_solve: dict[str, object] | None = None
 
 
 @dataclass(frozen=True, slots=True)
 class HeadingCluster:
-    """Pure input to outline: distinct Docling headings + token mass."""
+    """Pure input to outline: a heading, its token mass, and its parent heading."""
 
     heading: str
     token_mass: int
     sample_texts: tuple[str, ...]
+    parent_heading: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -248,6 +250,8 @@ class ProposedOutlineNode:
     prerequisite_score: Decimal
     centrality: Decimal
     proposed_outcomes: tuple[str, ...]
+    source_headings: tuple[str, ...] = ()
+    parent_title: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -271,6 +275,10 @@ PATCH_OUTLINE_GONE = (
     "revision; an administrator closes the round."
 )
 TEACHER_UPLOAD_GONE = "Teachers do not upload source PDFs. An administrator submits the topic PDF."
+SUBTOPIC_GENERATION_GONE = (
+    "Subtopic-level one-shot generation is retired. An administrator submits the topic PDF "
+    "via /admin/topics/{topic_id}/generation-runs for full outline and QA review."
+)
 
 
 class ReviewStage(StrEnum):

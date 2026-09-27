@@ -115,6 +115,7 @@ function workspace(over: Partial<ReviewWorkspace> = {}): ReviewWorkspace {
             force_create: false,
             proposed_outcomes: ["Add like fractions"],
             sequence: 1,
+            quota: 12,
           },
         ],
       },

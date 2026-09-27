@@ -9,6 +9,7 @@ from uuid import UUID, uuid4
 
 import pytest
 from fastapi.testclient import TestClient
+from google.adk.sessions.state import State
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
@@ -44,6 +45,7 @@ from education_platform.modules.generation.adk import (
     AdkRunRequest,
     AdkRunResult,
     BankItem,
+    ItemNodeSpec,
     extract_json_object,
     item_developer_instruction,
     item_reviewer_instruction,
@@ -59,8 +61,10 @@ from education_platform.modules.generation.adk_live import (
     build_items_agent,
     build_lesson_agent,
     build_outline_agent,
+    build_single_node_items_agent,
     freeze_lesson_after_loop,
     live_runner_for_job,
+    pipeline_children,
     skip_quiz_unless_lesson_approved,
 )
 from education_platform.modules.generation.adk_tools import check_numeric_answer
@@ -77,9 +81,14 @@ from education_platform.modules.generation.blueprint import (
     check_bank_mix,
 )
 from education_platform.modules.generation.curriculum import persist_gate_error
+from education_platform.modules.generation.curriculum_worker import process_curriculum_job_sync
 from education_platform.modules.generation.lesson_checks import check_lesson_quality
 from education_platform.modules.generation.models import CurriculumGenerationJob
-from education_platform.modules.generation.types import GenerationJobStatus, ReviewStatus
+from education_platform.modules.generation.types import (
+    SUBTOPIC_GENERATION_GONE,
+    GenerationJobStatus,
+    ReviewStatus,
+)
 from education_platform.modules.materials.models import (
     SourceChunk,
     SourceMaterial,
@@ -279,21 +288,32 @@ def _attach_ingested_chunks(session: Session, subtopic_id: UUID, text: str = CHU
     session.commit()
 
 
-def _enqueue(client: TestClient, subtopic_id: UUID) -> dict[str, object]:
-    response = client.post(
-        f"/api/v1/admin/subtopics/{subtopic_id}/generate-curriculum",
-        headers=_admin_headers(client),
+def _admin_user(session: Session) -> User:
+    settings = get_settings()
+    user = session.scalar(select(User).where(User.email == settings.demo_admin_email))
+    assert user is not None
+    return user
+
+
+def _enqueue_job(session: Session, subtopic_id: UUID) -> CurriculumGenerationJob:
+    """Queue a curriculum job in Postgres. HTTP enqueue is retired (410)."""
+    job = CurriculumGenerationJob(
+        subtopic_id=subtopic_id,
+        status=GenerationJobStatus.QUEUED,
+        created_by=_admin_user(session).id,
+        round_count=0,
     )
-    assert response.status_code == 202, response.text
-    body = response.json()
-    assert body["status"] == "queued"
-    assert body["round_count"] == 0
-    assert body["reviewer_notes"] is None
-    assert body["error"] is None
-    assert body["source_material_version_id"] is None
-    assert body["quiz_version_id"] is None
-    assert body["subtopic_id"] == str(subtopic_id)
-    return body
+    session.add(job)
+    session.commit()
+    session.refresh(job)
+    assert job.status is GenerationJobStatus.QUEUED
+    assert job.round_count == 0
+    assert job.reviewer_notes is None
+    assert job.error is None
+    assert job.source_material_version_id is None
+    assert job.quiz_version_id is None
+    assert job.subtopic_id == subtopic_id
+    return job
 
 
 def _job_row(session: Session, job_id: UUID) -> CurriculumGenerationJob:
@@ -327,7 +347,8 @@ def _item_payload(item: BankItem) -> dict[str, object]:
 def test_build_live_adk_graph_without_calling_llm() -> None:
     agent = build_curriculum_agent(model="openrouter/openai/gpt-4o", max_review_rounds=2)
     assert agent.name == "curriculum_pipeline"
-    names = [child.name for child in agent.sub_agents]
+    children = pipeline_children(agent)
+    names = [child.name for child in children]
     assert names == [
         INSTRUCTIONAL_DESIGNER,
         LESSON_REVIEW_LOOP,
@@ -335,10 +356,11 @@ def test_build_live_adk_graph_without_calling_llm() -> None:
         MISCONCEPTION_SIMULATOR,
         ITEMS_PARALLEL,
     ]
-    lesson_loop = agent.sub_agents[1]
-    parallel = agent.sub_agents[4]
+    lesson_loop = children[1]
+    parallel = children[4]
     assert [child.name for child in lesson_loop.sub_agents] == [LESSON_REVIEWER, LESSON_REFINER]
-    node = parallel.sub_agents[0]
+    node_children = pipeline_children(parallel)
+    node = node_children[0]
     assert node.name == "item_node_0"
     assert [child.name for child in node.sub_agents] == [
         f"{ITEM_DEVELOPER}_0",
@@ -357,26 +379,54 @@ def test_build_live_adk_graph_without_calling_llm() -> None:
     assert "exit_loop" in _tool_names(lesson_reviewer)
     assert "check_numeric_answer" in _tool_names(item_reviewer)
     assert "exit_loop" in _tool_names(item_reviewer)
-    assert agent.sub_agents[0].output_key == "lesson_draft"
+    assert children[0].output_key == "lesson_draft"
     assert node.sub_agents[0].output_key == "items_node_0"
 
 
 def test_outline_and_items_graphs_without_calling_llm() -> None:
     outline = build_outline_agent(model="openrouter/openai/gpt-4o", max_review_rounds=2)
-    assert [child.name for child in outline.sub_agents] == ["OutlineWriter", "outline_review_loop"]
+    assert outline.name == "OutlineWriter"
+    assert pipeline_children(outline) == []
     lesson = build_lesson_agent(
         model="openrouter/openai/gpt-4o", max_review_rounds=3, section_count=2
     )
-    assert [child.name for child in lesson.sub_agents] == [
+    assert [child.name for child in pipeline_children(lesson)] == [
         f"{INSTRUCTIONAL_DESIGNER}_0",
         f"{LESSON_REVIEW_LOOP}_0",
         f"{INSTRUCTIONAL_DESIGNER}_1",
         f"{LESSON_REVIEW_LOOP}_1",
         STITCH_AGENT,
     ]
+    bare = build_lesson_agent(
+        model="openrouter/openai/gpt-4o",
+        max_review_rounds=2,
+        section_count=1,
+        include_stitch=False,
+    )
+    assert [child.name for child in pipeline_children(bare)] == [
+        INSTRUCTIONAL_DESIGNER,
+        LESSON_REVIEW_LOOP,
+    ]
+    one_node = build_single_node_items_agent(
+        model="openrouter/openai/gpt-4o",
+        max_review_rounds=2,
+        node_spec=ItemNodeSpec(
+            key="squares",
+            heading="Squares",
+            chunk_texts=("four equal sides",),
+            quota=2,
+            bloom=("remember",),
+        ),
+    )
+    assert [child.name for child in pipeline_children(one_node)] == [
+        f"{ITEM_DEVELOPER}_0",
+        "item_review_loop_0",
+    ]
+    assert MISCONCEPTION_SIMULATOR not in [child.name for child in pipeline_children(one_node)]
     items = build_items_agent(model="openrouter/openai/gpt-4o", max_review_rounds=2, node_count=2)
-    assert [child.name for child in items.sub_agents] == [MISCONCEPTION_SIMULATOR, ITEMS_PARALLEL]
-    assert len(items.sub_agents[1].sub_agents) == 2
+    items_children = pipeline_children(items)
+    assert [child.name for child in items_children] == [MISCONCEPTION_SIMULATOR, ITEMS_PARALLEL]
+    assert len(pipeline_children(items_children[1])) == 2
 
 
 def test_lesson_and_quiz_reviewer_rubrics_are_split() -> None:
@@ -617,6 +667,26 @@ def test_skip_quiz_when_lesson_is_not_approved() -> None:
     assert ctx.state["lesson_review_status"] == "approved"
 
 
+def test_lesson_callbacks_read_adk_state_object() -> None:
+    """Per-heading lesson runs freeze ADK State, which dict() cannot copy."""
+    approved = State(
+        value={
+            "lesson_draft": json.dumps({"lesson_markdown": _detailed_lesson()}),
+            "lesson_review": json.dumps(
+                {"review_status": "approved", "reviewer_notes": "Teachable."}
+            ),
+        },
+        delta={},
+    )
+    freeze_lesson_after_loop(callback_context=SimpleNamespace(state=approved))
+    assert approved["approved_lesson"].strip() == _detailed_lesson().strip()
+    assert approved["lesson_review_status"] == "approved"
+
+    rejected = State(value={"lesson_review_status": "rejected"}, delta={})
+    skipped = skip_quiz_unless_lesson_approved(callback_context=SimpleNamespace(state=rejected))
+    assert skipped is not None
+
+
 def test_existing_seed_quizzes_still_have_ten_items(seeded_db: Session) -> None:
     subtopic = _subtopic(seeded_db)
     quiz = seeded_db.scalar(
@@ -644,11 +714,12 @@ def test_generate_endpoint_admin_only(
     seeded_db: Session,
 ) -> None:
     subtopic = _subtopic(seeded_db)
-    student = client.post(
-        f"/api/v1/admin/subtopics/{subtopic.id}/generate-curriculum",
-        headers=enrolled_student_headers,
-    )
-    assert student.status_code == 403
+    generate_url = f"/api/v1/admin/subtopics/{subtopic.id}/generate-curriculum"
+    job_url = f"/api/v1/admin/generation-jobs/{uuid4()}"
+    student_post = client.post(generate_url, headers=enrolled_student_headers)
+    assert student_post.status_code == 403
+    student_get = client.get(job_url, headers=enrolled_student_headers)
+    assert student_get.status_code == 403
     settings = get_settings()
     teacher = User(
         institution_id=seeded_db.scalar(
@@ -672,29 +743,37 @@ def test_generate_endpoint_admin_only(
         },
     )
     assert login.status_code == 200, login.text
-    teacher_resp = client.post(
-        f"/api/v1/admin/subtopics/{subtopic.id}/generate-curriculum",
-        headers={"Authorization": f"Bearer {login.json()['access_token']}"},
-    )
-    assert teacher_resp.status_code == 403
+    teacher_headers = {"Authorization": f"Bearer {login.json()['access_token']}"}
+    teacher_post = client.post(generate_url, headers=teacher_headers)
+    assert teacher_post.status_code == 403
+    teacher_get = client.get(job_url, headers=teacher_headers)
+    assert teacher_get.status_code == 403
 
 
-def test_get_generation_job_404_for_unknown_id(client: TestClient) -> None:
-    response = client.get(
-        f"/api/v1/admin/generation-jobs/{uuid4()}",
-        headers=_admin_headers(client),
-    )
-    assert response.status_code == 404
-
-
-def test_no_ingested_chunks_fails_without_persist(
+def test_generate_and_get_job_endpoints_are_gone(
     client: TestClient,
     seeded_db: Session,
 ) -> None:
     subtopic = _subtopic(seeded_db)
+    headers = _admin_headers(client)
+    posted = client.post(
+        f"/api/v1/admin/subtopics/{subtopic.id}/generate-curriculum",
+        headers=headers,
+    )
+    assert posted.status_code == 410
+    assert posted.json()["detail"] == SUBTOPIC_GENERATION_GONE
+    fetched = client.get(
+        f"/api/v1/admin/generation-jobs/{uuid4()}",
+        headers=headers,
+    )
+    assert fetched.status_code == 410
+    assert fetched.json()["detail"] == SUBTOPIC_GENERATION_GONE
+
+
+def test_no_ingested_chunks_fails_without_persist(seeded_db: Session) -> None:
+    subtopic = _subtopic(seeded_db)
     before_versions = seeded_db.scalar(select(func.count()).select_from(QuestionVersion))
-    body = _enqueue(client, subtopic.id)
-    job_id = UUID(str(body["id"]))
+    job_id = _enqueue_job(seeded_db, subtopic.id).id
     runner = BoomRunner()
     claimed = poll_once(session=seeded_db, curriculum_runner=runner)
     assert claimed == job_id
@@ -707,23 +786,13 @@ def test_no_ingested_chunks_fails_without_persist(
     assert job.quiz_version_id is None
     after_versions = seeded_db.scalar(select(func.count()).select_from(QuestionVersion))
     assert after_versions == before_versions
-    status = client.get(
-        f"/api/v1/admin/generation-jobs/{job_id}",
-        headers=_admin_headers(client),
-    )
-    assert status.status_code == 200
-    assert status.json()["status"] == "failed"
 
 
-def test_lesson_rejection_does_not_persist(
-    client: TestClient,
-    seeded_db: Session,
-) -> None:
+def test_lesson_rejection_does_not_persist(seeded_db: Session) -> None:
     subtopic = _subtopic(seeded_db)
     _attach_ingested_chunks(seeded_db, subtopic.id)
     before = seeded_db.scalar(select(func.count()).select_from(QuestionVersion))
-    body = _enqueue(client, subtopic.id)
-    job_id = UUID(str(body["id"]))
+    job_id = _enqueue_job(seeded_db, subtopic.id).id
     runner = FakeRunner(
         AdkRunResult(
             review_status=ReviewStatus.REJECTED,
@@ -750,16 +819,12 @@ def test_lesson_rejection_does_not_persist(
     assert seeded_db.scalar(select(func.count()).select_from(QuestionVersion)) == before
 
 
-def test_quiz_rejection_after_lesson_approval_does_not_persist(
-    client: TestClient,
-    seeded_db: Session,
-) -> None:
+def test_quiz_rejection_after_lesson_approval_does_not_persist(seeded_db: Session) -> None:
     subtopic = _subtopic(seeded_db)
     _attach_ingested_chunks(seeded_db, subtopic.id)
     before_questions = seeded_db.scalar(select(func.count()).select_from(QuestionVersion))
     before_materials = seeded_db.scalar(select(func.count()).select_from(SourceMaterialVersion))
-    body = _enqueue(client, subtopic.id)
-    job_id = UUID(str(body["id"]))
+    job_id = _enqueue_job(seeded_db, subtopic.id).id
     runner = FakeRunner(
         AdkRunResult(
             review_status=ReviewStatus.REJECTED,
@@ -790,10 +855,7 @@ def test_quiz_rejection_after_lesson_approval_does_not_persist(
     )
 
 
-def test_quiz_generation_uses_frozen_lesson(
-    client: TestClient,
-    seeded_db: Session,
-) -> None:
+def test_quiz_generation_uses_frozen_lesson(seeded_db: Session) -> None:
     frozen = _detailed_lesson()
     result = result_from_state(
         {
@@ -815,8 +877,7 @@ def test_quiz_generation_uses_frozen_lesson(
     assert "Hacked" not in result.lesson_markdown
     subtopic = _subtopic(seeded_db)
     _attach_ingested_chunks(seeded_db, subtopic.id)
-    body = _enqueue(client, subtopic.id)
-    job_id = UUID(str(body["id"]))
+    job_id = _enqueue_job(seeded_db, subtopic.id).id
     runner = FakeRunner(result)
     poll_once(session=seeded_db, curriculum_runner=runner)
     job = _job_row(seeded_db, job_id)
@@ -827,15 +888,11 @@ def test_quiz_generation_uses_frozen_lesson(
     assert "Hacked" not in (material.content_markdown or "")
 
 
-def test_approval_with_mix_fail_does_not_persist(
-    client: TestClient,
-    seeded_db: Session,
-) -> None:
+def test_approval_with_mix_fail_does_not_persist(seeded_db: Session) -> None:
     subtopic = _subtopic(seeded_db)
     _attach_ingested_chunks(seeded_db, subtopic.id)
     before = seeded_db.scalar(select(func.count()).select_from(QuestionVersion))
-    body = _enqueue(client, subtopic.id)
-    job_id = UUID(str(body["id"]))
+    job_id = _enqueue_job(seeded_db, subtopic.id).id
     wrong_mix = _bank_items([(QuestionItemKind.PROBLEM, QuestionDifficulty.EASY)] * BANK_SIZE)
     runner = FakeRunner(_approved_result(wrong_mix))
     poll_once(session=seeded_db, curriculum_runner=runner)
@@ -846,26 +903,19 @@ def test_approval_with_mix_fail_does_not_persist(
     assert seeded_db.scalar(select(func.count()).select_from(QuestionVersion)) == before
 
 
-def test_missing_openrouter_key_fails_without_stub_quiz(
-    client: TestClient,
-    seeded_db: Session,
-) -> None:
+def test_missing_openrouter_key_fails_without_stub_quiz(seeded_db: Session) -> None:
     subtopic = _subtopic(seeded_db)
     _attach_ingested_chunks(seeded_db, subtopic.id)
     before = seeded_db.scalar(select(func.count()).select_from(QuestionVersion))
-    body = _enqueue(client, subtopic.id)
-    job_id = UUID(str(body["id"]))
-    poll_once(session=seeded_db)
+    job_id = _enqueue_job(seeded_db, subtopic.id).id
+    process_curriculum_job_sync(job_id)
     job = _job_row(seeded_db, job_id)
     assert job.status is GenerationJobStatus.FAILED
     assert job.error == MISSING_OPENROUTER_MESSAGE
     assert seeded_db.scalar(select(func.count()).select_from(QuestionVersion)) == before
 
 
-def test_runner_exception_fails_job_without_persist(
-    client: TestClient,
-    seeded_db: Session,
-) -> None:
+def test_runner_exception_fails_job_without_persist(seeded_db: Session) -> None:
     class ExplodingRunner:
         def generate(self, request: AdkRunRequest) -> AdkRunResult:
             del request
@@ -874,8 +924,7 @@ def test_runner_exception_fails_job_without_persist(
     subtopic = _subtopic(seeded_db)
     _attach_ingested_chunks(seeded_db, subtopic.id)
     before = seeded_db.scalar(select(func.count()).select_from(QuestionVersion))
-    body = _enqueue(client, subtopic.id)
-    job_id = UUID(str(body["id"]))
+    job_id = _enqueue_job(seeded_db, subtopic.id).id
     poll_once(session=seeded_db, curriculum_runner=ExplodingRunner())
     job = _job_row(seeded_db, job_id)
     assert job.status is GenerationJobStatus.FAILED
@@ -906,8 +955,7 @@ def test_approval_persists_lesson_bank_and_ten_item_quiz(
     )
     assert seed_count == 10
     _attach_ingested_chunks(seeded_db, subtopic.id)
-    body = _enqueue(client, subtopic.id)
-    job_id = UUID(str(body["id"]))
+    job_id = _enqueue_job(seeded_db, subtopic.id).id
     runner = FakeRunner(_approved_result())
     poll_once(session=seeded_db, curriculum_runner=runner)
     assert runner.calls == 1
@@ -967,9 +1015,3 @@ def test_approval_persists_lesson_bank_and_ten_item_quiz(
     assert "correct_option_label" not in serialized
     assert "correct_rationale" not in serialized
     assert "answer_key" not in serialized
-    status = client.get(
-        f"/api/v1/admin/generation-jobs/{job_id}",
-        headers=_admin_headers(client),
-    )
-    assert status.json()["status"] == "succeeded"
-    assert status.json()["quiz_version_id"] == str(job.quiz_version_id)

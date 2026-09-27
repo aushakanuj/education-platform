@@ -47,8 +47,11 @@ class Settings(BaseSettings):
     openrouter_api_key: str | None = None
     openrouter_base_url: str = "https://openrouter.ai/api/v1"
     openrouter_model: str = "openai/gpt-4o-mini"
-    adk_model: str = "openrouter/openai/gpt-4o"
+    adk_model: str = "openrouter/openai/gpt-4o-mini"
     adk_max_review_rounds: int = 4
+    worker_lease_seconds: int = 300
+    # Different model family from adk_model, so the check is not grading its own items.
+    blind_solver_model: str = "anthropic/claude-sonnet-4.5"
     chat_context_limit_tokens: int = 20_000
     chat_retrieval_limit: int = 6
 

@@ -269,19 +269,6 @@ export type GenerationJobStatus = {
   status: string;
 };
 
-export type CurriculumGenerationStatus = "queued" | "running" | "succeeded" | "failed";
-
-export type CurriculumGenerationJob = {
-  id: string;
-  subtopic_id: string;
-  status: CurriculumGenerationStatus;
-  round_count: number;
-  reviewer_notes: string | null;
-  error: string | null;
-  source_material_version_id: string | null;
-  quiz_version_id: string | null;
-};
-
 export type GenerationOutlineNode = {
   id: string;
   parent_id: string | null;
@@ -365,6 +352,7 @@ export type OutlineNodeSnapshot = {
   force_create: boolean;
   proposed_outcomes: string[];
   sequence: number;
+  quota: number;
 };
 
 export type OutlineSnapshot = {
@@ -615,6 +603,8 @@ export type GenerationQaItem = {
   sequence: number;
   bloom?: BloomLevel | null;
   misconception_labels?: string[];
+  key_disputed?: boolean;
+  blind_answer?: string | null;
 };
 
 export type PublishedTopic = {
@@ -641,6 +631,42 @@ export type GenerationRun = {
   qa_items?: GenerationQaItem[];
   jobs: GenerationJobStatus[];
   created_at: string;
+};
+
+export type ItemStatFlag =
+  | "too_easy"
+  | "too_hard"
+  | "low_discrimination"
+  | "negative_discrimination"
+  | "dead_distractor"
+  | "distractor_beats_key_top_group";
+
+export type ItemOptionStat = {
+  label: string;
+  text: string;
+  is_key: boolean;
+  pick_rate: number;
+  top_group_pick_rate: number;
+  bottom_group_pick_rate: number;
+};
+
+export type TopicItemStat = {
+  question_version_id: string;
+  sequence: number;
+  prompt: string;
+  correct_option_label: string | null;
+  n: number;
+  p_correct: number | null;
+  discrimination: number | null;
+  options: ItemOptionStat[];
+  flags: ItemStatFlag[];
+};
+
+export type TopicItemStats = {
+  topic_id: string;
+  quiz_version_id: string | null;
+  minimum_n: number;
+  items: TopicItemStat[];
 };
 
 export type MaterialIngestAccepted = {

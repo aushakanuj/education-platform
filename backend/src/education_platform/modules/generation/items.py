@@ -19,6 +19,7 @@ from education_platform.modules.generation.adk import (
     item_kind_for_bloom,
     live_items_runner,
 )
+from education_platform.modules.generation.blueprint import ITEM_BATCH_MAX
 from education_platform.modules.generation.outline import largest_remainder
 from education_platform.modules.generation.types import BloomLevel
 
@@ -49,6 +50,7 @@ class OutlineNodeRef:
     slug: str
     title: str
     sequence: int
+    parent_title: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -130,27 +132,35 @@ def texts_for_nodes(
     nodes: Sequence[OutlineNodeRef],
     heading_groups: Sequence[tuple[str, tuple[str, ...]]],
 ) -> dict[UUID, tuple[str, ...]]:
-    """Map each node to that heading's texts; neighbors only if the node has none.
+    """Map each node to its heading's texts, in document order.
 
-    Never assigns every heading group to a single node unless there is only one group.
+    A path "6.1 Some Properties > Increments in Products" belongs to the child
+    whose title is the leaf and whose parent title is 6.1. In a flat outline a
+    renamed node takes the next unmatched group, and neighbors fill a node only
+    if it still has none. Never assigns every heading group to a single node
+    unless there is only one group.
     """
     ordered = sorted(nodes, key=lambda node: node.sequence)
     assigned: dict[UUID, list[str]] = {node.id: [] for node in ordered}
-    used_headings: set[str] = set()
+    targets = [_matching_node(ordered, heading) for heading, _texts in heading_groups]
+    tree = any(node.parent_title for node in ordered)
+    if not tree:
+        matched_ids = {target.id for target in targets if target is not None}
+        renamed = [node for node in ordered if node.id not in matched_ids]
+        leftover = [index for index, target in enumerate(targets) if target is None]
+        for node, index in zip(renamed, leftover, strict=False):
+            targets[index] = node
 
-    for heading, texts in heading_groups:
-        match = _matching_node(ordered, heading)
-        if match is None:
-            continue
-        assigned[match.id].extend(texts)
-        used_headings.add(heading)
+    previous: OutlineNodeRef | None = None
+    for (_heading, texts), target in zip(heading_groups, targets, strict=True):
+        if target is not None:
+            previous = target
+        owner = target if tree else (target or previous)
+        if owner is not None:
+            assigned[owner.id].extend(texts)
 
-    leftover = [
-        (heading, texts) for heading, texts in heading_groups if heading not in used_headings
-    ]
-    unmatched = [node for node in ordered if not assigned[node.id]]
-    for node, (_heading, texts) in zip(unmatched, leftover, strict=False):
-        assigned[node.id].extend(texts)
+    if tree:
+        return {node_id: tuple(texts) for node_id, texts in assigned.items()}
 
     for index, node in enumerate(ordered):
         if assigned[node.id]:
@@ -193,32 +203,46 @@ def items_from_chunks(request: NodeItemRequest) -> tuple[GeneratedItem, ...]:
     texts = request.chunk_texts or (request.heading,)
     items: list[GeneratedItem] = []
     for index, bloom in enumerate(request.bloom):
+        bloom_val = bloom.value if hasattr(bloom, "value") else str(bloom)
+        bloom_enum = bloom if isinstance(bloom, BloomLevel) else BloomLevel(bloom_val)
         snippet = _snippet(texts[index % len(texts)])
         prompt = (
-            f"Item {index + 1} ({bloom.value}) for {request.heading}: "
+            f"Item {index + 1} ({bloom_val}) for {request.heading}: "
             f"which statement is grounded in this source excerpt: {snippet}?"
         )
-        correct = f"A fact from the {request.heading} excerpt: {snippet}"
+        correct_text = f"A fact from the {request.heading} excerpt: {snippet}"
+        correct_label = OPTION_LABELS[index % len(OPTION_LABELS)]
+        raw_distractors = [
+            f"An unrelated claim that contradicts {request.heading}.",
+            f"A common mix-up about {request.heading}.",
+            f"A detail that the {request.heading} excerpt does not support.",
+        ]
+        options: dict[str, str] = {}
+        distractor_rationales: dict[str, str] = {}
+        d_idx = 0
+        for label in OPTION_LABELS:
+            if label == correct_label:
+                options[label] = correct_text
+            else:
+                dist_text = raw_distractors[d_idx % len(raw_distractors)]
+                d_idx += 1
+                options[label] = dist_text
+                distractor_rationales[label] = (
+                    f"This is not supported by the source excerpt for {request.heading}."
+                )
         items.append(
             GeneratedItem(
                 subtopic_id=request.subtopic_id,
                 learning_outcome_ids=request.learning_outcome_ids,
                 prompt=prompt,
-                options={
-                    "A": correct,
-                    "B": f"An unrelated claim that contradicts {request.heading}.",
-                    "C": f"A common mix-up about {request.heading}.",
-                    "D": f"A detail that the {request.heading} excerpt does not support.",
-                },
-                correct_label="A",
-                correct_rationale=f"The excerpt for {request.heading} supports A.",
-                distractor_rationales={
-                    "B": "This contradicts the source excerpt.",
-                    "C": "This is a common misconception, not the source fact.",
-                    "D": "This is not stated in the excerpt.",
-                },
-                bloom=bloom,
-                item_kind=item_kind_for_bloom(bloom),
+                options=options,
+                correct_label=correct_label,
+                correct_rationale=(
+                    f"The excerpt for {request.heading} supports option {correct_label}."
+                ),
+                distractor_rationales=distractor_rationales,
+                bloom=bloom_enum,
+                item_kind=item_kind_for_bloom(bloom_enum),
                 source_method=request.heading,
                 misconception_labels=("common mix-up",),
             )
@@ -254,7 +278,11 @@ def write_items_for_nodes(
     lesson_markdown: str = "",
     apply_curriculum_mix: bool = False,
 ) -> tuple[tuple[GeneratedItem, ...], ...]:
-    """Fan-out per outline node. Injected writers stay per-node; ADK uses ParallelAgent."""
+    """Fan-out per outline node. Injected writers stay per-node.
+
+    The live runner lists misconceptions once on the finished lesson, then writes
+    each node's items in its own call. Quotas are unchanged.
+    """
     if not requests:
         return ()
     if writer is not None:
@@ -265,13 +293,46 @@ def write_items_for_nodes(
     if runner is None and get_settings().openrouter_configured:
         runner = live_items_runner()
     if runner is not None:
-        return _items_from_runner(
-            requests,
+        expanded_requests: list[NodeItemRequest] = []
+        request_splits: list[int] = []
+        for req in requests:
+            if req.quota <= ITEM_BATCH_MAX or not req.bloom:
+                expanded_requests.append(req)
+                request_splits.append(1)
+            else:
+                batches = [
+                    req.bloom[i : i + ITEM_BATCH_MAX]
+                    for i in range(0, len(req.bloom), ITEM_BATCH_MAX)
+                ]
+                request_splits.append(len(batches))
+                for batch in batches:
+                    expanded_requests.append(
+                        NodeItemRequest(
+                            subtopic_id=req.subtopic_id,
+                            learning_outcome_ids=req.learning_outcome_ids,
+                            heading=req.heading,
+                            chunk_texts=req.chunk_texts,
+                            quota=len(batch),
+                            bloom=batch,
+                        )
+                    )
+        produced_groups = _items_from_runner(
+            expanded_requests,
             runner,
             job_id=job_id,
             lesson_markdown=lesson_markdown,
             apply_curriculum_mix=apply_curriculum_mix,
         )
+        reaggregated: list[tuple[GeneratedItem, ...]] = []
+        idx = 0
+        for split_count in request_splits:
+            combined: list[GeneratedItem] = []
+            for _ in range(split_count):
+                if idx < len(produced_groups):
+                    combined.extend(produced_groups[idx])
+                    idx += 1
+            reaggregated.append(tuple(combined))
+        return tuple(reaggregated)
     return tuple(items_from_chunks(request) if request.quota > 0 else () for request in requests)
 
 
@@ -437,14 +498,30 @@ def _parse_bloom(raw: object, mix: tuple[BloomLevel, ...], index: int) -> BloomL
 
 
 def _matching_node(nodes: Sequence[OutlineNodeRef], heading: str) -> OutlineNodeRef | None:
-    heading_cf = heading.strip().casefold()
-    heading_slug = _slugify(heading)
+    leaf, parent = _leaf_and_parent(heading)
+    leaf_cf = leaf.casefold()
+    parent_cf = None if parent is None else parent.casefold()
+    heading_slug = _slugify(leaf)
     for node in nodes:
-        if node.title.strip().casefold() == heading_cf:
-            return node
-        if node.slug == heading_slug:
+        if parent_cf is not None:
+            node_parent = (node.parent_title or "").casefold()
+            if node.title.strip().casefold() == leaf_cf and node_parent == parent_cf:
+                return node
+            continue
+        if node.parent_title:
+            continue
+        if node.title.strip().casefold() == leaf_cf or node.slug == heading_slug:
             return node
     return None
+
+
+def _leaf_and_parent(heading: str) -> tuple[str, str | None]:
+    parts = [part.strip() for part in heading.split(" > ") if part.strip()]
+    if len(parts) >= 2:
+        return parts[-1], parts[0]
+    if parts:
+        return parts[0], None
+    return heading.strip(), None
 
 
 def _slugify(value: str) -> str:

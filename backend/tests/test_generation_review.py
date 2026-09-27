@@ -361,7 +361,7 @@ def test_rewrite_cap_and_accept_still_generates(
     body = run.json()
     assert body["phase"] == "generating"
     kinds = {job["kind"] for job in body["jobs"]}
-    assert kinds == {"items", "lesson"}
+    assert kinds == {"lesson"}
     assert all(node["quota"] is not None for node in body["outline"]["nodes"])
     assert all(node["accepted_subtopic_id"] for node in body["outline"]["nodes"])
     get_settings.cache_clear()
@@ -413,7 +413,7 @@ def test_override_and_accept_still_generates(
     body = run.json()
     assert body["phase"] == "generating"
     kinds = {job["kind"] for job in body["jobs"]}
-    assert kinds == {"items", "lesson"}
+    assert kinds == {"lesson"}
     assert body["outline"]["nodes"][0]["title"] == "Fractions for Grade 8"
     assert all(node["quota"] is not None for node in body["outline"]["nodes"])
     assert all(node["accepted_subtopic_id"] for node in body["outline"]["nodes"])

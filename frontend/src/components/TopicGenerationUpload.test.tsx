@@ -134,6 +134,7 @@ function workspace(over: Partial<ReviewWorkspace> = {}): ReviewWorkspace {
             force_create: false,
             proposed_outcomes: ["Add like fractions"],
             sequence: 1,
+            quota: 12,
           },
         ],
       },
@@ -244,6 +245,7 @@ describe("TopicGenerationUpload", () => {
       workspace({
         active_revision: {
           ...workspace().active_revision,
+          stage: "outline",
           snapshot: {
             target_item_count: 80,
             nodes: [
@@ -382,6 +384,21 @@ describe("TopicGenerationUpload", () => {
     expect(screen.queryByRole("button", { name: "Save outline" })).not.toBeInTheDocument();
   });
 
+  it("retries a discarded run from the same PDF", async () => {
+    const user = userEvent.setup();
+    vi.mocked(listTopicGenerationRuns).mockResolvedValue([
+      run({ phase: "discarded", outline: null, failure_reason: null }),
+    ]);
+    vi.mocked(retryGenerationRun).mockResolvedValue(run({ phase: "outlining", outline: null }));
+
+    renderPanel();
+    await user.click(await screen.findByRole("button", { name: /Unit source/i }));
+    await user.click(screen.getByRole("button", { name: "Retry" }));
+
+    expect(retryGenerationRun).toHaveBeenCalledWith("run-1");
+    expect(await screen.findByText(/Building the outline/)).toBeInTheDocument();
+  });
+
   it("shows parked copy after accept and hides the editor", async () => {
     let settle!: (value: GenerationRun) => void;
     vi.mocked(listTopicGenerationRuns).mockResolvedValue([
@@ -406,11 +423,11 @@ describe("TopicGenerationUpload", () => {
 
     expect(
       await screen.findByText(
-        "generating. Outline accepted. Item and lesson generation are queued.",
+        "generating. Outline accepted. Lesson generation is in progress. Quiz items start after the lesson.",
       ),
     ).toBeInTheDocument();
     expect(screen.getByRole("listitem", { current: "step" })).toHaveTextContent(
-      "Generating quiz items",
+      "Generating lesson",
     );
     expect(screen.queryByRole("button", { name: "Save outline" })).not.toBeInTheDocument();
     expect(screen.queryByDisplayValue("Fractions")).not.toBeInTheDocument();
@@ -440,11 +457,11 @@ describe("TopicGenerationUpload", () => {
 
     expect(
       await screen.findByText(
-        "generating. Outline accepted. Queueing item and lesson generation.",
+        "generating. Outline accepted. Queueing lesson generation. Quiz items start after the lesson.",
       ),
     ).toBeInTheDocument();
     expect(screen.getByRole("listitem", { current: "step" })).toHaveTextContent(
-      "Generating quiz items",
+      "Generating lesson",
     );
     expect(screen.getByRole("button", { name: "Upload topic PDF" })).toBeDisabled();
     expect(screen.queryByRole("button", { name: "Processing…" })).not.toBeInTheDocument();
@@ -459,7 +476,7 @@ describe("TopicGenerationUpload", () => {
 
     expect(
       await screen.findByText(
-        "generating. Outline accepted. Item generation is complete. Lesson generation is in progress.",
+        "generating. Outline accepted. Lesson generation is in progress. Quiz items start after the lesson.",
       ),
     ).toBeInTheDocument();
     expect(screen.getByRole("listitem", { current: "step" })).toHaveTextContent("Generating lesson");
@@ -578,6 +595,23 @@ describe("TopicGenerationUpload", () => {
 
     expect(await screen.findByText("qa_review. Draft lesson and item bank are ready for QA.")).toBeInTheDocument();
     expect(screen.getByRole("listitem", { current: "step" })).toHaveTextContent("Ready to review");
+  });
+
+  it("marks a failed lesson on the lesson step", async () => {
+    const user = userEvent.setup();
+    vi.mocked(listTopicGenerationRuns).mockResolvedValue([
+      run({
+        phase: "failed",
+        failure_reason: "Context variable not found: heading",
+        jobs: [{ kind: "lesson", status: "failed" }],
+      }),
+    ]);
+
+    renderPanel();
+    await user.click(await screen.findByRole("button", { name: /Unit source/i }));
+
+    expect(screen.getByText("Generating lesson").closest("li")).toHaveTextContent("Failed");
+    expect(screen.getByText("Outline review").closest("li")).toHaveTextContent("Complete");
   });
 
   it("retries a failed run", async () => {

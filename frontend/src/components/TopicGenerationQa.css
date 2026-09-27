@@ -83,6 +83,10 @@
   max-width: 12rem;
 }
 
+.qa-review__disputed {
+  margin: 0.4rem 0 0;
+}
+
 .qa-review__prompt,
 .qa-review__rationale {
   margin: 0;

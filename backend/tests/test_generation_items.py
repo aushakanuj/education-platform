@@ -50,6 +50,7 @@ from education_platform.modules.generation.items import (
     parse_generated_items,
     texts_for_nodes,
 )
+from education_platform.modules.generation.lesson import section_from_chunks
 from education_platform.modules.generation.models import ContentGenerationRun, GenerationJob
 from education_platform.modules.generation.types import (
     GenerationJobKind,
@@ -171,6 +172,98 @@ def test_texts_for_nodes_uses_neighbors_when_heading_missing() -> None:
     assert assigned[second_id] == ("alpha excerpt", "gamma excerpt")
 
 
+def test_texts_for_nodes_gives_folded_runs_to_the_node_before_them() -> None:
+    fast_id = UUID("00000000-0000-0000-0000-000000000021")
+    squares_id = UUID("00000000-0000-0000-0000-000000000022")
+    nodes = (
+        OutlineNodeRef(
+            id=fast_id,
+            slug="fast",
+            title="Fast Multiplications Using the Distributive Property",
+            sequence=1,
+        ),
+        OutlineNodeRef(
+            id=squares_id,
+            slug="squares",
+            title="Square of the Sum/Difference of Two Numbers",
+            sequence=2,
+        ),
+    )
+    groups = (
+        ("Fast Multiplications Using the Distributive Property", ("heading only",)),
+        ("When one of the numbers is 11, 101, 1001, ...", ("47 × 11",)),
+        ("Figure it Out", ("exercise after fast multiplication",)),
+        ("Square of the Sum/Difference of Two Numbers", ("$$(a + b)^2$$",)),
+        ("Figure it Out", ("exercise after squares",)),
+    )
+    assigned = texts_for_nodes(nodes, groups)
+    assert assigned[fast_id] == (
+        "heading only",
+        "47 × 11",
+        "exercise after fast multiplication",
+    )
+    assert assigned[squares_id] == ("$$(a + b)^2$$", "exercise after squares")
+
+
+def test_texts_for_nodes_gives_a_subheading_only_its_own_path() -> None:
+    section_id = UUID("00000000-0000-0000-0000-000000000041")
+    increments_id = UUID("00000000-0000-0000-0000-000000000042")
+    figure_id = UUID("00000000-0000-0000-0000-000000000043")
+    square_id = UUID("00000000-0000-0000-0000-000000000044")
+    parent = "6.1 Some Properties of Multiplication"
+    nodes = (
+        OutlineNodeRef(id=section_id, slug="s61", title=parent, sequence=1),
+        OutlineNodeRef(
+            id=increments_id,
+            slug="increments",
+            title="Increments in Products",
+            sequence=2,
+            parent_title=parent,
+        ),
+        OutlineNodeRef(
+            id=figure_id,
+            slug="figure",
+            title="Figure it Out",
+            sequence=3,
+            parent_title=parent,
+        ),
+        OutlineNodeRef(
+            id=square_id,
+            slug="square",
+            title="Square of the Sum/Difference of Two Numbers",
+            sequence=4,
+            parent_title="6.2 Special Cases of the Distributive Property",
+        ),
+    )
+    groups = (
+        (f"{parent} > Increments in Products", ("23 × 27",)),
+        (f"{parent} > Figure it Out", ("exercise",)),
+        (
+            "6.2 Special Cases of the Distributive Property > "
+            "Square of the Sum/Difference of Two Numbers",
+            ("$$(a + b)^2$$",),
+        ),
+    )
+    assigned = texts_for_nodes(nodes, groups)
+    assert assigned[section_id] == ()
+    assert assigned[increments_id] == ("23 × 27",)
+    assert assigned[figure_id] == ("exercise",)
+    assert assigned[square_id] == ("$$(a + b)^2$$",)
+
+
+def test_texts_for_nodes_renamed_node_takes_next_unmatched_group() -> None:
+    kept_id = UUID("00000000-0000-0000-0000-000000000031")
+    renamed_id = UUID("00000000-0000-0000-0000-000000000032")
+    nodes = (
+        OutlineNodeRef(id=kept_id, slug="alpha", title="Alpha", sequence=1),
+        OutlineNodeRef(id=renamed_id, slug="teacher", title="Teacher title", sequence=2),
+    )
+    groups = (("Alpha", ("alpha",)), ("Beta", ("beta",)))
+    assigned = texts_for_nodes(nodes, groups)
+    assert assigned[kept_id] == ("alpha",)
+    assert assigned[renamed_id] == ("beta",)
+
+
 def test_parse_generated_items_drops_invalid() -> None:
     request = NodeItemRequest(
         subtopic_id=UUID("00000000-0000-0000-0000-000000000003"),
@@ -223,12 +316,12 @@ def test_accept_enqueues_items_and_lesson(
     run_id = _accept_two_node_run(client, admin_headers, seeded_topic_id, seeded_db)
     body = client.get(f"/api/v1/teaching/generation-runs/{run_id}", headers=admin_headers).json()
     assert body["phase"] == "generating"
-    assert {job["kind"] for job in body["jobs"]} == {"items", "lesson"}
+    assert {job["kind"] for job in body["jobs"]} == {"lesson"}
     jobs = list(
         seeded_db.scalars(select(GenerationJob).where(GenerationJob.run_id == run_id)).all()
     )
     kinds = sorted(job.kind.value for job in jobs)
-    assert kinds.count("items") == 1
+    assert kinds.count("items") == 0
     assert kinds.count("lesson") == 1
     nodes = body["outline"]["nodes"]
     assert sum(node["quota"] for node in nodes) == body["target_item_count"]
@@ -253,7 +346,7 @@ def test_accept_enqueues_items_and_lesson(
             )
         ).all()
     )
-    assert len(items_jobs) == 1
+    assert len(items_jobs) == 0
     assert len(lesson_jobs) == 1
     get_settings.cache_clear()
 
@@ -266,7 +359,7 @@ def test_generating_without_jobs_requeues_on_get(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
-    """Leftover slice-1 parks (generating, jobs: []) resume items+lesson on GET."""
+    """Leftover slice-1 parks (generating, jobs: []) resume the lesson on GET."""
     _silence_embed(monkeypatch, tmp_path)
     run_id = _accept_two_node_run(client, admin_headers, seeded_topic_id, seeded_db)
     seeded_db.execute(delete(GenerationJob).where(GenerationJob.run_id == run_id))
@@ -275,7 +368,7 @@ def test_generating_without_jobs_requeues_on_get(
     assert empty.status_code == 200, empty.text
     body = empty.json()
     assert body["phase"] == "generating"
-    assert {job["kind"] for job in body["jobs"]} == {"items", "lesson"}
+    assert {job["kind"] for job in body["jobs"]} == {"lesson"}
     assert all(job["status"] == "queued" for job in body["jobs"])
     listed = client.get(
         f"/api/v1/teaching/topics/{seeded_topic_id}/generation-runs",
@@ -283,12 +376,12 @@ def test_generating_without_jobs_requeues_on_get(
     )
     assert listed.status_code == 200, listed.text
     listed_jobs = listed.json()[0]["jobs"]
-    assert {job["kind"] for job in listed_jobs} == {"items", "lesson"}
+    assert {job["kind"] for job in listed_jobs} == {"lesson"}
     seeded_db.expire_all()
     jobs = list(
         seeded_db.scalars(select(GenerationJob).where(GenerationJob.run_id == run_id)).all()
     )
-    assert sorted(job.kind.value for job in jobs) == ["items", "lesson"]
+    assert sorted(job.kind.value for job in jobs) == ["lesson"]
     get_settings.cache_clear()
 
 
@@ -330,6 +423,17 @@ def test_items_worker_is_per_node_and_does_not_publish(
 ) -> None:
     _silence_embed(monkeypatch, tmp_path)
     run_id = _accept_two_node_run(client, admin_headers, seeded_topic_id, seeded_db)
+    stored = seeded_db.get(ContentGenerationRun, run_id)
+    assert stored is not None
+    stored.draft_lesson_markdown = "Draft lesson so item generation is allowed."
+    seeded_db.add(
+        GenerationJob(
+            run_id=run_id,
+            kind=GenerationJobKind.ITEMS,
+            status=GenerationJobStatus.QUEUED,
+        )
+    )
+    seeded_db.commit()
     captured: list[NodeItemRequest] = []
 
     def _capture(request: NodeItemRequest) -> Sequence[GeneratedItem]:
@@ -454,6 +558,15 @@ def test_items_retry_does_not_duplicate_bank(
 ) -> None:
     _silence_embed(monkeypatch, tmp_path)
     run_id = _accept_two_node_run(client, admin_headers, seeded_topic_id, seeded_db)
+    lesson = seeded_db.scalar(
+        select(GenerationJob).where(
+            GenerationJob.run_id == run_id,
+            GenerationJob.kind == GenerationJobKind.LESSON,
+        )
+    )
+    assert lesson is not None
+    process_generation_job_sync(lesson.id, write_lesson=section_from_chunks)
+    seeded_db.expire_all()
     calls = {"count": 0}
 
     def _fail_second(request: NodeItemRequest) -> Sequence[GeneratedItem]:
@@ -504,7 +617,7 @@ def test_items_retry_does_not_duplicate_bank(
     seeded_db.expire_all()
     run = seeded_db.get(ContentGenerationRun, run_id)
     assert run is not None
-    assert run.phase is RunPhase.GENERATING
+    assert run.phase is RunPhase.QA_REVIEW
     assert run.draft_quiz_version_id is not None
     items = list(
         seeded_db.scalars(
@@ -538,6 +651,15 @@ def test_generated_items_carry_accepted_subtopic_and_outcomes(
 ) -> None:
     _silence_embed(monkeypatch, tmp_path)
     run_id = _accept_two_node_run(client, admin_headers, seeded_topic_id, seeded_db)
+    lesson = seeded_db.scalar(
+        select(GenerationJob).where(
+            GenerationJob.run_id == run_id,
+            GenerationJob.kind == GenerationJobKind.LESSON,
+        )
+    )
+    assert lesson is not None
+    process_generation_job_sync(lesson.id, write_lesson=section_from_chunks)
+    seeded_db.expire_all()
     body = client.get(f"/api/v1/teaching/generation-runs/{run_id}", headers=admin_headers).json()
     accepted_by_title = {
         node["title"]: UUID(node["accepted_subtopic_id"]) for node in body["outline"]["nodes"]

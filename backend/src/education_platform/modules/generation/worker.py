@@ -9,13 +9,15 @@ writes published source material or released quizzes.
 from __future__ import annotations
 
 import logging
-from collections import OrderedDict
 from collections.abc import Sequence
 from uuid import UUID, uuid4
 
 from sqlalchemy import delete, func, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
+from sqlalchemy.orm.exc import ObjectDeletedError
 
+from education_platform.core.config import get_settings
 from education_platform.db.session import sync_session
 from education_platform.modules.academics.models import (
     Grade,
@@ -40,6 +42,12 @@ from education_platform.modules.assessments.models import (
     QuizVersionStatus,
 )
 from education_platform.modules.generation.adk import difficulty_for_bloom, item_kind_for_bloom
+from education_platform.modules.generation.blind_solve import (
+    BlindSolver,
+    blind_solve_items,
+    blind_solve_record,
+    resolve_blind_solver,
+)
 from education_platform.modules.generation.items import (
     OPTION_LABELS,
     GeneratedItem,
@@ -72,9 +80,15 @@ from education_platform.modules.generation.models import (
     ReviewRoundRow,
 )
 from education_platform.modules.generation.outline import (
+    HEADING_PATH_SEPARATOR as _HEADING_SEP,
+)
+from education_platform.modules.generation.outline import (
     OutlineWriter,
+    SourceSection,
     combined_weight,
     match_existing_subtopics,
+    outline_clusters,
+    source_sections,
     write_outline,
 )
 from education_platform.modules.generation.revisions import (
@@ -114,6 +128,7 @@ from education_platform.modules.generation.types import (
 from education_platform.modules.materials.models import SourceChunk
 from education_platform.modules.progress.types import run_subject
 from education_platform.modules.progress.wake import publish_wake
+from education_platform.workers.lease import Claimed, Exhausted, claim
 
 logger = logging.getLogger(__name__)
 
@@ -155,21 +170,33 @@ def fail_run_for_intake(session: Session, version_id: UUID, reason: str) -> None
 
 
 def claim_next_generation_job(session: Session) -> UUID | None:
-    """FOR UPDATE SKIP LOCKED on generation_jobs status=queued. Mark running, commit."""
-    job = session.scalar(
-        select(GenerationJob)
-        .where(GenerationJob.status == GenerationJobStatus.QUEUED)
-        .order_by(GenerationJob.created_at)
-        .with_for_update(skip_locked=True)
-        .limit(1)
-    )
-    if job is None:
+    """Claim one queued or stale-running generation job. Exhausted jobs fail the run."""
+    result = claim(session, GenerationJob)
+    if isinstance(result, Exhausted):
+        fail_exhausted_generation_job(session, result.job_id)
         return None
-    job.status = GenerationJobStatus.RUNNING
-    job_id = job.id
-    publish_wake(session, run_subject(job.run_id))
-    session.commit()
-    return job_id
+    if not isinstance(result, Claimed):
+        return None
+    job = session.get(GenerationJob, result.job_id)
+    if job is not None:
+        publish_wake(session, run_subject(job.run_id))
+        session.commit()
+    return result.job_id
+
+
+def fail_exhausted_generation_job(session: Session, job_id: UUID) -> None:
+    job = session.get(GenerationJob, job_id)
+    times = 0 if job is None else job.attempts
+    _fail_job_and_run(session, job_id, f"Worker lost this job {times} times")
+
+
+def _cancelled(session: Session, run: ContentGenerationRun) -> bool:
+    """True when an administrator discarded or removed the run while this job was in flight."""
+    try:
+        session.refresh(run)
+    except ObjectDeletedError:
+        return True
+    return run.phase is RunPhase.DISCARDED
 
 
 def process_generation_job_sync(
@@ -178,12 +205,19 @@ def process_generation_job_sync(
     write_outline: OutlineWriter | None = None,
     write_items: ItemsWriter | None = None,
     write_lesson: TopicLessonWriter | None = None,
+    blind_solver: BlindSolver | None = None,
 ) -> None:
     session = sync_session()
     try:
         job = session.get(GenerationJob, job_id)
         if job is None:
             logger.error("Generation job %s not found", job_id)
+            return
+        run = session.get(ContentGenerationRun, job.run_id)
+        if run is not None and _cancelled(session, run):
+            job.status = GenerationJobStatus.FAILED
+            job.error = "Cancelled."
+            session.commit()
             return
         job.status = GenerationJobStatus.RUNNING
         publish_wake(session, run_subject(job.run_id))
@@ -198,12 +232,16 @@ def process_generation_job_sync(
             return
         if job.kind is GenerationJobKind.REWRITE_CONTENT:
             _finish_content_rewrite(
-                session, job, write_items=write_items, write_lesson=write_lesson
+                session,
+                job,
+                write_items=write_items,
+                write_lesson=write_lesson,
+                blind_solver=blind_solver,
             )
             _complete_job(session, job_id, ok_phases=frozenset({RunPhase.QA_REVIEW}))
             return
         if job.kind is GenerationJobKind.ITEMS:
-            _finish_items(session, job.run_id, writer=write_items)
+            _finish_items(session, job.run_id, writer=write_items, blind_solver=blind_solver)
             _complete_job(session, job_id, ok_phases=_SLICE23_OK)
             return
         if job.kind is GenerationJobKind.LESSON:
@@ -211,7 +249,7 @@ def process_generation_job_sync(
             _complete_job(session, job_id, ok_phases=_SLICE23_OK)
             return
         if job.kind is GenerationJobKind.REGENERATE_ITEMS:
-            _finish_regenerate_items(session, job, writer=write_items)
+            _finish_regenerate_items(session, job, writer=write_items, blind_solver=blind_solver)
             _complete_job(session, job_id, ok_phases=_SLICE23_OK)
             return
         logger.error("Unsupported generation job kind %s", job.kind)
@@ -251,7 +289,7 @@ def _fail_job_and_run(session: Session, job_id: UUID, reason: str) -> None:
     job.status = GenerationJobStatus.FAILED
     job.error = reason[:2000]
     run = session.get(ContentGenerationRun, job.run_id)
-    if run is not None:
+    if run is not None and not _cancelled(session, run):
         run.phase = RunPhase.FAILED
         run.failure_reason = reason[:2000]
     if job is not None:
@@ -288,6 +326,8 @@ def _finish_outline(
         session.scalars(select(Subtopic).where(Subtopic.topic_id == run.topic_id)).all()
     )
     matches = match_existing_subtopics(proposed, existing)
+    if _cancelled(session, run):
+        return
     _persist_nodes(session, run.id, proposed.nodes, matches)
     run.phase = RunPhase.OUTLINE_REVIEW
     run.failure_reason = None
@@ -322,6 +362,8 @@ def _finish_rewrite(session: Session, job: GenerationJob) -> None:
         _fail_run(session, run, "Rewrite needs at least one change request.")
         return
     snapshot = rewrite_outline_snapshot(snapshot_from_json(revision.snapshot), requests)
+    if _cancelled(session, run):
+        return
     successor = persist_outline_revision(
         session,
         run_id=run.id,
@@ -375,9 +417,18 @@ def _change_requests_for_ids(
     return tuple(out)
 
 
-def _finish_items(session: Session, run_id: UUID, *, writer: ItemsWriter | None) -> None:
+def _finish_items(
+    session: Session,
+    run_id: UUID,
+    *,
+    writer: ItemsWriter | None,
+    blind_solver: BlindSolver | None = None,
+) -> None:
     run = session.get(ContentGenerationRun, run_id)
     if run is None or run.phase is not RunPhase.GENERATING:
+        return
+    if not run.draft_lesson_markdown or not run.draft_lesson_markdown.strip():
+        _fail_run(session, run, "Cannot generate items before the lesson exists.")
         return
     if run.intake_source_material_version_id is None:
         _fail_run(session, run, "Intake version is missing; cannot generate items.")
@@ -400,11 +451,7 @@ def _finish_items(session: Session, run_id: UUID, *, writer: ItemsWriter | None)
         ).all()
     )
     heading_groups = _heading_text_groups(chunks)
-    refs = tuple(
-        OutlineNodeRef(id=node.id, slug=node.slug, title=node.title, sequence=node.sequence)
-        for node in nodes
-    )
-    texts_by_node = texts_for_nodes(refs, heading_groups)
+    texts_by_node = texts_for_nodes(_outline_refs(nodes), heading_groups)
     node_count = len(nodes)
     target = run.target_item_count
     expected = sum(node.quota or 0 for node in nodes)
@@ -448,6 +495,7 @@ def _finish_items(session: Session, run_id: UUID, *, writer: ItemsWriter | None)
                 ),
             )
         )
+    solver = resolve_blind_solver(blind_solver)
     sequence = 1
     generated_count = 0
     if writer is not None:
@@ -462,10 +510,10 @@ def _finish_items(session: Session, run_id: UUID, *, writer: ItemsWriter | None)
             except Exception as exc:
                 _fail_run(session, run, str(exc)[:2000])
                 return
-            for item in produced:
-                _persist_generated_item(session, quiz_version.id, item, sequence)
-                sequence += 1
-                generated_count += 1
+            sequence, count = _persist_produced(
+                session, quiz_version.id, produced, sequence, solver=solver
+            )
+            generated_count += count
             session.flush()
     else:
         try:
@@ -479,10 +527,10 @@ def _finish_items(session: Session, run_id: UUID, *, writer: ItemsWriter | None)
             _fail_run(session, run, str(exc)[:2000])
             return
         for produced in grouped:
-            for item in produced:
-                _persist_generated_item(session, quiz_version.id, item, sequence)
-                sequence += 1
-                generated_count += 1
+            sequence, count = _persist_produced(
+                session, quiz_version.id, produced, sequence, solver=solver
+            )
+            generated_count += count
             session.flush()
     if generated_count != expected:
         _fail_run(
@@ -520,22 +568,23 @@ def _finish_lesson(session: Session, run_id: UUID, *, writer: TopicLessonWriter 
         ).all()
     )
     heading_groups = _heading_text_groups(chunks)
-    refs = tuple(
-        OutlineNodeRef(id=node.id, slug=node.slug, title=node.title, sequence=node.sequence)
-        for node in nodes
-    )
-    texts_by_node = texts_for_nodes(refs, heading_groups)
+    texts_by_node = texts_for_nodes(_outline_refs(nodes), heading_groups)
     grade_voice = _grade_voice_for_topic(session, run.topic_id)
+    container_ids = {node.parent_id for node in nodes if node.parent_id is not None}
     section_requests: list[LessonSectionRequest] = []
+    lesson_nodes: list[ContentGenerationOutlineNode] = []
     for node in nodes:
         chunk_texts = texts_by_node.get(node.id, ())
         if not chunk_texts:
+            if node.id in container_ids:
+                continue
             _fail_run(
                 session,
                 run,
                 f"No source chunks for outline node {node.slug}; will not dump the whole PDF.",
             )
             return
+        lesson_nodes.append(node)
         objectives = tuple(
             str(item).strip()
             for item in (node.proposed_outcomes or [])
@@ -567,19 +616,51 @@ def _finish_lesson(session: Session, run_id: UUID, *, writer: TopicLessonWriter 
             markdown=section.markdown,
             sequence=node.sequence,
         )
-        for node, section in zip(nodes, written.sections, strict=True)
+        for node, section in zip(lesson_nodes, written.sections, strict=True)
     )
     replace_run_lesson_sections(session, run.id, snapshots)
     run.draft_lesson_markdown = written.markdown
     run.failure_reason = None
+    _enqueue_generation_job(session, run.id, GenerationJobKind.ITEMS)
     _maybe_advance_to_qa_review(session, run, completing=GenerationJobKind.LESSON)
+
+
+def _enqueue_generation_job(session: Session, run_id: UUID, kind: GenerationJobKind) -> None:
+    """Sync twin of the service helper. Skip when a live or succeeded job exists."""
+    existing = session.scalar(
+        select(GenerationJob.id).where(
+            GenerationJob.run_id == run_id,
+            GenerationJob.kind == kind,
+            GenerationJob.status.in_(
+                (
+                    GenerationJobStatus.QUEUED,
+                    GenerationJobStatus.RUNNING,
+                    GenerationJobStatus.SUCCEEDED,
+                )
+            ),
+        )
+    )
+    if existing is not None:
+        return
+    try:
+        with session.begin_nested():
+            session.add(
+                GenerationJob(
+                    run_id=run_id,
+                    kind=kind,
+                    status=GenerationJobStatus.QUEUED,
+                )
+            )
+            session.flush()
+    except IntegrityError:
+        return
 
 
 def _maybe_advance_to_qa_review(
     session: Session, run: ContentGenerationRun, *, completing: GenerationJobKind
 ) -> None:
     """HITL 2 opens only after both draft products exist. Never publishes."""
-    if run.phase is not RunPhase.GENERATING:
+    if _cancelled(session, run) or run.phase is not RunPhase.GENERATING:
         return
     if not run.draft_lesson_markdown or run.draft_quiz_version_id is None:
         return
@@ -714,8 +795,52 @@ def _clear_draft_items(session: Session, quiz_version_id: UUID) -> None:
         session.flush()
 
 
+def _rubric_with_blind_solve(
+    item: GeneratedItem, blind_solve: dict[str, object] | None
+) -> dict[str, object]:
+    rubric = item_scoring_rubric(item.bloom, item.misconception_labels)
+    if blind_solve is not None:
+        rubric["blind_solve"] = blind_solve
+    return rubric
+
+
+def _blind_records(
+    items: Sequence[GeneratedItem], solver: BlindSolver | None
+) -> list[dict[str, object] | None]:
+    if solver is None or not items:
+        return [None] * len(items)
+    verdicts = blind_solve_items(items, solver)
+    model = get_settings().blind_solver_model
+    return [
+        blind_solve_record(verdict, correct_label=item.correct_label, model=model)
+        for item, verdict in zip(items, verdicts, strict=True)
+    ]
+
+
+def _persist_produced(
+    session: Session,
+    quiz_version_id: UUID,
+    produced: Sequence[GeneratedItem],
+    sequence: int,
+    *,
+    solver: BlindSolver | None,
+) -> tuple[int, int]:
+    records = _blind_records(produced, solver)
+    count = 0
+    for item, record in zip(produced, records, strict=True):
+        _persist_generated_item(session, quiz_version_id, item, sequence, blind_solve=record)
+        sequence += 1
+        count += 1
+    return sequence, count
+
+
 def _persist_generated_item(
-    session: Session, quiz_version_id: UUID, item: GeneratedItem, sequence: int
+    session: Session,
+    quiz_version_id: UUID,
+    item: GeneratedItem,
+    sequence: int,
+    *,
+    blind_solve: dict[str, object] | None = None,
 ) -> None:
     question = Question(subtopic_id=item.subtopic_id)
     session.add(question)
@@ -746,7 +871,7 @@ def _persist_generated_item(
             correct_option_label=item.correct_label,
             correct_rationale=item.correct_rationale,
             distractor_rationales=dict(item.distractor_rationales),
-            scoring_rubric=item_scoring_rubric(item.bloom, item.misconception_labels),
+            scoring_rubric=_rubric_with_blind_solve(item, blind_solve),
         )
     )
     for outcome_id in item.learning_outcome_ids:
@@ -783,14 +908,35 @@ def _outcome_ids_for_node(session: Session, node: ContentGenerationOutlineNode) 
     return tuple(row.id for row in rows[:3])
 
 
+def _source_sections(chunks: Sequence[SourceChunk]) -> list[SourceSection]:
+    return source_sections(
+        (chunk.section_heading, chunk.text, chunk.token_count or len(chunk.text.split()))
+        for chunk in chunks
+    )
+
+
 def _heading_text_groups(chunks: Sequence[SourceChunk]) -> list[tuple[str, tuple[str, ...]]]:
-    groups: OrderedDict[str, list[str]] = OrderedDict()
-    for chunk in chunks:
-        heading = (chunk.section_heading or "").strip()
-        if not heading:
-            continue
-        groups.setdefault(heading, []).append(chunk.text)
-    return [(heading, tuple(texts)) for heading, texts in groups.items()]
+    groups: list[tuple[str, tuple[str, ...]]] = []
+    for section in _source_sections(chunks):
+        label = section.heading
+        if section.parent_heading:
+            label = f"{section.parent_heading}{_HEADING_SEP}{section.heading}"
+        groups.append((label, section.texts))
+    return groups
+
+
+def _outline_refs(nodes: Sequence[ContentGenerationOutlineNode]) -> tuple[OutlineNodeRef, ...]:
+    titles = {node.id: node.title for node in nodes}
+    return tuple(
+        OutlineNodeRef(
+            id=node.id,
+            slug=node.slug,
+            title=node.title,
+            sequence=node.sequence,
+            parent_title=titles.get(node.parent_id) if node.parent_id is not None else None,
+        )
+        for node in nodes
+    )
 
 
 def _persist_nodes(
@@ -849,21 +995,12 @@ def _persist_nodes(
 
 
 def _cluster_by_heading(chunks: Sequence[SourceChunk]) -> list[HeadingCluster]:
-    groups: OrderedDict[str, list[SourceChunk]] = OrderedDict()
-    for chunk in chunks:
-        heading = (chunk.section_heading or "").strip()
-        if not heading:
-            continue
-        groups.setdefault(heading, []).append(chunk)
-    clusters: list[HeadingCluster] = []
-    for heading, group in groups.items():
-        mass = sum(chunk.token_count or len(chunk.text.split()) for chunk in group)
-        samples = tuple(chunk.text[:400] for chunk in group[:3])
-        clusters.append(HeadingCluster(heading=heading, token_mass=mass, sample_texts=samples))
-    return clusters
+    return outline_clusters(_source_sections(chunks))
 
 
 def _fail_run(session: Session, run: ContentGenerationRun, reason: str) -> None:
+    if _cancelled(session, run):
+        return
     run.phase = RunPhase.FAILED
     run.failure_reason = reason[:2000]
 
@@ -907,7 +1044,11 @@ def install_initial_content_revision(
 
 
 def _finish_regenerate_items(
-    session: Session, job: GenerationJob, *, writer: ItemsWriter | None
+    session: Session,
+    job: GenerationJob,
+    *,
+    writer: ItemsWriter | None,
+    blind_solver: BlindSolver | None = None,
 ) -> None:
     run = session.get(ContentGenerationRun, job.run_id)
     if run is None or run.phase not in {RunPhase.GENERATING, RunPhase.QA_REVIEW}:
@@ -918,8 +1059,10 @@ def _finish_regenerate_items(
     if not question_ids:
         _fail_run(session, run, "Selective item repair requires question ids.")
         return
-    kept = _replace_selected_items(session, run, question_ids, writer=writer)
-    if kept is None:
+    kept = _replace_selected_items(
+        session, run, question_ids, writer=writer, blind_solver=blind_solver
+    )
+    if kept is None or _cancelled(session, run):
         return
     run.failure_reason = None
     if run.phase is RunPhase.GENERATING:
@@ -934,6 +1077,7 @@ def _finish_content_rewrite(
     *,
     write_items: ItemsWriter | None,
     write_lesson: TopicLessonWriter | None,
+    blind_solver: BlindSolver | None = None,
 ) -> None:
     run = session.get(ContentGenerationRun, job.run_id)
     if run is None:
@@ -970,12 +1114,16 @@ def _finish_content_rewrite(
         if not repaired:
             return
     if item_keys:
-        replaced = _replace_selected_items(session, run, item_keys, writer=write_items)
+        replaced = _replace_selected_items(
+            session, run, item_keys, writer=write_items, blind_solver=blind_solver
+        )
         if replaced is None:
             return
     snapshot = _content_snapshot_from_drafts(session, run)
     if snapshot is None:
         _fail_run(session, run, "Could not snapshot repaired lesson and items.")
+        return
+    if _cancelled(session, run):
         return
     successor = persist_content_revision(
         session,
@@ -1033,11 +1181,7 @@ def _repair_lesson_sections(
             ).all()
         )
     heading_groups = _heading_text_groups(chunks)
-    refs = tuple(
-        OutlineNodeRef(id=node.id, slug=node.slug, title=node.title, sequence=node.sequence)
-        for node in nodes
-    )
-    texts_by_node = texts_for_nodes(refs, heading_groups) if refs else {}
+    texts_by_node = texts_for_nodes(_outline_refs(nodes), heading_groups) if nodes else {}
     grade_voice = _grade_voice_for_topic(session, run.topic_id)
     snapshots: list[LessonSectionSnapshot] = []
     stitch_sections_in: list[LessonSection] = []
@@ -1101,6 +1245,7 @@ def _replace_selected_items(
     question_ids: tuple[UUID, ...] | frozenset[UUID],
     *,
     writer: ItemsWriter | None,
+    blind_solver: BlindSolver | None = None,
 ) -> int | None:
     if run.draft_quiz_version_id is None:
         _fail_run(session, run, "Cannot repair items before the draft bank exists.")
@@ -1164,13 +1309,10 @@ def _replace_selected_items(
             ).all()
         )
     heading_groups = _heading_text_groups(chunks)
-    refs = tuple(
-        OutlineNodeRef(id=node.id, slug=node.slug, title=node.title, sequence=node.sequence)
-        for node in nodes
-    )
-    texts_by_node = texts_for_nodes(refs, heading_groups)
+    texts_by_node = texts_for_nodes(_outline_refs(nodes), heading_groups)
     node_count = len(nodes)
     target = run.target_item_count
+    solver = resolve_blind_solver(blind_solver)
     for item, version, question in matched:
         node = node_by_subtopic.get(question.subtopic_id)
         if node is None:
@@ -1208,14 +1350,21 @@ def _replace_selected_items(
         replacement = produced[0]
         if version.lifecycle_status is QuestionVersionStatus.DRAFT:
             version.lifecycle_status = QuestionVersionStatus.ARCHIVED
-        new_version = _persist_question_version(session, question.id, replacement)
+        records = _blind_records((replacement,), solver)
+        new_version = _persist_question_version(
+            session, question.id, replacement, blind_solve=records[0]
+        )
         item.question_version_id = new_version.id
         session.flush()
     return len(items)
 
 
 def _persist_question_version(
-    session: Session, question_id: UUID, item: GeneratedItem
+    session: Session,
+    question_id: UUID,
+    item: GeneratedItem,
+    *,
+    blind_solve: dict[str, object] | None = None,
 ) -> QuestionVersion:
     current = session.scalar(
         select(func.max(QuestionVersion.version_number)).where(
@@ -1248,7 +1397,7 @@ def _persist_question_version(
             correct_option_label=item.correct_label,
             correct_rationale=item.correct_rationale,
             distractor_rationales=dict(item.distractor_rationales),
-            scoring_rubric=item_scoring_rubric(item.bloom, item.misconception_labels),
+            scoring_rubric=_rubric_with_blind_solve(item, blind_solve),
         )
     )
     for outcome_id in item.learning_outcome_ids:

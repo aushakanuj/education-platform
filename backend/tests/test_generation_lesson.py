@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
+import re
 from collections.abc import Sequence
 from pathlib import Path
-from uuid import UUID
+from uuid import UUID, uuid4
 
 import pytest
 from fastapi.testclient import TestClient
@@ -15,7 +16,18 @@ from test_generation_items import _accept_two_node_run, _silence_embed
 
 from education_platform.core.config import get_settings
 from education_platform.modules.academics.models import Subtopic
-from education_platform.modules.generation.adk import KATEX_MARKDOWN_RULES
+from education_platform.modules.generation.adk import (
+    KATEX_MARKDOWN_RULES,
+    LessonRunRequest,
+    LessonRunResult,
+    LessonSectionSpec,
+    lesson_reviewer_instruction,
+)
+from education_platform.modules.generation.adk_live import LiveLessonRunner
+from education_platform.modules.generation.blueprint import (
+    DIAGRAM_PLACEHOLDER,
+    MIN_SOURCED_PROSE_CHARS,
+)
 from education_platform.modules.generation.items import (
     GeneratedItem,
     NodeItemRequest,
@@ -28,20 +40,24 @@ from education_platform.modules.generation.lesson import (
     LessonSectionRequest,
     SectionPass,
     StitchRequest,
-    assert_usable_mermaid,
+    assert_parseable_mermaid,
     parse_mermaid_diagram,
     section_from_chunks,
     stitch_sections,
     write_topic_lesson,
+    write_topic_lesson_document,
 )
+from education_platform.modules.generation.lesson_checks import check_lesson_quality
 from education_platform.modules.generation.models import ContentGenerationRun, GenerationJob
 from education_platform.modules.generation.types import (
     GenerationJobKind,
     GenerationJobStatus,
+    ReviewStatus,
     RunPhase,
 )
 from education_platform.modules.generation.worker import process_generation_job_sync
 from education_platform.modules.materials.models import SourceMaterial
+from education_platform.modules.rag.chunking import DIAGRAM_PLACEHOLDER as CHUNK_DIAGRAM_PLACEHOLDER
 
 
 @pytest.fixture()
@@ -93,6 +109,8 @@ def test_mermaid_parse_rejects_invalid() -> None:
 
 
 def test_lesson_system_prompt_requires_renderable_katex() -> None:
+    assert "{heading}" not in _SECTION_SYSTEM
+    assert "this section's heading" in _SECTION_SYSTEM
     assert KATEX_MARKDOWN_RULES in _SECTION_SYSTEM
     assert "$2x + 3 = 11$" in KATEX_MARKDOWN_RULES
     assert r"\frac{2x}{2} = 6" in KATEX_MARKDOWN_RULES
@@ -145,7 +163,7 @@ def test_write_topic_lesson_is_sequential_not_a_dump() -> None:
     assert "180 degrees" in markdown
     assert "**Topic recap.**" in markdown
     assert markdown.index("Properties of squares") < markdown.index("Angles of a triangle")
-    assert_usable_mermaid(markdown)
+    assert_parseable_mermaid(markdown)
 
 
 def test_overflow_splits_idea_then_examples() -> None:
@@ -195,7 +213,35 @@ def test_mermaid_retry_on_parser_error() -> None:
     )
     markdown = write_topic_lesson((request,), write_section=_flaky)
     assert calls["count"] == 2
-    assert_usable_mermaid(markdown)
+    assert_parseable_mermaid(markdown)
+
+
+def test_section_without_mermaid_is_accepted() -> None:
+    def _no_diagram(request: LessonSectionRequest) -> str:
+        return (
+            f"## {request.heading}\n\n"
+            "A square has four equal sides and four right angles. "
+            "Think of a tile on the floor: every side matches the next. "
+            "Because all sides match, you can measure one side and know them all.\n\n"
+            "For example, if one side of a square is 5 cm, the perimeter is 4 times 5, "
+            "which is 20 cm. You only needed one measurement.\n\n"
+            "Now you can explain what makes a square a square and find its perimeter "
+            "from a single side.\n"
+        )
+
+    request = LessonSectionRequest(
+        heading="Squares",
+        objectives=("Identify squares",),
+        chunk_texts=("A square has four equal sides.",),
+        grade_voice="Write for Grade 6 students.",
+        glossary=(),
+        prior_titles=(),
+        defined_terms=(),
+        prior_recap="",
+    )
+    markdown = write_topic_lesson((request,), write_section=_no_diagram)
+    assert "```mermaid" not in markdown
+    assert "perimeter" in markdown
 
 
 def test_stitch_does_not_rewrite_teaching() -> None:
@@ -238,6 +284,17 @@ def test_items_only_success_stays_generating(
 ) -> None:
     _silence_embed(monkeypatch, tmp_path)
     run_id = _accept_two_node_run(client, admin_headers, seeded_topic_id, seeded_db)
+    stored = seeded_db.get(ContentGenerationRun, run_id)
+    assert stored is not None
+    stored.draft_lesson_markdown = "# Lesson\n\nReady for questions."
+    seeded_db.add(
+        GenerationJob(
+            run_id=run_id,
+            kind=GenerationJobKind.ITEMS,
+            status=GenerationJobStatus.QUEUED,
+        )
+    )
+    seeded_db.commit()
     process_generation_job_sync(
         _job(seeded_db, run_id, GenerationJobKind.ITEMS).id,
         write_items=_items_from_request,
@@ -246,7 +303,7 @@ def test_items_only_success_stays_generating(
     run = seeded_db.get(ContentGenerationRun, run_id)
     assert run is not None
     assert run.phase is RunPhase.GENERATING
-    assert run.draft_lesson_markdown is None
+    assert run.draft_quiz_version_id is not None
     lesson = _job(seeded_db, run_id, GenerationJobKind.LESSON)
     assert lesson.status is GenerationJobStatus.QUEUED
     get_settings.cache_clear()
@@ -314,16 +371,16 @@ def test_both_jobs_advance_to_qa_review(
     _silence_embed(monkeypatch, tmp_path)
     run_id = _accept_two_node_run(client, admin_headers, seeded_topic_id, seeded_db)
     process_generation_job_sync(
-        _job(seeded_db, run_id, GenerationJobKind.ITEMS).id,
-        write_items=_items_from_request,
+        _job(seeded_db, run_id, GenerationJobKind.LESSON).id,
+        write_lesson=_section_from_request,
     )
     seeded_db.expire_all()
     run = seeded_db.get(ContentGenerationRun, run_id)
     assert run is not None
     assert run.phase is RunPhase.GENERATING
     process_generation_job_sync(
-        _job(seeded_db, run_id, GenerationJobKind.LESSON).id,
-        write_lesson=_section_from_request,
+        _job(seeded_db, run_id, GenerationJobKind.ITEMS).id,
+        write_items=_items_from_request,
     )
     seeded_db.expire_all()
     run = seeded_db.get(ContentGenerationRun, run_id)
@@ -378,10 +435,6 @@ def test_lesson_retry_does_not_duplicate_markdown(
 ) -> None:
     _silence_embed(monkeypatch, tmp_path)
     run_id = _accept_two_node_run(client, admin_headers, seeded_topic_id, seeded_db)
-    process_generation_job_sync(
-        _job(seeded_db, run_id, GenerationJobKind.ITEMS).id,
-        write_items=_items_from_request,
-    )
     calls = {"count": 0}
 
     def _fail_first(request: LessonSectionRequest) -> str:
@@ -399,6 +452,9 @@ def test_lesson_retry_does_not_duplicate_markdown(
     assert run is not None
     assert run.phase is RunPhase.FAILED
     assert run.draft_lesson_markdown is None
+    failed = client.get(f"/api/v1/teaching/generation-runs/{run_id}", headers=admin_headers)
+    assert failed.status_code == 200, failed.text
+    assert {"kind": "lesson", "status": "failed"} in failed.json()["jobs"]
 
     retried = client.post(
         f"/api/v1/teaching/generation-runs/{run_id}/retry",
@@ -416,6 +472,16 @@ def test_lesson_retry_does_not_duplicate_markdown(
     assert queued is not None
     process_generation_job_sync(queued.id, write_lesson=_section_from_request)
     seeded_db.expire_all()
+    items = seeded_db.scalar(
+        select(GenerationJob).where(
+            GenerationJob.run_id == run_id,
+            GenerationJob.kind == GenerationJobKind.ITEMS,
+            GenerationJob.status == GenerationJobStatus.QUEUED,
+        )
+    )
+    assert items is not None
+    process_generation_job_sync(items.id, write_items=_items_from_request)
+    seeded_db.expire_all()
     run = seeded_db.get(ContentGenerationRun, run_id)
     assert run is not None
     assert run.phase is RunPhase.QA_REVIEW
@@ -431,3 +497,251 @@ def test_lesson_retry_does_not_duplicate_markdown(
     )
     assert len(lesson_jobs) == 2
     get_settings.cache_clear()
+
+
+def _section_request(heading: str, excerpt: str) -> LessonSectionRequest:
+    return LessonSectionRequest(
+        heading=heading,
+        objectives=(f"Explain {heading}",),
+        chunk_texts=(excerpt,),
+        grade_voice="Write for Grade 6 students.",
+        glossary=(),
+        prior_titles=(),
+        defined_terms=(),
+        prior_recap="",
+    )
+
+
+def _rich_section(heading: str, recap: str) -> str:
+    sentence = (
+        f"{heading} follows the source method. "
+        "Each step uses a rule already written in the excerpt, and the reason for that step "
+        "is the same reason the source gives. "
+    )
+    body = "\n\n".join([sentence] * 8)
+    return f"## {heading}\n\n{body}\n\n**Recap.** {recap}\n"
+
+
+def test_designer_prompt_asks_for_depth_and_forbids_invented_facts() -> None:
+    reviewer = lesson_reviewer_instruction()
+    assert "worked example" in _SECTION_SYSTEM
+    assert "each step explained" in _SECTION_SYSTEM
+    assert "800-1500" in _SECTION_SYSTEM
+    assert "absent from the untrusted source excerpts" in _SECTION_SYSTEM
+    assert "[Diagram]" in _SECTION_SYSTEM
+    assert "not transcribed" in _SECTION_SYSTEM
+    assert re.search(r"\{[A-Za-z_][A-Za-z0-9_]*\}", _SECTION_SYSTEM) is None
+    assert "one short paragraph" in reviewer
+    assert "not transcribed" in reviewer
+    assert "diagram-only" in reviewer
+    assert DIAGRAM_PLACEHOLDER == CHUNK_DIAGRAM_PLACEHOLDER
+
+
+def test_live_lesson_calls_are_one_heading_then_python_stitch() -> None:
+    class _RecordingRunner:
+        def __init__(self) -> None:
+            self.requests: list[LessonRunRequest] = []
+
+        def generate(self, request: LessonRunRequest) -> LessonRunResult:
+            self.requests.append(request)
+            heading = request.sections[0].heading
+            recap = (
+                "Alpha recap stays local."
+                if heading.startswith("Alpha")
+                else "Beta recap stays local."
+            )
+            markdown = _rich_section(heading, recap)
+            return LessonRunResult(
+                review_status=ReviewStatus.APPROVED,
+                reviewer_notes="",
+                round_count=1,
+                sections_markdown=(markdown,),
+                markdown=markdown,
+                transcript={},
+            )
+
+    runner = _RecordingRunner()
+    markdown = write_topic_lesson_document(
+        (
+            _section_request("Alpha shapes", "UNIQUE_ALPHA_EXCERPT"),
+            _section_request("Beta angles", "UNIQUE_BETA_EXCERPT"),
+        ),
+        runner=runner,
+    ).markdown
+    assert len(runner.requests) == 2
+    assert all(len(call.sections) == 1 for call in runner.requests)
+    first, second = runner.requests
+    assert first.sections[0].chunk_texts == ("UNIQUE_ALPHA_EXCERPT",)
+    assert first.sections[0].prior_recap == ""
+    assert "UNIQUE_BETA_EXCERPT" not in first.sections[0].chunk_texts
+    assert second.sections[0].chunk_texts == ("UNIQUE_BETA_EXCERPT",)
+    assert "UNIQUE_ALPHA_EXCERPT" not in "".join(second.sections[0].chunk_texts)
+    assert second.sections[0].prior_recap == "Alpha recap stays local."
+    assert "You just saw" in markdown
+    assert "**Topic recap.**" in markdown
+    assert "UNIQUE_ALPHA_EXCERPT" not in second.sections[0].prior_recap
+
+
+def test_live_lesson_runner_builds_one_message_per_heading(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    messages: list[str] = []
+    built: list[dict[str, object]] = []
+
+    def _build(**kwargs: object) -> object:
+        built.append(kwargs)
+        return object()
+
+    def _run(**kwargs: object) -> tuple[dict[str, str], list[object]]:
+        message = str(kwargs["user_message"])
+        messages.append(message)
+        heading = "Alpha shapes" if "UNIQUE_ALPHA_EXCERPT" in message else "Beta angles"
+        markdown = f"## {heading}\n\nTaught {heading}.\n"
+        return (
+            {
+                "lesson_draft": markdown,
+                "approved_lesson": markdown,
+                "lesson_review_status": "approved",
+            },
+            [],
+        )
+
+    monkeypatch.setattr(
+        "education_platform.modules.generation.adk_live.build_lesson_agent",
+        _build,
+    )
+    monkeypatch.setattr(
+        "education_platform.modules.generation.adk_live.run_live_agent",
+        _run,
+    )
+    LiveLessonRunner().generate(
+        LessonRunRequest(
+            job_id=uuid4(),
+            sections=(
+                LessonSectionSpec(
+                    heading="Alpha shapes",
+                    objectives=("State the alpha property",),
+                    chunk_texts=("UNIQUE_ALPHA_EXCERPT",),
+                    grade_voice="Write for Grade 6 students.",
+                    prior_recap="",
+                ),
+                LessonSectionSpec(
+                    heading="Beta angles",
+                    objectives=("State the beta property",),
+                    chunk_texts=("UNIQUE_BETA_EXCERPT",),
+                    grade_voice="Write for Grade 6 students.",
+                    prior_recap="Alpha recap stays local.",
+                ),
+            ),
+            model="openrouter/openai/gpt-4o-mini",
+            max_review_rounds=1,
+        )
+    )
+    assert len(messages) == 2
+    assert len(built) == 2
+    assert all(call["include_stitch"] is False and call["section_count"] == 1 for call in built)
+    assert "UNIQUE_ALPHA_EXCERPT" in messages[0]
+    assert "UNIQUE_BETA_EXCERPT" not in messages[0]
+    assert "State the alpha property" in messages[0]
+    assert "Write for Grade 6 students." in messages[0]
+    assert "UNIQUE_BETA_EXCERPT" in messages[1]
+    assert "UNIQUE_ALPHA_EXCERPT" not in messages[1]
+    assert "Alpha recap stays local." in messages[1]
+    assert "State the beta property" in messages[1]
+
+
+def test_length_gate_allows_diagram_only_and_rejects_paraphrase() -> None:
+    diagram = "## Figures\n\nThe figure in this source was not transcribed.\n"
+    assert (
+        check_lesson_quality(
+            diagram,
+            section_sources=(("Figures", ("[Diagram]",)),),
+        )
+        is None
+    )
+    paraphrase = "## Squares\n\nA square has four equal sides and four right angles.\n"
+    error = check_lesson_quality(
+        paraphrase,
+        section_sources=(
+            (
+                "Squares",
+                (
+                    "A square has four equal sides. The diagonals are equal and bisect "
+                    "each other at right angles, which is why the area is side times side.",
+                ),
+            ),
+        ),
+    )
+    assert error is not None
+    assert "Squares" in error
+    assert str(MIN_SOURCED_PROSE_CHARS) in error
+    mixed = check_lesson_quality(
+        "## Squares\n\nSee the figure.\n",
+        section_sources=(("Squares", ("intro text [Diagram]",)),),
+    )
+    assert mixed is not None
+    long_body = " ".join(["The source method uses equal sides at every step."] * 40)
+    both = (
+        "## Figures\n\nThe figure in this source was not transcribed.\n\n"
+        f"## Squares\n\n{long_body}\n"
+    )
+    assert (
+        check_lesson_quality(
+            both,
+            section_sources=(
+                ("Figures", ("[Diagram]",)),
+                ("Squares", ("A square has four equal sides and the area is side times side.",)),
+            ),
+        )
+        is None
+    )
+
+
+def test_live_path_length_gate_matches_source() -> None:
+    class _Fixed:
+        def __init__(self, body: str) -> None:
+            self.body = body
+
+        def generate(self, request: LessonRunRequest) -> LessonRunResult:
+            heading = request.sections[0].heading
+            markdown = f"## {heading}\n\n{self.body}\n"
+            return LessonRunResult(
+                review_status=ReviewStatus.APPROVED,
+                reviewer_notes="",
+                round_count=1,
+                sections_markdown=(markdown,),
+                markdown=markdown,
+                transcript={},
+            )
+
+    diagram = write_topic_lesson_document(
+        (_section_request("Figures", "[Diagram]"),),
+        runner=_Fixed("The figure in this source was not transcribed."),
+    )
+    assert "not transcribed" in diagram.markdown
+    with pytest.raises(ValueError, match=str(MIN_SOURCED_PROSE_CHARS)):
+        write_topic_lesson_document(
+            (
+                _section_request(
+                    "Squares",
+                    "A square has four equal sides and the area is side times side.",
+                ),
+            ),
+            runner=_Fixed("A square has four equal sides."),
+        )
+
+
+def test_injected_writer_skips_source_length_gate() -> None:
+    def _short(request: LessonSectionRequest) -> str:
+        return f"## {request.heading}\n\nA square has four equal sides.\n"
+
+    markdown = write_topic_lesson(
+        (
+            _section_request(
+                "Squares",
+                "A square has four equal sides and the area is side times side.",
+            ),
+        ),
+        write_section=_short,
+    )
+    assert "four equal sides" in markdown

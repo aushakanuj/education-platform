@@ -15,8 +15,9 @@ from education_platform.api.deps import (
     scoped,
 )
 from education_platform.db.session import get_session
+from education_platform.modules.assessments.item_stats import TopicItemStats, item_stats_for_topic
 from education_platform.modules.authorization.scope import scope_for
-from education_platform.modules.generation import chat, curriculum, review, service
+from education_platform.modules.generation import chat, review, service
 from education_platform.modules.generation.schemas import (
     AcceptedRunOut,
     CloseRoundIn,
@@ -35,14 +36,18 @@ from education_platform.modules.generation.schemas import (
     close_round_command,
     teacher_decision_command,
 )
-from education_platform.modules.generation.types import PATCH_OUTLINE_GONE, TEACHER_UPLOAD_GONE
+from education_platform.modules.generation.types import (
+    PATCH_OUTLINE_GONE,
+    SUBTOPIC_GENERATION_GONE,
+    TEACHER_UPLOAD_GONE,
+)
 
 router = APIRouter(tags=["generation"])
 
 
 async def _run_out(request: ScopedRequest, run_id: UUID) -> GenerationRunOut:
     run = await service.get_run(request.session, request.scope, run_id)
-    jobs = await service.in_flight_jobs(request.session, [run.id])
+    jobs = await service.jobs_for_runs(request.session, [run])
     qa_items = await service.qa_items_for_run(request.session, run)
     return GenerationRunOut.from_domain(run, jobs.get(run.id, ()), qa_items)
 
@@ -73,6 +78,28 @@ async def submit(
     return AcceptedRunOut.from_domain(accepted)
 
 
+@router.delete("/admin/topics/{topic_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_topic(
+    topic_id: UUID,
+    principal: Principal = Depends(require_administrator),
+    session: AsyncSession = Depends(get_session),
+) -> None:
+    scope = await scope_for(session, principal)
+    await service.delete_unpublished_topic(session, scope, principal, topic_id)
+
+
+@router.get(
+    "/admin/topics/{topic_id}/item-stats",
+    response_model=TopicItemStats,
+)
+async def topic_item_stats(
+    topic_id: UUID,
+    _principal: Principal = Depends(require_administrator),
+    session: AsyncSession = Depends(get_session),
+) -> TopicItemStats:
+    return await item_stats_for_topic(session, topic_id)
+
+
 @router.post(
     "/admin/subjects/{subject_id}/generation-runs",
     response_model=AcceptedRunOut,
@@ -101,28 +128,27 @@ async def submit_for_subject(
 @router.post(
     "/admin/subtopics/{subtopic_id}/generate-curriculum",
     response_model=CurriculumGenerationJobOut,
-    status_code=status.HTTP_202_ACCEPTED,
+    status_code=status.HTTP_410_GONE,
 )
 async def generate_curriculum(
     subtopic_id: UUID,
     principal: Principal = Depends(require_administrator),
-    session: AsyncSession = Depends(get_session),
 ) -> CurriculumGenerationJobOut:
-    job = await curriculum.enqueue_curriculum_generation(session, principal, subtopic_id)
-    return CurriculumGenerationJobOut.from_domain(job)
+    del subtopic_id, principal
+    raise HTTPException(status_code=status.HTTP_410_GONE, detail=SUBTOPIC_GENERATION_GONE)
 
 
 @router.get(
     "/admin/generation-jobs/{job_id}",
     response_model=CurriculumGenerationJobOut,
+    status_code=status.HTTP_410_GONE,
 )
 async def show_curriculum_job(
     job_id: UUID,
     principal: Principal = Depends(require_administrator),
-    session: AsyncSession = Depends(get_session),
 ) -> CurriculumGenerationJobOut:
-    job = await curriculum.get_curriculum_job(session, principal, job_id)
-    return CurriculumGenerationJobOut.from_domain(job)
+    del job_id, principal
+    raise HTTPException(status_code=status.HTTP_410_GONE, detail=SUBTOPIC_GENERATION_GONE)
 
 
 @router.get(
@@ -149,7 +175,7 @@ async def list_for_topic(
     request: ScopedRequest = Depends(scoped("teaching.generation.list")),
 ) -> list[GenerationRunOut]:
     rows = await service.list_runs(request.session, request.scope, topic_id)
-    jobs = await service.in_flight_jobs(request.session, [row.id for row in rows])
+    jobs = await service.jobs_for_runs(request.session, rows)
     await request.record_rows(len(rows))
     out: list[GenerationRunOut] = []
     for row in rows:

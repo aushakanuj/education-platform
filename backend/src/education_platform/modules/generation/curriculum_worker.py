@@ -5,7 +5,6 @@ from __future__ import annotations
 import logging
 from uuid import UUID
 
-from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from education_platform.core.config import get_settings
@@ -23,25 +22,28 @@ from education_platform.modules.generation.curriculum import (
 )
 from education_platform.modules.generation.models import CurriculumGenerationJob
 from education_platform.modules.generation.types import GenerationJobStatus
+from education_platform.workers.lease import Claimed, Exhausted, claim
 
 logger = logging.getLogger(__name__)
 
 
 def claim_next_curriculum_job(session: Session) -> UUID | None:
-    """FOR UPDATE SKIP LOCKED on curriculum_generation_jobs status=queued."""
-    job = session.scalar(
-        select(CurriculumGenerationJob)
-        .where(CurriculumGenerationJob.status == GenerationJobStatus.QUEUED)
-        .order_by(CurriculumGenerationJob.created_at)
-        .with_for_update(skip_locked=True)
-        .limit(1)
-    )
-    if job is None:
+    """Claim one queued or stale-running curriculum job. Exhausted jobs are failed."""
+    result = claim(session, CurriculumGenerationJob)
+    if isinstance(result, Exhausted):
+        fail_exhausted_curriculum_job(session, result.job_id)
         return None
-    job.status = GenerationJobStatus.RUNNING
-    job_id = job.id
+    if isinstance(result, Claimed):
+        return result.job_id
+    return None
+
+
+def fail_exhausted_curriculum_job(session: Session, job_id: UUID) -> None:
+    job = session.get(CurriculumGenerationJob, job_id)
+    if job is None:
+        return
+    fail_curriculum_job(job, f"Worker lost this job {job.attempts} times")
     session.commit()
-    return job_id
 
 
 def _resolve_runner(runner: CurriculumRunner | None) -> CurriculumRunner | str:

@@ -39,8 +39,8 @@ const GENERATION_STEPS = [
   { id: "indexing", label: "Indexing PDF" },
   { id: "outlining", label: "Determining outline" },
   { id: "outline_review", label: "Outline review" },
-  { id: "items", label: "Generating quiz items" },
   { id: "lesson", label: "Generating lesson" },
+  { id: "items", label: "Generating quiz items" },
   { id: "ready", label: "Ready to review" },
 ] as const;
 
@@ -52,9 +52,9 @@ function generatingActiveStep(run: GenerationRun): GenerationStepId {
   if (regenJob !== undefined) return "items";
   const itemsJob = run.jobs.find((job) => job.kind === "items");
   const lessonJob = run.jobs.find((job) => job.kind === "lesson");
-  if (itemsJob !== undefined) return "items";
   if (lessonJob !== undefined) return "lesson";
-  return "items";
+  if (itemsJob !== undefined) return "items";
+  return "lesson";
 }
 
 function failedActiveStep(run: GenerationRun): GenerationStepId {
@@ -246,16 +246,16 @@ function generatingStatusCopy(run: GenerationRun): string {
   }
   const itemsJob = run.jobs.find((job) => job.kind === "items");
   const lessonJob = run.jobs.find((job) => job.kind === "lesson");
-  if (itemsJob !== undefined && lessonJob !== undefined) {
-    return "Outline accepted. Item and lesson generation are queued.";
-  }
-  if (itemsJob !== undefined) {
-    return "Outline accepted. Item generation is in progress.";
+  if (lessonJob !== undefined && itemsJob !== undefined) {
+    return "Outline accepted. Lesson generation is in progress. Quiz items start after the lesson.";
   }
   if (lessonJob !== undefined) {
-    return "Outline accepted. Item generation is complete. Lesson generation is in progress.";
+    return "Outline accepted. Lesson generation is in progress. Quiz items start after the lesson.";
   }
-  return "Outline accepted. Queueing item and lesson generation.";
+  if (itemsJob !== undefined) {
+    return "Outline accepted. Lesson generation is complete. Quiz item generation is in progress.";
+  }
+  return "Outline accepted. Queueing lesson generation. Quiz items start after the lesson.";
 }
 
 export function TopicGenerationUpload({
@@ -675,7 +675,24 @@ export function TopicGenerationUpload({
     switch (current.phase) {
       case "indexing":
       case "outlining":
-        return status;
+      case "generating":
+        return (
+          <>
+            {status}
+            {canClose ? (
+              <div className="admin-upload__actions">
+                <PushButton
+                  type="button"
+                  variant="outline"
+                  disabled={busy}
+                  onClick={() => setConfirm("discard")}
+                >
+                  Cancel run
+                </PushButton>
+              </div>
+            ) : null}
+          </>
+        );
       case "outline_review":
         return (
           <>
@@ -723,8 +740,6 @@ export function TopicGenerationUpload({
             ) : null}
           </>
         );
-      case "generating":
-        return status;
       case "qa_review":
         return (
           <>
@@ -758,7 +773,18 @@ export function TopicGenerationUpload({
           </>
         );
       case "discarded":
-        return status;
+        return (
+          <>
+            {status}
+            {canClose && current.intake_version_id ? (
+              <div className="admin-upload__actions">
+                <PushButton type="button" disabled={busy} loading={busy} onClick={() => void onRetry()}>
+                  Retry
+                </PushButton>
+              </div>
+            ) : null}
+          </>
+        );
       default: {
         const _never: never = current.phase;
         void _never;
@@ -900,8 +926,8 @@ export function TopicGenerationUpload({
         title="Discard this run?"
         body={
           workspace?.active_revision.stage === "qa"
-            ? "Unpublished drafts will be discarded. Live student material is unchanged."
-            : "The outline will be discarded. You can upload a new PDF afterward."
+            ? "Unpublished drafts will be discarded. Live student material is unchanged. You can retry this PDF or upload another."
+            : "This run will be cancelled. You can retry the same PDF or upload another."
         }
         onDismiss={() => setConfirm(null)}
         actions={[

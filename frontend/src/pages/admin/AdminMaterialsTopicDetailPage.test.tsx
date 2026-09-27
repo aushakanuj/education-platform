@@ -3,7 +3,7 @@ import userEvent from "@testing-library/user-event";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import type { CurriculumGenerationJob, GenerationQaItem, GenerationRun, LearningDirectory } from "../../api/types";
+import type { GenerationQaItem, GenerationRun, LearningDirectory } from "../../api/types";
 import { AdminMaterialsTopicDetailPage } from "./AdminMaterialsTopicDetailPage";
 
 vi.mock("../../auth/AuthContext", () => ({
@@ -21,6 +21,7 @@ vi.mock("../../api/materials", () => ({
 
 vi.mock("../../api/generation", () => ({
   listTopicGenerationRuns: vi.fn(),
+  fetchTopicItemStats: vi.fn(),
   discardGenerationRun: vi.fn(),
   retryGenerationRun: vi.fn(),
   subscribeGenerationRun: vi.fn(),
@@ -31,13 +32,6 @@ vi.mock("../../api/generation", () => ({
   closeReviewRound: vi.fn(),
   publishGenerationRun: vi.fn(),
   rejectGenerationItems: vi.fn(),
-  enqueueCurriculumGeneration: vi.fn(),
-  getCurriculumGenerationJob: vi.fn(),
-  pollCurriculumGenerationJob: vi.fn(),
-  isInFlightCurriculumGenerationStatus: (status: string) =>
-    status === "queued" || status === "running",
-  isTerminalCurriculumGenerationStatus: (status: string) =>
-    status === "succeeded" || status === "failed",
   isInFlightGenerationPhase: (phase: string) =>
     phase === "indexing" ||
     phase === "outlining" ||
@@ -47,11 +41,10 @@ vi.mock("../../api/generation", () => ({
 }));
 
 import {
-  enqueueCurriculumGeneration,
+  fetchTopicItemStats,
   getGenerationReview,
   getGenerationRun,
   listTopicGenerationRuns,
-  pollCurriculumGenerationJob,
   publishGenerationRun,
 } from "../../api/generation";
 import { fetchLearningDirectory, getSubtopicMaterial, getTopicMaterial } from "../../api/materials";
@@ -134,20 +127,6 @@ function run(over: Partial<GenerationRun> = {}): GenerationRun {
   };
 }
 
-function curriculumJob(over: Partial<CurriculumGenerationJob> = {}): CurriculumGenerationJob {
-  return {
-    id: "job-1",
-    subtopic_id: "st-1-uuid",
-    status: "queued",
-    round_count: 0,
-    reviewer_notes: null,
-    error: null,
-    source_material_version_id: null,
-    quiz_version_id: null,
-    ...over,
-  };
-}
-
 function renderPage(initialPath = path) {
   return render(
     <MemoryRouter
@@ -170,13 +149,18 @@ describe("AdminMaterialsTopicDetailPage", () => {
     vi.mocked(getTopicMaterial).mockReset();
     vi.mocked(getSubtopicMaterial).mockReset();
     vi.mocked(listTopicGenerationRuns).mockReset();
+    vi.mocked(fetchTopicItemStats).mockReset();
     vi.mocked(getGenerationReview).mockReset();
     vi.mocked(getGenerationRun).mockReset();
     vi.mocked(publishGenerationRun).mockReset();
-    vi.mocked(enqueueCurriculumGeneration).mockReset();
-    vi.mocked(pollCurriculumGenerationJob).mockReset();
     vi.mocked(fetchLearningDirectory).mockResolvedValue(directory());
     vi.mocked(listTopicGenerationRuns).mockResolvedValue([]);
+    vi.mocked(fetchTopicItemStats).mockResolvedValue({
+      topic_id: "topic-1-uuid",
+      quiz_version_id: null,
+      minimum_n: 20,
+      items: [],
+    });
     vi.mocked(getGenerationReview).mockResolvedValue({
       run_id: "run-1",
       topic_id: "topic-1-uuid",
@@ -290,6 +274,8 @@ describe("AdminMaterialsTopicDetailPage", () => {
     expect(screen.getByRole("complementary", { name: "Published quiz" })).toHaveClass(
       "lesson-layout__aside",
     );
+    expect(await screen.findByRole("region", { name: "Item statistics" })).toBeInTheDocument();
+    expect(screen.getByText(/Not enough responses to flag items yet/)).toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: "Continue" }));
     expect(await screen.findByRole("heading", { name: "Introduction" })).toBeInTheDocument();
@@ -468,83 +454,5 @@ describe("AdminMaterialsTopicDetailPage", () => {
     expect(screen.getByText("Tens sit to the left of ones.")).toBeInTheDocument();
     expect(getSubtopicMaterial).toHaveBeenCalledWith("st-1-uuid");
     expect(getTopicMaterial).not.toHaveBeenCalled();
-  });
-
-  it("generates a subtopic lesson and quiz, then refreshes the catalog", async () => {
-    const user = userEvent.setup();
-    vi.mocked(enqueueCurriculumGeneration).mockResolvedValue(curriculumJob());
-    vi.mocked(pollCurriculumGenerationJob).mockResolvedValue(
-      curriculumJob({
-        status: "succeeded",
-        round_count: 2,
-        reviewer_notes: "Approved. Add the pairing diagram.",
-        source_material_version_id: "mv-1",
-        quiz_version_id: "qv-1",
-      }),
-    );
-    vi.mocked(fetchLearningDirectory)
-      .mockResolvedValueOnce(directory())
-      .mockResolvedValueOnce(
-        directory({
-          subtopics: [
-            {
-              id: "st-1-uuid",
-              title: "Place value",
-              slug: "place-value",
-              sequence: 1,
-              has_lesson: true,
-              lesson_completed: false,
-              progress_percent: 0,
-              quiz: {
-                id: "quiz-st-1",
-                title: "Place value check",
-                scope: "subtopic_mastery",
-                available: true,
-                unlocked: true,
-                locked_reason: null,
-                pass_threshold_percent: 70,
-                attempt_count: 0,
-                best_score_percent: null,
-                passed: false,
-                in_progress_attempt_id: null,
-                recent_attempts: [],
-              },
-            },
-          ],
-        }),
-      );
-
-    renderPage();
-
-    expect(
-      await screen.findByText(/Requires a curriculum PDF uploaded and ingested/i),
-    ).toBeInTheDocument();
-    await user.click(screen.getByRole("button", { name: "Generate lesson & quiz" }));
-
-    expect(enqueueCurriculumGeneration).toHaveBeenCalledWith("st-1-uuid");
-    expect(await screen.findByText("Approved. Add the pairing diagram.")).toBeInTheDocument();
-    await waitFor(() => {
-      expect(fetchLearningDirectory).toHaveBeenCalledTimes(2);
-    });
-    expect(await screen.findByText(/Place value check/)).toBeInTheDocument();
-    expect(screen.getByText(/Published lesson/)).toBeInTheDocument();
-  });
-
-  it("shows curriculum generation failure without refreshing the catalog", async () => {
-    const user = userEvent.setup();
-    vi.mocked(enqueueCurriculumGeneration).mockResolvedValue(curriculumJob());
-    vi.mocked(pollCurriculumGenerationJob).mockResolvedValue(
-      curriculumJob({
-        status: "failed",
-        error: "No ingested chunks for this subtopic.",
-      }),
-    );
-
-    renderPage();
-    await user.click(await screen.findByRole("button", { name: "Generate lesson & quiz" }));
-
-    expect(await screen.findByText("No ingested chunks for this subtopic.")).toBeInTheDocument();
-    expect(screen.getByText("Failed")).toBeInTheDocument();
-    expect(fetchLearningDirectory).toHaveBeenCalledTimes(1);
   });
 });

@@ -21,6 +21,7 @@ from education_platform.modules.generation.adk import (
     live_lesson_runner,
     stitch_agent_instruction,
 )
+from education_platform.modules.generation.blueprint import section_source_length_error
 
 _OVERFLOW_CHARS = 8000
 _MERMAID_FENCE = re.compile(r"```mermaid\s*([\s\S]*?)```", re.IGNORECASE)
@@ -29,9 +30,12 @@ _MERMAID_START = re.compile(
     r"erDiagram|journey|gantt|pie|mindmap)\b",
     re.IGNORECASE,
 )
+MERMAID_UNREPAIRED_PREFIX = "Unrepaired mermaid diagram"
 
 _SECTION_SYSTEM = instructional_designer_instruction(heading_style="section")
 _STITCH_SYSTEM = stitch_agent_instruction()
+_HEADING_LINE = re.compile(r"^(#{1,6})\s+(.+?)\s*$")
+_SLIDE_PREFIX = re.compile(r"^slide\s+\d+\s+[—–-]\s+", re.IGNORECASE)
 
 
 class SectionPass(StrEnum):
@@ -88,6 +92,11 @@ def carry_forward_brief(request: LessonSectionRequest) -> str:
     )
 
 
+def _mermaid_label(heading: str) -> str:
+    cleaned = heading.replace('"', "'")
+    return cleaned[:60] or "Idea"
+
+
 def parse_mermaid_diagram(source: str) -> str:
     """Boundary parse of one mermaid body. Invalid → ValueError, not a half-diagram."""
     text = source.strip()
@@ -103,12 +112,89 @@ def parse_mermaid_diagram(source: str) -> str:
     return text
 
 
-def assert_usable_mermaid(markdown: str) -> None:
-    fences = _MERMAID_FENCE.findall(markdown)
-    if not fences:
-        raise ValueError("lesson section must include a mermaid fence")
-    for body in fences:
+def repair_mermaid_diagram(source: str, heading: str = "Concept") -> str:
+    """Repair unbalanced brackets in a non-empty fence. Empty source raises."""
+    original = source.strip()
+    if not original:
+        raise ValueError("mermaid diagram is empty")
+    text = original
+    first = text.splitlines()[0].strip()
+    if _MERMAID_START.match(first) is None:
+        text = "flowchart TD\n  " + text
+    diff_brackets = text.count("[") - text.count("]")
+    if diff_brackets > 0:
+        text += "]" * diff_brackets
+    elif diff_brackets < 0:
+        text = text.replace("]", "", abs(diff_brackets))
+    diff_parens = text.count("(") - text.count(")")
+    if diff_parens > 0:
+        text += ")" * diff_parens
+    elif diff_parens < 0:
+        text = text.replace(")", "", abs(diff_parens))
+    try:
+        return parse_mermaid_diagram(text)
+    except ValueError as exc:
+        raise ValueError(
+            f"{MERMAID_UNREPAIRED_PREFIX} in {heading!r}: {exc}. "
+            "Refusing to replace source content with a generic stub."
+        ) from exc
+
+
+def repair_mermaid_fences(markdown: str, heading: str = "Concept") -> str:
+    """Repair any mermaid fences present. A lesson without a diagram is valid."""
+    repaired_markdown = markdown
+    for match in reversed(list(_MERMAID_FENCE.finditer(markdown))):
+        body = match.group(1)
+        try:
+            parse_mermaid_diagram(body)
+            continue
+        except ValueError:
+            pass
+        repaired_body = repair_mermaid_diagram(body, heading)
+        repaired_fence = f"```mermaid\n{repaired_body.strip()}\n```"
+        repaired_markdown = (
+            repaired_markdown[: match.start()] + repaired_fence + repaired_markdown[match.end() :]
+        )
+    return repaired_markdown
+
+
+def assert_parseable_mermaid(markdown: str) -> None:
+    """Every mermaid fence present must parse. No fence is required."""
+    for body in _MERMAID_FENCE.findall(markdown):
         parse_mermaid_diagram(body)
+
+
+def normalize_lesson_heading(text: str) -> str:
+    """Case-folded heading with a leading 'Slide N —' prefix removed."""
+    cleaned = _SLIDE_PREFIX.sub("", text.strip())
+    return " ".join(cleaned.casefold().split())
+
+
+def extract_lesson_section(markdown: str, heading: str) -> str:
+    """Markdown for one heading, without later headings' teaching text."""
+    wanted = normalize_lesson_heading(heading)
+    if not wanted:
+        return ""
+    lines = markdown.splitlines()
+    start: int | None = None
+    level = 2
+    for index, line in enumerate(lines):
+        match = _HEADING_LINE.match(line.strip())
+        if match is None:
+            continue
+        if normalize_lesson_heading(match.group(2)) == wanted:
+            start = index
+            level = len(match.group(1))
+            break
+    if start is None:
+        return ""
+    end = len(lines)
+    for index in range(start + 1, len(lines)):
+        match = _HEADING_LINE.match(lines[index].strip())
+        if match is not None and len(match.group(1)) <= level:
+            end = index
+            break
+    return "\n".join(lines[start:end]).strip()
 
 
 def extract_recap(markdown: str, heading: str) -> str:
@@ -119,20 +205,18 @@ def extract_recap(markdown: str, heading: str) -> str:
     )
     if match is not None:
         return " ".join(match.group(1).split())[:400]
+    # Narrative sections may end with a plain closing paragraph instead of a bold label.
+    paragraphs = [p.strip() for p in markdown.strip().split("\n\n") if p.strip()]
+    for paragraph in reversed(paragraphs):
+        if paragraph.startswith("##") or paragraph.startswith("```"):
+            continue
+        return " ".join(paragraph.split())[:400]
     return heading
 
 
 def section_from_chunks(request: LessonSectionRequest) -> str:
-    """Heuristic teach rewrite grounded in this node's excerpts only."""
+    """Heuristic narrative rewrite grounded in this node's excerpts only."""
     excerpt = _snippet(" ".join(request.chunk_texts), 400)
-    label = _mermaid_label(request.heading)
-    mermaid = (
-        "```mermaid\n"
-        f"flowchart TD\n"
-        f'  idea["{label}"] --> why[Why it matters]\n'
-        f"  why --> try[Try it]\n"
-        "```"
-    )
     idea_line = (
         f"In {request.grade_voice}, {request.heading} means this: {excerpt}"
         if request.pass_kind is not SectionPass.EXAMPLES
@@ -143,22 +227,20 @@ def section_from_chunks(request: LessonSectionRequest) -> str:
         if request.pass_kind is not SectionPass.IDEA
         else f"Hold the definition of {request.heading}; examples come next."
     )
-    prior = ", ".join(request.prior_titles) or "an unrelated idea"
+    prior = ", ".join(request.prior_titles) or "nothing yet in this topic"
     return (
         f"## {request.heading}\n\n"
-        f"**The idea.** {idea_line}\n\n"
-        f"**Why it matters.** You will use {request.heading} in later problems in this topic.\n\n"
-        f"{mermaid}\n\n"
-        f"**Worked example.** {example_line}\n\n"
-        f"**Try it.** Using only {request.heading}, "
-        f"answer a question about: {_snippet(excerpt, 80)}\n\n"
-        f"**Common mistakes.** Do not mix this up with {prior}. Stay with the excerpt.\n\n"
-        f"**Recap.** {request.heading}: {_snippet(excerpt, 120)}\n"
+        f"{idea_line}\n\n"
+        f"Building on {prior}, here is how it works in practice. {example_line}\n\n"
+        f"Now try one yourself: using only {request.heading}, "
+        f"answer a question about {_snippet(excerpt, 80)}.\n\n"
+        f"By the end of this section you can explain {request.heading} and use it: "
+        f"{_snippet(excerpt, 120)}\n"
     )
 
 
 def stitch_sections(request: StitchRequest) -> str:
-    """2–3 sentence bridges and one topic recap. Does not rewrite the teaching."""
+    """Short narrative transitions and one topic recap. Does not rewrite the teaching."""
     if not request.sections:
         raise ValueError("cannot stitch an empty lesson")
     parts: list[str] = [f"# Lesson\n\n{request.grade_voice}"]
@@ -167,9 +249,7 @@ def stitch_sections(request: StitchRequest) -> str:
         if index > 0:
             previous = titles[index - 1]
             parts.append(
-                f"*Bridge.* You already learned {previous}. "
-                f"Next we teach {section.heading} using the new excerpts, "
-                f"without repeating the earlier definitions."
+                f"You just saw {previous}. Now we use that to understand {section.heading}."
             )
         parts.append(section.markdown.strip())
     recap_bits = "; ".join(titles)
@@ -206,6 +286,44 @@ def write_topic_lesson(
     ).markdown
 
 
+def _spec_from_request(item: LessonSectionRequest) -> LessonSectionSpec:
+    return LessonSectionSpec(
+        heading=item.heading,
+        objectives=item.objectives,
+        chunk_texts=item.chunk_texts,
+        grade_voice=item.grade_voice,
+        glossary=item.glossary,
+        prior_titles=item.prior_titles,
+        defined_terms=item.defined_terms,
+        prior_recap=item.prior_recap,
+        pass_kind=item.pass_kind.value,
+        heading_style="section",
+    )
+
+
+def _live_section_writer(runner: LessonRunner, job_id: UUID | None) -> SectionWriter:
+    """One heading per runner call. The caller stitches the finished sections."""
+
+    def write(request: LessonSectionRequest) -> str:
+        settings = get_settings()
+        result = runner.generate(
+            LessonRunRequest(
+                job_id=job_id or uuid4(),
+                sections=(_spec_from_request(request),),
+                model=settings.adk_model,
+                max_review_rounds=settings.adk_max_review_rounds,
+            )
+        )
+        text = result.sections_markdown[0] if result.sections_markdown else result.markdown
+        if result.review_status.value != "approved" and not text.strip():
+            raise ValueError(
+                result.reviewer_notes or "Lesson pedagogy reviewer rejected the draft."
+            )
+        return text
+
+    return write
+
+
 def write_topic_lesson_document(
     sections: Sequence[LessonSectionRequest],
     *,
@@ -214,14 +332,20 @@ def write_topic_lesson_document(
     runner: LessonRunner | None = None,
     job_id: UUID | None = None,
 ) -> WrittenTopicLesson:
-    """Same sequential walk as ``write_topic_lesson``, plus the per-node sections."""
+    """Same sequential walk as ``write_topic_lesson``, plus the per-node sections.
+
+    A live run stays on this loop: each step is one heading, with that heading's
+    excerpts and the previous recap. ``stitch_sections`` joins the results.
+    """
     if not sections:
         raise ValueError("cannot write a lesson with no sections")
+    using_live = False
     if write_section is None and write_stitch is None:
         if runner is None and get_settings().openrouter_configured:
             runner = live_lesson_runner()
         if runner is not None:
-            return _lesson_from_runner(sections, runner, job_id=job_id)
+            write_section = _live_section_writer(runner, job_id)
+            using_live = True
     written: list[LessonSection] = []
     glossary = sections[0].glossary
     defined = sections[0].defined_terms
@@ -236,6 +360,12 @@ def write_topic_lesson_document(
             prior_recap=prior_recap,
         )
         markdown = _write_section_passes(request, write_section)
+        if using_live:
+            length_error = section_source_length_error(
+                markdown, request.chunk_texts, heading=request.heading
+            )
+            if length_error is not None:
+                raise ValueError(length_error)
         recap = extract_recap(markdown, request.heading)
         terms = _merge_terms(defined, request.heading)
         written.append(
@@ -256,61 +386,6 @@ def write_topic_lesson_document(
     else:
         markdown = stitch_sections(stitch_request)
     return WrittenTopicLesson(sections=tuple(written), markdown=markdown)
-
-
-def _lesson_from_runner(
-    sections: Sequence[LessonSectionRequest],
-    runner: LessonRunner,
-    *,
-    job_id: UUID | None,
-) -> WrittenTopicLesson:
-    expanded: list[LessonSectionRequest] = []
-    for seed in sections:
-        expanded.extend(_split_if_needed(seed))
-    settings = get_settings()
-    specs = tuple(
-        LessonSectionSpec(
-            heading=item.heading,
-            objectives=item.objectives,
-            chunk_texts=item.chunk_texts,
-            grade_voice=item.grade_voice,
-            glossary=item.glossary,
-            prior_titles=item.prior_titles,
-            defined_terms=item.defined_terms,
-            prior_recap=item.prior_recap,
-            pass_kind=item.pass_kind.value,
-            heading_style="section",
-        )
-        for item in expanded
-    )
-    result = runner.generate(
-        LessonRunRequest(
-            job_id=job_id or uuid4(),
-            sections=specs,
-            model=settings.adk_model,
-            max_review_rounds=settings.adk_max_review_rounds,
-        )
-    )
-    if result.review_status.value != "approved" and not result.markdown.strip():
-        raise ValueError(result.reviewer_notes or "Lesson pedagogy reviewer rejected the draft.")
-    markdowns = list(result.sections_markdown) or [result.markdown]
-    written: list[LessonSection] = []
-    for index, request in enumerate(expanded):
-        markdown = markdowns[index] if index < len(markdowns) else result.markdown
-        assert_usable_mermaid(markdown)
-        written.append(
-            LessonSection(
-                heading=request.heading,
-                markdown=markdown,
-                recap=extract_recap(markdown, request.heading),
-                defined_terms=_merge_terms((), request.heading),
-            )
-        )
-    stitched = result.markdown.strip() or stitch_sections(
-        StitchRequest(grade_voice=sections[0].grade_voice, sections=tuple(written))
-    )
-    assert_usable_mermaid(stitched)
-    return WrittenTopicLesson(sections=tuple(written), markdown=stitched)
 
 
 def _write_section_passes(request: LessonSectionRequest, writer: SectionWriter | None) -> str:
@@ -344,12 +419,17 @@ def _split_if_needed(request: LessonSectionRequest) -> tuple[LessonSectionReques
 def _render_section(request: LessonSectionRequest, writer: SectionWriter | None) -> str:
     markdown = _produce_section(request, writer)
     try:
-        assert_usable_mermaid(markdown)
+        assert_parseable_mermaid(markdown)
         return markdown
     except ValueError:
         markdown = _produce_section(request, writer)
-        assert_usable_mermaid(markdown)
-        return markdown
+        try:
+            assert_parseable_mermaid(markdown)
+            return markdown
+        except ValueError:
+            repaired = repair_mermaid_fences(markdown, request.heading)
+            assert_parseable_mermaid(repaired)
+            return repaired
 
 
 def _produce_section(request: LessonSectionRequest, writer: SectionWriter | None) -> str:
@@ -380,8 +460,3 @@ def _snippet(text: str, limit: int) -> str:
     if len(collapsed) <= limit:
         return collapsed
     return collapsed[: limit - 1].rstrip() + "…"
-
-
-def _mermaid_label(heading: str) -> str:
-    cleaned = heading.replace('"', "'")
-    return cleaned[:60] or "Idea"

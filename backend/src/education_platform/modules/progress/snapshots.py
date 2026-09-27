@@ -71,7 +71,7 @@ class PostgresSnapshotReader:
         heal: bool,
     ) -> GenerationRunOut:
         run = await generation_service.get_run(session, scope, run_id, heal=heal)
-        jobs = await generation_service.in_flight_jobs(session, [run.id])
+        jobs = await generation_service.jobs_for_runs(session, [run])
         qa_items = await generation_service.qa_items_for_run(session, run)
         return GenerationRunOut.from_domain(run, jobs.get(run.id, ()), qa_items)
 

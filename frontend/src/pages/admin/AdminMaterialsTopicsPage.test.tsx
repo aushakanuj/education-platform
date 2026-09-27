@@ -19,6 +19,9 @@ vi.mock("../../api/materials", () => ({
 vi.mock("../../api/generation", () => ({
   listTopicGenerationRuns: vi.fn(),
   submitSubjectGenerationRun: vi.fn(),
+  deleteUnpublishedTopic: vi.fn(),
+  discardGenerationRun: vi.fn(),
+  retryGenerationRun: vi.fn(),
   isInFlightGenerationPhase: (phase: string) =>
     phase === "indexing" ||
     phase === "outlining" ||
@@ -27,7 +30,13 @@ vi.mock("../../api/generation", () => ({
     phase === "qa_review",
 }));
 
-import { listTopicGenerationRuns, submitSubjectGenerationRun } from "../../api/generation";
+import {
+  deleteUnpublishedTopic,
+  discardGenerationRun,
+  listTopicGenerationRuns,
+  retryGenerationRun,
+  submitSubjectGenerationRun,
+} from "../../api/generation";
 import { fetchLearningDirectory } from "../../api/materials";
 
 const mockDirectory: LearningDirectory = {
@@ -117,6 +126,9 @@ describe("AdminMaterialsTopicsPage", () => {
     vi.mocked(listTopicGenerationRuns).mockReset();
     vi.mocked(listTopicGenerationRuns).mockResolvedValue([]);
     vi.mocked(submitSubjectGenerationRun).mockReset();
+    vi.mocked(deleteUnpublishedTopic).mockReset();
+    vi.mocked(discardGenerationRun).mockReset();
+    vi.mocked(retryGenerationRun).mockReset();
   });
 
   it("lists chapter cards instead of only the parent topic row", async () => {
@@ -208,8 +220,92 @@ describe("AdminMaterialsTopicsPage", () => {
 
     renderPage();
     expect(await screen.findByText("in progress")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Cancel" })).toBeInTheDocument();
     expect(screen.queryByText("published")).not.toBeInTheDocument();
     expect(screen.getByText("Fractions")).toBeInTheDocument();
     expect(screen.queryByText("Approved Materials")).not.toBeInTheDocument();
+  });
+
+  it("cancels an in-progress run and retries the same PDF", async () => {
+    const user = userEvent.setup();
+    vi.mocked(fetchLearningDirectory).mockResolvedValue({
+      ...mockDirectory,
+      subjects: [
+        {
+          ...mockDirectory.subjects[0]!,
+          topics: [{ ...mockDirectory.subjects[0]!.topics[1]!, has_topic_lesson: false }],
+        },
+      ],
+    });
+    vi.mocked(listTopicGenerationRuns).mockResolvedValue([
+      {
+        id: "run-1",
+        topic_id: "topic-2-uuid",
+        title: "Fractions source",
+        phase: "outline_review",
+        target_item_count: 80,
+        submitted_by_user_id: "u1",
+        intake_version_id: "v1",
+        failure_reason: null,
+        outline: null,
+        draft_lesson_markdown: null,
+        jobs: [],
+        created_at: "2026-09-09T00:00:00Z",
+      },
+    ]);
+    vi.mocked(discardGenerationRun).mockResolvedValue({
+      id: "run-1",
+      topic_id: "topic-2-uuid",
+      title: "Fractions source",
+      phase: "discarded",
+      target_item_count: 80,
+      submitted_by_user_id: "u1",
+      intake_version_id: "v1",
+      failure_reason: null,
+      outline: null,
+      draft_lesson_markdown: null,
+      jobs: [],
+      created_at: "2026-09-09T00:00:00Z",
+    });
+    vi.mocked(retryGenerationRun).mockResolvedValue({
+      id: "run-1",
+      topic_id: "topic-2-uuid",
+      title: "Fractions source",
+      phase: "outlining",
+      target_item_count: 80,
+      submitted_by_user_id: "u1",
+      intake_version_id: "v1",
+      failure_reason: null,
+      outline: null,
+      draft_lesson_markdown: null,
+      jobs: [],
+      created_at: "2026-09-09T00:00:00Z",
+    });
+
+    renderPage();
+    await user.click(await screen.findByRole("button", { name: "Cancel" }));
+    expect(discardGenerationRun).toHaveBeenCalledWith("run-1");
+    await user.click(await screen.findByRole("button", { name: "Retry" }));
+    expect(retryGenerationRun).toHaveBeenCalledWith("run-1");
+    expect(await screen.findByText("in progress")).toBeInTheDocument();
+  });
+
+  it("removes an unpublished unit and leaves published units", async () => {
+    const user = userEvent.setup();
+    vi.mocked(deleteUnpublishedTopic).mockResolvedValue(undefined);
+
+    renderPage();
+
+    expect(await screen.findByText("Properties of Rectangles and Squares")).toBeInTheDocument();
+    expect(screen.getAllByRole("button", { name: "Remove" })).toHaveLength(1);
+    await user.click(screen.getByRole("button", { name: "Remove" }));
+    await user.click(screen.getByRole("button", { name: "Confirm remove" }));
+
+    expect(deleteUnpublishedTopic).toHaveBeenCalledWith("topic-2-uuid");
+    await waitFor(() => {
+      expect(screen.queryByText("Fractions")).not.toBeInTheDocument();
+    });
+    expect(screen.getByText("Properties of Rectangles and Squares")).toBeInTheDocument();
+    expect(screen.getByText("Square Numbers and Odd Number Sums")).toBeInTheDocument();
   });
 });

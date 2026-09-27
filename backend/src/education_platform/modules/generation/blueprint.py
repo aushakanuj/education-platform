@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from collections.abc import Sequence
 from dataclasses import dataclass
 
@@ -25,7 +26,69 @@ QUIZ_HARD = 2
 ITEM_BATCH_MIN = 10
 ITEM_BATCH_MAX = 16
 
+# Callers that only have finished markdown (the curriculum gate) keep this floor.
+# Topic lessons that still have source excerpts use the sourced floors below.
 MIN_CONCEPT_PROSE_CHARS = 240
+# About two short paragraphs. A one-paragraph paraphrase of real teaching text fails.
+MIN_SOURCED_PROSE_CHARS = 1200
+# An honest "figure was not transcribed" note. One missing diagram must not fail the chapter.
+MIN_DIAGRAM_PROSE_CHARS = 40
+# Same marker as rag.chunking.DIAGRAM_PLACEHOLDER. Kept here so the gate does not import Docling.
+DIAGRAM_PLACEHOLDER = "[Diagram]"
+
+_MERMAID_FENCE = re.compile(r"```mermaid\s*([\s\S]*?)```", re.IGNORECASE)
+_BULLET_LINE = re.compile(r"^\s*[-*]\s+")
+_HEADING_LINE = re.compile(r"^#{1,6}\s+\S")
+
+
+def excerpts_are_diagram_only(texts: Sequence[str]) -> bool:
+    """True when every non-empty excerpt is only the untranscribed-figure placeholder."""
+    saw_placeholder = False
+    for text in texts:
+        collapsed = " ".join(text.split())
+        if not collapsed:
+            continue
+        if DIAGRAM_PLACEHOLDER not in collapsed:
+            return False
+        remainder = collapsed.replace(DIAGRAM_PLACEHOLDER, " ")
+        remainder = " ".join(remainder.split()).strip(" .,:;!-")
+        if remainder:
+            return False
+        saw_placeholder = True
+    return saw_placeholder
+
+
+def concept_prose_length(content: str) -> int:
+    """Characters of teaching prose, ignoring mermaid fences, headings, and bullets."""
+    body = _MERMAID_FENCE.sub(" ", content)
+    lines = [
+        line.strip()
+        for line in body.splitlines()
+        if line.strip()
+        and not _BULLET_LINE.match(line)
+        and _HEADING_LINE.match(line.strip()) is None
+    ]
+    return len(" ".join(lines))
+
+
+def section_source_length_error(
+    content: str,
+    chunk_texts: Sequence[str],
+    *,
+    heading: str = "",
+) -> str | None:
+    """Length gate that knows whether the source is real teaching text or a figure placeholder."""
+    diagram_only = excerpts_are_diagram_only(chunk_texts)
+    floor = MIN_DIAGRAM_PROSE_CHARS if diagram_only else MIN_SOURCED_PROSE_CHARS
+    if concept_prose_length(content) >= floor:
+        return None
+    label = heading.strip() or "Section"
+    if diagram_only:
+        return (
+            f"{label} is an untranscribed figure and is shorter than {floor} characters of prose."
+        )
+    return f"{label} paraphrases real source text in fewer than {floor} characters of prose."
+
 
 # Curriculum bank slots: 20 theory / 60 problem and 32 easy / 32 medium / 16 hard.
 # Bloom is assigned so remember/understand → easy, apply → medium, analyze → hard.

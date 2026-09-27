@@ -6,11 +6,11 @@ import re
 from collections.abc import Sequence
 from datetime import UTC, datetime
 from decimal import Decimal
-from typing import cast
+from typing import Any, cast
 from uuid import UUID
 
 from fastapi import UploadFile
-from sqlalchemy import case, func, select
+from sqlalchemy import case, delete, func, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -22,11 +22,15 @@ from education_platform.modules.academics.models import (
     Topic,
 )
 from education_platform.modules.assessments.models import (
+    AttemptAnswer,
+    CommonMasteryQuiz,
     Question,
     QuestionAnswerKey,
     QuestionOption,
+    QuestionOutcomeTag,
     QuestionVersion,
     QuestionVersionStatus,
+    QuizAttempt,
     QuizItem,
     QuizMaterialBinding,
     QuizRelease,
@@ -44,7 +48,12 @@ from education_platform.modules.generation.items import (
 from education_platform.modules.generation.models import (
     ContentGenerationOutlineNode,
     ContentGenerationRun,
+    CurriculumGenerationJob,
+    GenerationChangeRequest,
     GenerationJob,
+    GenerationRevision,
+    ReviewRoundClosure,
+    ReviewRoundRow,
 )
 from education_platform.modules.generation.outline import largest_remainder
 from education_platform.modules.generation.types import (
@@ -65,26 +74,22 @@ from education_platform.modules.generation.types import (
     RunPhase,
 )
 from education_platform.modules.materials.models import (
+    SourceChunk,
     SourceMaterial,
     SourceMaterialStatus,
     SourceMaterialVersion,
     SourceMaterialVersionStatus,
+    StudentMaterialProgress,
 )
 from education_platform.modules.progress.types import run_subject
 from education_platform.modules.progress.wake import publish_wake_async
 from education_platform.modules.rag import storage
+from education_platform.modules.rag.models import ChunkEmbedding, IngestJob
 from education_platform.modules.rag.queue import queue_topic_intake_pdf, validate_pdf_upload
+from education_platform.modules.rag.storage import delete_blob
 
 _SLUG_RE = re.compile(r"[^a-z0-9]+")
 _IN_FLIGHT_UNIQUE = "uq_content_generation_runs_one_in_flight_topic"
-_WORKER_PHASES = frozenset(
-    {
-        RunPhase.INDEXING,
-        RunPhase.OUTLINING,
-        RunPhase.GENERATING,
-        RunPhase.PUBLISHED,
-    }
-)
 _POST_ACCEPT = frozenset({RunPhase.GENERATING, RunPhase.QA_REVIEW, RunPhase.PUBLISHED})
 
 
@@ -249,6 +254,40 @@ async def in_flight_jobs(
     grouped: dict[UUID, list[tuple[str, str]]] = {run_id: [] for run_id in run_ids}
     for row in rows:
         grouped.setdefault(row.run_id, []).append((row.kind.value, row.status.value))
+    return grouped
+
+
+async def jobs_for_runs(
+    session: AsyncSession, runs: Sequence[GenerationRun]
+) -> dict[UUID, list[tuple[str, str]]]:
+    """In-flight jobs, plus the latest failed job once a run has failed.
+
+    Queued and running jobs drive the live stepper. A failed lesson or item job
+    is no longer in flight, so without it the page falls back to outline review.
+    """
+    grouped = await in_flight_jobs(session, [run.id for run in runs])
+    failed_ids = [run.id for run in runs if run.phase is RunPhase.FAILED]
+    if not failed_ids:
+        return grouped
+    rows = (
+        await session.scalars(
+            select(GenerationJob)
+            .where(
+                GenerationJob.run_id.in_(tuple(failed_ids)),
+                GenerationJob.status == GenerationJobStatus.FAILED,
+            )
+            .order_by(GenerationJob.created_at.desc())
+        )
+    ).all()
+    seen: set[UUID] = set()
+    for row in rows:
+        if row.run_id in seen:
+            continue
+        seen.add(row.run_id)
+        marker = (row.kind.value, row.status.value)
+        existing = grouped.setdefault(row.run_id, [])
+        if marker not in existing:
+            existing.append(marker)
     return grouped
 
 
@@ -529,8 +568,7 @@ async def accept_outline(
     stored = await _load_run_row(session, run_id)
     stored.phase = RunPhase.GENERATING
     stored.failure_reason = None
-    await _enqueue_generation_job(session, stored.id, GenerationJobKind.ITEMS)
-    await _enqueue_generation_job(session, stored.id, GenerationJobKind.LESSON)
+    await _enqueue_content_jobs(session, stored.id)
     await session.flush()
     await _notify_run(session, stored.id)
     return await get_run(session, scope, run_id)
@@ -548,14 +586,13 @@ async def discard_outline(
     if row.phase is RunPhase.DISCARDED:
         nodes = await _load_nodes(session, row.id)
         return _to_domain(row, nodes)
-    if row.phase in _WORKER_PHASES:
-        raise GenerationError(
-            "This run cannot be discarded while a worker owns it or after publish.",
-            status_code=409,
-        )
-    if row.phase not in {RunPhase.OUTLINE_REVIEW, RunPhase.FAILED, RunPhase.QA_REVIEW}:
+    if row.phase is RunPhase.PUBLISHED:
+        raise GenerationError("A published run cannot be discarded.", status_code=409)
+    if row.phase not in IN_FLIGHT_PHASES and row.phase is not RunPhase.FAILED:
         raise GenerationError("This run cannot be discarded.", status_code=409)
+    await _cancel_open_jobs(session, row.id)
     row.phase = RunPhase.DISCARDED
+    row.failure_reason = None
     await session.flush()
     await _notify_run(session, row.id)
     return await get_run(session, scope, run_id)
@@ -570,8 +607,8 @@ async def retry_failed(
     _require_closer(principal)
     row = await _load_run_row(session, run_id)
     await _authorised_topic(session, scope, row.topic_id)
-    if row.phase is not RunPhase.FAILED:
-        raise GenerationError("Only a failed run can be retried.", status_code=409)
+    if row.phase not in {RunPhase.FAILED, RunPhase.DISCARDED}:
+        raise GenerationError("Only a failed or discarded run can be retried.", status_code=409)
     if row.intake_source_material_version_id is None:
         raise GenerationError("Intake indexing failed. Submit a new PDF.", status_code=409)
     intake = await session.get(SourceMaterialVersion, row.intake_source_material_version_id)
@@ -587,11 +624,7 @@ async def retry_failed(
     elif kind is GenerationJobKind.ITEMS or kind is GenerationJobKind.LESSON:
         row.phase = RunPhase.GENERATING
         row.failure_reason = None
-        succeeded = await _succeeded_kinds(session, row.id)
-        if GenerationJobKind.ITEMS not in succeeded:
-            await _enqueue_generation_job(session, row.id, GenerationJobKind.ITEMS)
-        if GenerationJobKind.LESSON not in succeeded:
-            await _enqueue_generation_job(session, row.id, GenerationJobKind.LESSON)
+        await _enqueue_content_jobs(session, row.id)
     else:
         row.phase = RunPhase.OUTLINING
         row.failure_reason = None
@@ -605,6 +638,312 @@ async def retry_failed(
     await session.flush()
     await _notify_run(session, row.id)
     return await get_run(session, scope, run_id)
+
+
+def _topic_or_subtopics(
+    topic_column: Any,
+    subtopic_column: Any,
+    topic_id: UUID,
+    subtopic_ids: list[UUID],
+) -> Any:
+    clause = topic_column == topic_id
+    if subtopic_ids:
+        clause = clause | subtopic_column.in_(subtopic_ids)
+    return clause
+
+
+async def delete_unpublished_topic(
+    session: AsyncSession,
+    scope: Scope,
+    principal: Principal,
+    topic_id: UUID,
+) -> None:
+    """Remove a generation attempt that was never published to students."""
+    _require_closer(principal)
+    topic = await _authorised_topic(session, scope, topic_id)
+    subtopic_ids = list(
+        await session.scalars(select(Subtopic.id).where(Subtopic.topic_id == topic.id))
+    )
+    if await _topic_is_live(session, topic.id, subtopic_ids):
+        raise GenerationError(
+            "This unit is published. Remove is only for generation attempts.",
+            status_code=409,
+        )
+    blob_keys = await _delete_topic_rows(session, topic.id, subtopic_ids)
+    await session.delete(topic)
+    await session.flush()
+    for key in blob_keys:
+        delete_blob(key)
+
+
+async def _topic_is_live(session: AsyncSession, topic_id: UUID, subtopic_ids: list[UUID]) -> bool:
+    published_run = await session.scalar(
+        select(ContentGenerationRun.id).where(
+            ContentGenerationRun.topic_id == topic_id,
+            ContentGenerationRun.phase == RunPhase.PUBLISHED,
+        )
+    )
+    if published_run is not None:
+        return True
+    material_ids = list(
+        await session.scalars(
+            select(SourceMaterial.id).where(
+                _topic_or_subtopics(
+                    SourceMaterial.topic_id,
+                    SourceMaterial.subtopic_id,
+                    topic_id,
+                    subtopic_ids,
+                )
+            )
+        )
+    )
+    if material_ids:
+        published_material = await session.scalar(
+            select(SourceMaterialVersion.id).where(
+                SourceMaterialVersion.source_material_id.in_(material_ids),
+                SourceMaterialVersion.lifecycle_status == SourceMaterialVersionStatus.PUBLISHED,
+            )
+        )
+        if published_material is not None:
+            return True
+        progressed = await session.scalar(
+            select(StudentMaterialProgress.id).where(
+                StudentMaterialProgress.source_material_version_id.in_(
+                    select(SourceMaterialVersion.id).where(
+                        SourceMaterialVersion.source_material_id.in_(material_ids)
+                    )
+                )
+            )
+        )
+        if progressed is not None:
+            return True
+    quiz_ids = list(
+        await session.scalars(
+            select(CommonMasteryQuiz.id).where(
+                _topic_or_subtopics(
+                    CommonMasteryQuiz.topic_id,
+                    CommonMasteryQuiz.subtopic_id,
+                    topic_id,
+                    subtopic_ids,
+                )
+            )
+        )
+    )
+    if not quiz_ids:
+        return False
+    version_ids = select(QuizVersion.id).where(QuizVersion.quiz_id.in_(quiz_ids))
+    released = await session.scalar(
+        select(QuizVersion.id).where(
+            QuizVersion.quiz_id.in_(quiz_ids),
+            QuizVersion.lifecycle_status == QuizVersionStatus.RELEASED,
+        )
+    )
+    if released is not None:
+        return True
+    attempted = await session.scalar(
+        select(QuizAttempt.id).where(QuizAttempt.quiz_version_id.in_(version_ids))
+    )
+    return attempted is not None
+
+
+async def _delete_topic_rows(
+    session: AsyncSession, topic_id: UUID, subtopic_ids: list[UUID]
+) -> list[str]:
+    run_ids = list(
+        await session.scalars(
+            select(ContentGenerationRun.id).where(ContentGenerationRun.topic_id == topic_id)
+        )
+    )
+    revision_ids = (
+        list(
+            await session.scalars(
+                select(GenerationRevision.id).where(GenerationRevision.run_id.in_(run_ids))
+            )
+        )
+        if run_ids
+        else []
+    )
+    round_ids = (
+        list(
+            await session.scalars(
+                select(ReviewRoundRow.id).where(ReviewRoundRow.run_id.in_(run_ids))
+            )
+        )
+        if run_ids
+        else []
+    )
+    if run_ids:
+        await session.execute(delete(GenerationJob).where(GenerationJob.run_id.in_(run_ids)))
+    if revision_ids:
+        await session.execute(
+            delete(GenerationChangeRequest).where(
+                GenerationChangeRequest.revision_id.in_(revision_ids)
+            )
+        )
+    if round_ids:
+        await session.execute(
+            delete(ReviewRoundClosure).where(ReviewRoundClosure.round_id.in_(round_ids))
+        )
+        await session.execute(delete(ReviewRoundRow).where(ReviewRoundRow.id.in_(round_ids)))
+    if revision_ids:
+        await session.execute(
+            update(GenerationRevision)
+            .where(GenerationRevision.run_id.in_(run_ids))
+            .values(parent_revision_id=None)
+        )
+        await session.execute(
+            delete(GenerationRevision).where(GenerationRevision.run_id.in_(run_ids))
+        )
+    if run_ids:
+        await session.execute(
+            delete(ContentGenerationRun).where(ContentGenerationRun.id.in_(run_ids))
+        )
+    if subtopic_ids:
+        await session.execute(
+            delete(CurriculumGenerationJob).where(
+                CurriculumGenerationJob.subtopic_id.in_(subtopic_ids)
+            )
+        )
+
+    material_filter = _topic_or_subtopics(
+        SourceMaterial.topic_id,
+        SourceMaterial.subtopic_id,
+        topic_id,
+        subtopic_ids,
+    )
+    material_ids = list(await session.scalars(select(SourceMaterial.id).where(material_filter)))
+    version_ids = (
+        list(
+            await session.scalars(
+                select(SourceMaterialVersion.id).where(
+                    SourceMaterialVersion.source_material_id.in_(material_ids)
+                )
+            )
+        )
+        if material_ids
+        else []
+    )
+    blob_keys = (
+        list(
+            await session.scalars(
+                select(SourceMaterialVersion.blob_object_key).where(
+                    SourceMaterialVersion.id.in_(version_ids),
+                    SourceMaterialVersion.blob_object_key.is_not(None),
+                )
+            )
+        )
+        if version_ids
+        else []
+    )
+    chunk_ids = (
+        list(
+            await session.scalars(
+                select(SourceChunk.id).where(
+                    SourceChunk.source_material_version_id.in_(version_ids)
+                )
+            )
+        )
+        if version_ids
+        else []
+    )
+    if chunk_ids:
+        await session.execute(delete(ChunkEmbedding).where(ChunkEmbedding.chunk_id.in_(chunk_ids)))
+        await session.execute(delete(SourceChunk).where(SourceChunk.id.in_(chunk_ids)))
+    if version_ids:
+        await session.execute(
+            delete(IngestJob).where(IngestJob.source_material_version_id.in_(version_ids))
+        )
+        await session.execute(
+            delete(QuizMaterialBinding).where(
+                QuizMaterialBinding.source_material_version_id.in_(version_ids)
+            )
+        )
+        await session.execute(
+            delete(SourceMaterialVersion).where(SourceMaterialVersion.id.in_(version_ids))
+        )
+    if material_ids:
+        await session.execute(delete(SourceMaterial).where(SourceMaterial.id.in_(material_ids)))
+
+    quiz_ids = list(
+        await session.scalars(
+            select(CommonMasteryQuiz.id).where(
+                _topic_or_subtopics(
+                    CommonMasteryQuiz.topic_id,
+                    CommonMasteryQuiz.subtopic_id,
+                    topic_id,
+                    subtopic_ids,
+                )
+            )
+        )
+    )
+    quiz_version_ids = (
+        list(await session.scalars(select(QuizVersion.id).where(QuizVersion.quiz_id.in_(quiz_ids))))
+        if quiz_ids
+        else []
+    )
+    question_ids = (
+        list(
+            await session.scalars(select(Question.id).where(Question.subtopic_id.in_(subtopic_ids)))
+        )
+        if subtopic_ids
+        else []
+    )
+    question_version_ids = (
+        list(
+            await session.scalars(
+                select(QuestionVersion.id).where(QuestionVersion.question_id.in_(question_ids))
+            )
+        )
+        if question_ids
+        else []
+    )
+    if quiz_version_ids:
+        await session.execute(
+            delete(QuizItem).where(QuizItem.quiz_version_id.in_(quiz_version_ids))
+        )
+        await session.execute(
+            delete(QuizRelease).where(QuizRelease.quiz_version_id.in_(quiz_version_ids))
+        )
+        await session.execute(
+            delete(QuizMaterialBinding).where(
+                QuizMaterialBinding.quiz_version_id.in_(quiz_version_ids)
+            )
+        )
+    if question_version_ids:
+        await session.execute(
+            delete(AttemptAnswer).where(AttemptAnswer.question_version_id.in_(question_version_ids))
+        )
+        await session.execute(
+            delete(QuestionAnswerKey).where(
+                QuestionAnswerKey.question_version_id.in_(question_version_ids)
+            )
+        )
+        await session.execute(
+            delete(QuestionOption).where(
+                QuestionOption.question_version_id.in_(question_version_ids)
+            )
+        )
+        await session.execute(
+            delete(QuestionOutcomeTag).where(
+                QuestionOutcomeTag.question_version_id.in_(question_version_ids)
+            )
+        )
+        await session.execute(
+            delete(QuestionVersion).where(QuestionVersion.id.in_(question_version_ids))
+        )
+    if question_ids:
+        await session.execute(delete(Question).where(Question.id.in_(question_ids)))
+    if subtopic_ids:
+        await session.execute(
+            delete(LearningOutcome).where(LearningOutcome.subtopic_id.in_(subtopic_ids))
+        )
+    if quiz_version_ids:
+        await session.execute(delete(QuizVersion).where(QuizVersion.id.in_(quiz_version_ids)))
+    if quiz_ids:
+        await session.execute(delete(CommonMasteryQuiz).where(CommonMasteryQuiz.id.in_(quiz_ids)))
+    if subtopic_ids:
+        await session.execute(delete(Subtopic).where(Subtopic.id.in_(subtopic_ids)))
+    return [key for key in blob_keys if key]
 
 
 async def qa_items_for_run(session: AsyncSession, run: GenerationRun) -> list[QaItem]:
@@ -642,6 +981,8 @@ async def qa_items_for_run(session: AsyncSession, run: GenerationRun) -> list[Qa
         )
         rationales = key.distractor_rationales if key is not None else None
         rubric = key.scoring_rubric if key is not None else None
+        raw_blind = rubric.get("blind_solve") if isinstance(rubric, dict) else None
+        blind_solve = cast(dict[str, object], raw_blind) if isinstance(raw_blind, dict) else None
         out.append(
             QaItem(
                 question_id=question.id,
@@ -655,6 +996,7 @@ async def qa_items_for_run(session: AsyncSession, run: GenerationRun) -> list[Qa
                 sequence=item.sequence,
                 bloom=bloom_from_rubric(rubric),
                 misconception_labels=misconceptions_from_rubric(rubric),
+                blind_solve=blind_solve,
             )
         )
     return out
@@ -926,13 +1268,35 @@ async def _ensure_generating_jobs(session: AsyncSession, run: ContentGenerationR
         run.failure_reason = "Intake version is missing; cannot generate items."
         await session.flush()
         return
-    await _enqueue_generation_job(session, run.id, GenerationJobKind.ITEMS)
-    await _enqueue_generation_job(session, run.id, GenerationJobKind.LESSON)
+    await _enqueue_content_jobs(session, run.id)
     await session.flush()
+
+
+async def _cancel_open_jobs(session: AsyncSession, run_id: UUID) -> None:
+    jobs = (
+        await session.scalars(
+            select(GenerationJob).where(
+                GenerationJob.run_id == run_id,
+                GenerationJob.status.in_((GenerationJobStatus.QUEUED, GenerationJobStatus.RUNNING)),
+            )
+        )
+    ).all()
+    for job in jobs:
+        job.status = GenerationJobStatus.FAILED
+        job.error = "Cancelled."
 
 
 async def _notify_run(session: AsyncSession, run_id: UUID) -> None:
     await publish_wake_async(session, run_subject(run_id))
+
+
+async def _enqueue_content_jobs(session: AsyncSession, run_id: UUID) -> None:
+    """Enqueue the lesson first. Items wait until that lesson job has succeeded."""
+    succeeded = await _succeeded_kinds(session, run_id)
+    if GenerationJobKind.LESSON in succeeded:
+        await _enqueue_generation_job(session, run_id, GenerationJobKind.ITEMS)
+    else:
+        await _enqueue_generation_job(session, run_id, GenerationJobKind.LESSON)
 
 
 async def _enqueue_generation_job(

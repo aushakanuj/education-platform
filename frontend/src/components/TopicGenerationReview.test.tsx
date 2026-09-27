@@ -43,6 +43,7 @@ function workspace(over: Partial<ReviewWorkspace> = {}): ReviewWorkspace {
             force_create: false,
             proposed_outcomes: ["Add like fractions"],
             sequence: 1,
+            quota: 12,
           },
         ],
       },
@@ -89,6 +90,75 @@ describe("TopicGenerationReview", () => {
     expect(screen.queryByRole("button", { name: "Discard run" })).not.toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "Approve outline" }));
     expect(onApprove).toHaveBeenCalledTimes(1);
+  });
+
+  it("nests a subheading under its section with outcomes and a rolled-up question count", () => {
+    const base = workspace();
+    const revision = base.active_revision;
+    if (revision === null || revision.stage !== "outline") {
+      throw new Error("fixture");
+    }
+    render(
+      <TopicGenerationReview
+        workspace={workspace({
+          active_revision: {
+            ...revision,
+            snapshot: {
+              target_item_count: 80,
+              nodes: [
+                {
+                  node_key: "section",
+                  parent_node_key: null,
+                  slug: "properties",
+                  title: "6.1 Some Properties of Multiplication",
+                  token_mass: 0,
+                  prerequisite_score: "0",
+                  centrality: "0",
+                  weight: "0",
+                  matched_subtopic_id: null,
+                  force_create: false,
+                  proposed_outcomes: ["Use the distributive property"],
+                  sequence: 1,
+                  quota: 0,
+                },
+                {
+                  node_key: "increments",
+                  parent_node_key: "section",
+                  slug: "increments",
+                  title: "Increments in Products",
+                  token_mass: 171,
+                  prerequisite_score: "0.50",
+                  centrality: "0.80",
+                  weight: "0.4000",
+                  matched_subtopic_id: null,
+                  force_create: false,
+                  proposed_outcomes: ["Grow a product by a small increment"],
+                  sequence: 2,
+                  quota: 18,
+                },
+              ],
+            },
+          },
+        })}
+        busy={false}
+        canClose={false}
+        onApprove={vi.fn()}
+        onRequestChanges={vi.fn()}
+        onAcceptCurrent={vi.fn()}
+        onRewrite={vi.fn()}
+        onOverride={vi.fn()}
+        onDiscard={vi.fn()}
+      />,
+    );
+
+    const section = screen.getByText("Sequence 1: 6.1 Some Properties of Multiplication");
+    const child = screen.getByText("Sequence 2: Increments in Products");
+    expect(section.closest("li")?.querySelector(".outline-review__children")).toContainElement(child);
+    expect(screen.getByText("Use the distributive property")).toBeInTheDocument();
+    expect(screen.getByText("Grow a product by a small increment")).toBeInTheDocument();
+    expect(screen.getByText("0 tokens · 18 questions")).toBeInTheDocument();
+    expect(screen.getByText("171 tokens · 18 questions")).toBeInTheDocument();
+    expect(screen.getByRole("option", { name: "— Increments in Products" })).toBeInTheDocument();
   });
 
   it("lets an administrator close with accept, override, or discard", async () => {

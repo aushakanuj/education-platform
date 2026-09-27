@@ -763,7 +763,7 @@ def test_admin_accept_freezes_and_matches(
     body = accepted.json()
     assert body["phase"] == "generating"
     kinds = [job["kind"] for job in body["jobs"]]
-    assert set(kinds) == {"items", "lesson"}
+    assert set(kinds) == {"lesson"}
     assert all(job["status"] == "queued" for job in body["jobs"])
     nodes = body["outline"]["nodes"]
     assert all(node["quota"] is not None for node in nodes)
@@ -811,6 +811,104 @@ def test_discard_allows_new_submit(
     again = _submit_admin(client, admin_headers, seeded_topic_id, title="Second run")
     assert again.status_code == 202, again.text
     assert again.json()["run_id"] != str(run_id)
+    get_settings.cache_clear()
+
+
+def test_cancel_in_progress_run_then_retry_same_pdf(
+    client: TestClient,
+    admin_headers: dict[str, str],
+    seeded_topic_id: UUID,
+    seeded_db: Session,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    _silence_embed(monkeypatch, tmp_path)
+    response = _submit_admin(client, admin_headers, seeded_topic_id)
+    run_id = UUID(response.json()["run_id"])
+    intake_id = UUID(
+        client.get(f"/api/v1/teaching/generation-runs/{run_id}", headers=admin_headers).json()[
+            "intake_version_id"
+        ]
+    )
+    _index_run(seeded_db, intake_id)
+    cancelled = client.post(
+        f"/api/v1/teaching/generation-runs/{run_id}/discard",
+        headers=admin_headers,
+    )
+    assert cancelled.status_code == 200, cancelled.text
+    assert cancelled.json()["phase"] == "discarded"
+    seeded_db.expire_all()
+    outline_job = seeded_db.scalar(
+        select(GenerationJob).where(
+            GenerationJob.run_id == run_id,
+            GenerationJob.kind == GenerationJobKind.OUTLINE,
+        )
+    )
+    assert outline_job is not None
+    assert outline_job.status is GenerationJobStatus.FAILED
+    assert outline_job.error == "Cancelled."
+
+    outline_job.status = GenerationJobStatus.QUEUED
+    outline_job.error = None
+    seeded_db.commit()
+    process_generation_job_sync(outline_job.id, write_outline=_write_one_node)
+    seeded_db.expire_all()
+    revived = seeded_db.get(ContentGenerationRun, run_id)
+    assert revived is not None
+    assert revived.phase is RunPhase.DISCARDED
+
+    retried = client.post(
+        f"/api/v1/teaching/generation-runs/{run_id}/retry",
+        headers=admin_headers,
+    )
+    assert retried.status_code == 200, retried.text
+    assert retried.json()["phase"] == "outlining"
+    seeded_db.expire_all()
+    queued = seeded_db.scalar(
+        select(GenerationJob).where(
+            GenerationJob.run_id == run_id,
+            GenerationJob.kind == GenerationJobKind.OUTLINE,
+            GenerationJob.status == GenerationJobStatus.QUEUED,
+        )
+    )
+    assert queued is not None
+    get_settings.cache_clear()
+
+
+def test_delete_unpublished_topic_removes_the_attempt(
+    client: TestClient,
+    admin_headers: dict[str, str],
+    seeded_topic_id: UUID,
+    seeded_db: Session,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    _silence_embed(monkeypatch, tmp_path)
+    subject_id = _seeded_subject_id(seeded_db)
+    created = _submit_subject(client, admin_headers, subject_id, title="Scratch chapter")
+    assert created.status_code == 202, created.text
+    topic_id = UUID(created.json()["topic_id"])
+    run_id = UUID(created.json()["run_id"])
+    intake_id = UUID(
+        client.get(f"/api/v1/teaching/generation-runs/{run_id}", headers=admin_headers).json()[
+            "intake_version_id"
+        ]
+    )
+    _index_run(seeded_db, intake_id)
+    _outline_run(seeded_db, run_id, _write_one_node)
+
+    refused = client.delete(f"/api/v1/admin/topics/{seeded_topic_id}", headers=admin_headers)
+    assert refused.status_code == 409, refused.text
+
+    removed = client.delete(f"/api/v1/admin/topics/{topic_id}", headers=admin_headers)
+    assert removed.status_code == 204, removed.text
+    seeded_db.expire_all()
+    assert seeded_db.get(Topic, topic_id) is None
+    assert seeded_db.get(ContentGenerationRun, run_id) is None
+    assert seeded_db.get(Topic, seeded_topic_id) is not None
+    assert (
+        seeded_db.scalar(select(SourceMaterial).where(SourceMaterial.topic_id == topic_id)) is None
+    )
     get_settings.cache_clear()
 
 

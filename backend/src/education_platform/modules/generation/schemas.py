@@ -9,6 +9,7 @@ from uuid import UUID
 
 from pydantic import BaseModel, Field
 
+from education_platform.modules.generation.outline import preview_quotas
 from education_platform.modules.generation.revisions import snapshot_from_json
 from education_platform.modules.generation.types import (
     AcceptCurrent,
@@ -148,6 +149,15 @@ class OutlineOut(BaseModel):
     nodes: list[OutlineNodeOut]
 
 
+def _blind_qa_fields(raw: object) -> tuple[bool, str | None]:
+    """key_disputed is a real disagreement only. Errors and skips are not disputes."""
+    if not isinstance(raw, dict):
+        return False, None
+    answer = raw.get("answer")
+    blind_answer = answer.strip() if isinstance(answer, str) and answer.strip() else None
+    return raw.get("status") == "disagree", blind_answer
+
+
 class QaItemOut(BaseModel):
     question_id: UUID
     question_version_id: UUID
@@ -160,9 +170,12 @@ class QaItemOut(BaseModel):
     sequence: int
     bloom: str | None = None
     misconception_labels: list[str] = Field(default_factory=list)
+    key_disputed: bool = False
+    blind_answer: str | None = None
 
     @classmethod
     def from_domain(cls, item: QaItem) -> QaItemOut:
+        disputed, blind_answer = _blind_qa_fields(item.blind_solve)
         return cls(
             question_id=item.question_id,
             question_version_id=item.question_version_id,
@@ -175,6 +188,8 @@ class QaItemOut(BaseModel):
             sequence=item.sequence,
             bloom=item.bloom.value if item.bloom is not None else None,
             misconception_labels=list(item.misconception_labels),
+            key_disputed=disputed,
+            blind_answer=blind_answer,
         )
 
 
@@ -592,9 +607,10 @@ class OutlineNodeSnapshotOut(BaseModel):
     force_create: bool
     proposed_outcomes: list[str]
     sequence: int
+    quota: int = 0
 
     @classmethod
-    def from_domain(cls, node: OutlineNodeSnapshot) -> OutlineNodeSnapshotOut:
+    def from_domain(cls, node: OutlineNodeSnapshot, *, quota: int = 0) -> OutlineNodeSnapshotOut:
         return cls(
             node_key=node.node_key,
             parent_node_key=node.parent_node_key,
@@ -608,12 +624,27 @@ class OutlineNodeSnapshotOut(BaseModel):
             force_create=node.force_create,
             proposed_outcomes=[item.statement for item in node.proposed_outcomes],
             sequence=node.sequence,
+            quota=quota,
         )
 
 
 class OutlineSnapshotOut(BaseModel):
     target_item_count: int
     nodes: list[OutlineNodeSnapshotOut]
+
+    @classmethod
+    def from_domain(cls, snapshot: OutlineSnapshot) -> OutlineSnapshotOut:
+        quotas = preview_quotas(
+            tuple(node.weight for node in snapshot.nodes),
+            snapshot.target_item_count.value,
+        )
+        return cls(
+            target_item_count=snapshot.target_item_count.value,
+            nodes=[
+                OutlineNodeSnapshotOut.from_domain(node, quota=quota)
+                for node, quota in zip(snapshot.nodes, quotas, strict=True)
+            ],
+        )
 
 
 class OutlineRevisionOut(BaseModel):
@@ -640,12 +671,7 @@ class OutlineRevisionOut(BaseModel):
             snapshot_hash=revision.snapshot_hash,
             created_at=revision.created_at,
             created_by=ActorStampOut.from_domain(revision.created_by),
-            snapshot=OutlineSnapshotOut(
-                target_item_count=revision.snapshot.target_item_count.value,
-                nodes=[
-                    OutlineNodeSnapshotOut.from_domain(node) for node in revision.snapshot.nodes
-                ],
-            ),
+            snapshot=OutlineSnapshotOut.from_domain(revision.snapshot),
         )
 
 

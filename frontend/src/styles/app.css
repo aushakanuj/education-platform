@@ -1267,6 +1267,14 @@ button.card {
   text-align: right;
 }
 
+.subtopic-card__actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 0.4rem;
+  padding: 0 1rem 0.85rem;
+}
+
 .subtopic-card__quiz-meta {
   margin: 0;
   font-family: var(--font-mono);
@@ -3162,6 +3170,38 @@ button.teacher-item-list__row:disabled {
   font-size: 0.92rem;
 }
 
+.topic-item-stats {
+  margin-top: 1.25rem;
+  padding-top: 1rem;
+  border-top: 1px solid var(--border);
+}
+
+.topic-item-stats__title {
+  margin: 0 0 0.35rem;
+  font-size: 1.05rem;
+  letter-spacing: -0.02em;
+}
+
+.topic-item-stats__prompt,
+.topic-item-stats__options {
+  margin: 0;
+}
+
+.topic-item-stats__options {
+  margin-top: 0.25rem;
+}
+
+.topic-item-stats__flags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+}
+
+.topic-item-stats .data-table td {
+  white-space: normal;
+  vertical-align: top;
+}
+
 button.admin-published-row {
   width: 100%;
   text-align: left;
@@ -3383,6 +3423,15 @@ button.admin-published-row {
   align-items: center;
   justify-content: space-between;
   gap: 0.45rem;
+}
+
+.outline-review__children {
+  display: grid;
+  gap: 0.65rem;
+  margin: 0;
+  padding: 0 0 0 0.9rem;
+  list-style: none;
+  border-left: 2px solid var(--border);
 }
 
 .outline-review__sequence {
