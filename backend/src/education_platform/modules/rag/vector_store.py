@@ -46,47 +46,70 @@ def _session() -> Iterator[Session]:
         engine.dispose()
 
 
-def delete_by_version(version_id: UUID) -> int:
-    with _session() as session:
-        result = session.execute(
-            delete(ChunkEmbedding).where(ChunkEmbedding.version_id == version_id)
+def _delete_by_version_on(session: Session, version_id: UUID) -> int:
+    result = session.execute(delete(ChunkEmbedding).where(ChunkEmbedding.version_id == version_id))
+    return int(result.rowcount)  # type: ignore[attr-defined]
+
+
+def _upsert_rows_on(session: Session, rows: list[VectorRow]) -> None:
+    validated = [VectorRow.model_validate(row) for row in rows]
+    for row in validated:
+        stmt = insert(ChunkEmbedding).values(
+            chunk_id=row.chunk_id,
+            embedding=row.embedding,
+            doc_id=row.doc_id,
+            doc_kind=row.doc_kind,
+            institution_id=row.institution_id,
+            required_roles=row.required_roles,
+            doc_type=row.doc_type,
+            page_number=row.page_number,
+            version_id=row.version_id,
         )
-        session.commit()
-        return int(result.rowcount)  # type: ignore[attr-defined]
+        stmt = stmt.on_conflict_do_update(
+            index_elements=[ChunkEmbedding.chunk_id],
+            set_={
+                "embedding": stmt.excluded.embedding,
+                "doc_id": stmt.excluded.doc_id,
+                "doc_kind": stmt.excluded.doc_kind,
+                "institution_id": stmt.excluded.institution_id,
+                "required_roles": stmt.excluded.required_roles,
+                "doc_type": stmt.excluded.doc_type,
+                "page_number": stmt.excluded.page_number,
+                "version_id": stmt.excluded.version_id,
+            },
+        )
+        session.execute(stmt)
 
 
-def upsert_rows(rows: list[VectorRow]) -> None:
+def delete_by_version(version_id: UUID, *, session: Session | None = None) -> int:
+    """Delete embeddings for a version.
+
+    When ``session`` is provided (ingest worker path), changes stay in that
+    transaction — callers must commit/rollback with chunk writes. A bare call
+    still opens its own short transaction for ad-hoc/admin use.
+    """
+    if session is not None:
+        return _delete_by_version_on(session, version_id)
+    with _session() as own:
+        deleted = _delete_by_version_on(own, version_id)
+        own.commit()
+        return deleted
+
+
+def upsert_rows(rows: list[VectorRow], *, session: Session | None = None) -> None:
+    """Upsert embedding rows.
+
+    Pass the ingest worker ``session`` so embeddings commit atomically with
+    ``source_chunks`` / ``knowledge_chunks``. Without it, uses a standalone commit.
+    """
     if not rows:
         return
-    validated = [VectorRow.model_validate(row) for row in rows]
-    with _session() as session:
-        for row in validated:
-            stmt = insert(ChunkEmbedding).values(
-                chunk_id=row.chunk_id,
-                embedding=row.embedding,
-                doc_id=row.doc_id,
-                doc_kind=row.doc_kind,
-                institution_id=row.institution_id,
-                required_roles=row.required_roles,
-                doc_type=row.doc_type,
-                page_number=row.page_number,
-                version_id=row.version_id,
-            )
-            stmt = stmt.on_conflict_do_update(
-                index_elements=[ChunkEmbedding.chunk_id],
-                set_={
-                    "embedding": stmt.excluded.embedding,
-                    "doc_id": stmt.excluded.doc_id,
-                    "doc_kind": stmt.excluded.doc_kind,
-                    "institution_id": stmt.excluded.institution_id,
-                    "required_roles": stmt.excluded.required_roles,
-                    "doc_type": stmt.excluded.doc_type,
-                    "page_number": stmt.excluded.page_number,
-                    "version_id": stmt.excluded.version_id,
-                },
-            )
-            session.execute(stmt)
-        session.commit()
+    if session is not None:
+        _upsert_rows_on(session, rows)
+        return
+    with _session() as own:
+        _upsert_rows_on(own, rows)
+        own.commit()
 
 
 def count_for_version(version_id: UUID) -> int:

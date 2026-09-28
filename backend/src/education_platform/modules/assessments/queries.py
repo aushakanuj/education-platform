@@ -17,6 +17,8 @@ from education_platform.modules.assessments.models import (
     CommonMasteryQuiz,
     QuestionOption,
     QuestionVersion,
+    QuizAttempt,
+    QuizAttemptStatus,
     QuizItem,
     QuizRelease,
     QuizReleaseStatus,
@@ -24,7 +26,39 @@ from education_platform.modules.assessments.models import (
     QuizVersion,
     QuizVersionStatus,
 )
-from education_platform.modules.assessments.schemas import QuizOption, QuizQuestion
+from education_platform.modules.assessments.schemas import (
+    AttemptHistoryItem,
+    QuizOption,
+    QuizQuestion,
+)
+
+# Statuses whose score/pass may credit unlock gates and analytics. HELD means
+# admin_release scored the attempt but results are not student-visible yet.
+PASS_CREDIT_STATUSES = frozenset(
+    {
+        QuizAttemptStatus.SUBMITTED,
+        QuizAttemptStatus.SCORED,
+        QuizAttemptStatus.RELEASED,
+    }
+)
+
+
+def results_visible(attempt: QuizAttempt) -> bool:
+    """Whether score/pass may be shown to the student for this attempt."""
+    return attempt.status != QuizAttemptStatus.HELD
+
+
+def history_item_for(attempt: QuizAttempt) -> AttemptHistoryItem:
+    visible = results_visible(attempt)
+    return AttemptHistoryItem(
+        id=attempt.id,
+        attempt_number=attempt.attempt_number,
+        status=attempt.status.value,
+        score_percent=attempt.score_percent if visible else None,
+        passed=attempt.passed if visible else None,
+        submitted_at=attempt.submitted_at,
+        started_at=attempt.started_at,
+    )
 
 
 async def released_quiz(

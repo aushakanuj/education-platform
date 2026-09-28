@@ -33,6 +33,8 @@ from education_platform.modules.assessments.models import (
     QuizVersionStatus,
 )
 from education_platform.modules.assessments.queries import (
+    PASS_CREDIT_STATUSES,
+    history_item_for,
     open_release_for_quiz_version,
     questions_for_quiz_version,
 )
@@ -151,6 +153,7 @@ async def _ensure_subtopic_quizzes_passed(
                 QuizAttempt.student_id == student_id,
                 QuizAttempt.quiz_version_id.in_(version_ids),
                 QuizAttempt.passed.is_(True),
+                QuizAttempt.status.in_(PASS_CREDIT_STATUSES),
             )
         )
         if passed is None:
@@ -542,15 +545,4 @@ async def list_attempts_for_quiz(
             .order_by(QuizAttempt.attempt_number.desc())
         )
     ).all()
-    return [
-        AttemptHistoryItem(
-            id=attempt.id,
-            attempt_number=attempt.attempt_number,
-            status=attempt.status.value,
-            score_percent=attempt.score_percent,
-            passed=attempt.passed,
-            submitted_at=attempt.submitted_at,
-            started_at=attempt.started_at,
-        )
-        for attempt in attempts
-    ]
+    return [history_item_for(attempt) for attempt in attempts]
