@@ -89,6 +89,8 @@ _DML_DDL_TYPES: Final[tuple[type[exp.Expression], ...]] = (
     exp.Drop,
     exp.Grant,
     exp.Command,
+    exp.Create,
+    exp.Into,
 )
 
 _SHAPE_HINTS: Final[dict[type[exp.Expr], str]] = {
@@ -98,9 +100,58 @@ _SHAPE_HINTS: Final[dict[type[exp.Expr], str]] = {
     exp.Insert: "INSERT statements are not allowed — only SELECT is permitted",
     exp.Update: "UPDATE statements are not allowed — only SELECT is permitted",
     exp.Drop: "DROP statements are not allowed — only SELECT is permitted",
+    exp.Create: "CREATE statements are not allowed — only SELECT is permitted",
+    exp.Into: "SELECT INTO is not allowed — only a plain SELECT is permitted",
     exp.Command: "that statement type is not allowed — only SELECT is permitted",
     exp.Set: "SET statements are not allowed — only SELECT is permitted",
 }
+
+# Session mutators / non-read helpers that can defeat RLS, poison the connection pool,
+# or hang the statement — even inside an otherwise-valid SELECT or CTE.
+_BLOCKED_FUNCTIONS: Final[frozenset[str]] = frozenset(
+    {
+        "set_config",
+        "pg_advisory_lock",
+        "pg_advisory_xact_lock",
+        "pg_advisory_unlock",
+        "pg_advisory_unlock_all",
+        "pg_sleep",
+        "pg_terminate_backend",
+        "pg_cancel_backend",
+        "lo_import",
+        "lo_export",
+    }
+)
+
+
+def is_cte_or_derived_table_ref(table_node: exp.Table, local_aliases: set[str]) -> bool:
+    """True when `table_node` names a CTE or derived-table alias, not a real schema table.
+
+    Critical nuance: a non-RECURSIVE CTE whose alias collides with a real table name
+    (`WITH student_profiles AS (SELECT … FROM student_profiles) …`) binds the *inner*
+    `FROM student_profiles` to the base table in Postgres. Treating that inner ref as a
+    CTE alias would skip whitelist / role-scope checks on the real table — the exact
+    gap a same-named CTE can use to defeat apply_role_scope. Recursive CTE self-refs
+    remain CTE refs (Postgres binds them to the CTE).
+
+    Schema-/catalog-qualified names (`public.student_profiles`, `pg_catalog.pg_roles`)
+    are never CTE refs — Postgres resolves them to the real relation even inside a
+    RECURSIVE CTE whose alias collides with that table. Treating those as CTE aliases
+    would skip whitelist and apply_role_scope on the real scan (and combine with a
+    session-mutator bypass into a full RLS escalation).
+    """
+    if table_node.db or table_node.catalog:
+        return False
+    name = table_node.name.lower()
+    if name not in local_aliases:
+        return False
+    parent: exp.Expr | None = table_node.parent
+    while parent is not None:
+        if isinstance(parent, exp.CTE) and (parent.alias or "").lower() == name:
+            with_node = parent.parent
+            return bool(isinstance(with_node, exp.With) and with_node.args.get("recursive"))
+        parent = parent.parent
+    return True
 
 
 def _build_scoped_tables() -> dict[str, Table]:
@@ -181,6 +232,9 @@ def _local_aliases(tree: exp.Select) -> set[str]:
     generate_sql's own system prompt now teaches for "one row per entity, picking a
     specific attempt's value" questions (see that module's docstring), so rejecting it
     here would silently defeat that fix.
+    Aliases attached to a same-named *base-table* ref inside a non-RECURSIVE CTE body
+    are intentionally omitted — those name the real table (see
+    `is_cte_or_derived_table_ref`).
     """
     aliases: set[str] = set()
     cte_names: set[str] = set()
@@ -195,8 +249,13 @@ def _local_aliases(tree: exp.Select) -> set[str]:
         if lateral.alias:
             aliases.add(lateral.alias.lower())
     for table_node in tree.find_all(exp.Table):
-        if table_node.name.lower() in cte_names and table_node.alias:
-            aliases.add(table_node.alias.lower())
+        if not table_node.alias:
+            continue
+        if table_node.name.lower() not in cte_names:
+            continue
+        if not is_cte_or_derived_table_ref(table_node, cte_names):
+            continue  # alias of a real base table inside a same-named CTE body
+        aliases.add(table_node.alias.lower())
     return aliases
 
 
@@ -204,7 +263,7 @@ def _check_tables(tree: exp.Select, local_aliases: set[str]) -> tuple[dict[str, 
     """Returns (alias/name -> real scoped table name, rejection detail or None)."""
     alias_map: dict[str, str] = {}
     for table_node in tree.find_all(exp.Table):
-        if table_node.name.lower() in local_aliases:
+        if is_cte_or_derived_table_ref(table_node, local_aliases):
             continue  # a reference to a CTE by name, not a real table
         real_name = _resolve_table(table_node)
         if real_name is None:
@@ -224,7 +283,7 @@ def _check_columns(
         qualifier = col.table.lower() if col.table else None
 
         if qualifier:
-            if qualifier in local_aliases:
+            if qualifier in local_aliases and qualifier not in alias_map:
                 continue  # column on a CTE/derived table — not checked, see docstring
             real_name = alias_map.get(qualifier)
             if real_name is None:
@@ -238,6 +297,43 @@ def _check_columns(
                 tables_listed = ", ".join(sorted(real_tables_used))
                 return f"column `{raw}` does not exist on any referenced table ({tables_listed})"
     return None
+
+
+def _anonymous_function_name(node: exp.Anonymous) -> str | None:
+    """Normalize sqlglot's function-name payload to a lowercase bare name.
+
+    Unquoted `set_config(...)` stores the name as a plain `str`. Double-quoted
+    `"set_config"(...)` (and `pg_catalog."set_config"(...)`) store an
+    `exp.Identifier` instead — comparing only `isinstance(raw, str)` would miss
+    the quoted form and let a session mutator through validate_sql.
+    """
+    raw = node.this
+    if isinstance(raw, str):
+        return raw.lower()
+    if isinstance(raw, exp.Identifier):
+        return raw.name.lower()
+    return None
+
+
+def _find_blocked_function(tree: exp.Expr) -> str | None:
+    for node in tree.find_all(exp.Anonymous):
+        name = _anonymous_function_name(node)
+        if name is not None and name in _BLOCKED_FUNCTIONS:
+            return name
+    return None
+
+
+def _limit_value(tree: exp.Select) -> int | None:
+    limit = tree.args.get("limit")
+    if not isinstance(limit, exp.Limit):
+        return None
+    expression = limit.expression
+    if not isinstance(expression, exp.Literal) or expression.is_string:
+        return None
+    try:
+        return int(expression.this)
+    except (TypeError, ValueError):
+        return None
 
 
 async def validate_sql(state: TextToSQLState) -> TextToSQLState:
@@ -292,8 +388,20 @@ async def validate_sql(state: TextToSQLState) -> TextToSQLState:
     if column_error is not None:
         return {**state, "error": format_error(VALIDATION_ERROR, column_error)}
 
-    # 5. LIMIT enforcement — inject a default rather than reject-and-retry.
-    if tree.args.get("limit") is None:
+    # 5. Block session-mutating / non-read functions (set_config, advisory locks, …).
+    blocked = _find_blocked_function(tree)
+    if blocked is not None:
+        return {
+            **state,
+            "error": format_error(
+                VALIDATION_ERROR,
+                f"function `{blocked}` is not allowed in text-to-SQL queries",
+            ),
+        }
+
+    # 6. LIMIT enforcement — inject a default, and clamp any explicit oversize LIMIT.
+    limit_value = _limit_value(tree)
+    if limit_value is None or limit_value > DEFAULT_ROW_LIMIT:
         tree = tree.limit(DEFAULT_ROW_LIMIT)
 
     return {**state, "validated_sql": _sql_with_named_parameters(tree), "error": None}

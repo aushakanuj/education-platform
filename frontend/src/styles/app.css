@@ -858,6 +858,13 @@ button:hover:not(:disabled),
   width: 100%;
 }
 
+/* The analytics dashboard is a grid of cards and charts, not prose — let it use the
+   full content width instead of the article-width cap above. */
+.route-motion__page:has(.analytics-view) {
+  max-width: none;
+  width: 100%;
+}
+
 /* An ordinary page is a document: its sections keep their own height and the content
    column scrolls.
 
@@ -1212,6 +1219,16 @@ button.card {
   font-weight: 650;
   margin: 0;
   font-size: 1rem;
+}
+
+a.list-item__title {
+  color: var(--ink);
+  text-decoration: none;
+}
+
+a.list-item__title:hover {
+  color: var(--accent);
+  text-decoration: underline;
 }
 
 .list-item__meta {
@@ -3905,6 +3922,365 @@ button.teacher-item-list__row:disabled {
 .data-table tbody tr.at-risk-row--urgent td:first-child {
   border-left: 3px solid var(--warning);
   padding-left: calc(0.7rem - 3px);
+}
+
+/* ---- Teacher analytics dashboard ------------------------------------------------- */
+
+.progress--ok > span {
+  background: var(--success);
+}
+
+.progress--warn > span {
+  background: var(--warning);
+}
+
+.progress--danger > span {
+  background: var(--danger);
+}
+
+.analytics-kpi-grid {
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 10rem), 1fr));
+  margin-bottom: 1rem;
+}
+
+.analytics-kpi-grid .card h2 {
+  font-size: 1.6rem;
+  letter-spacing: -0.02em;
+}
+
+.analytics-panel {
+  margin-bottom: 1rem;
+}
+
+.analytics-panel h2 {
+  margin: 0 0 0.15rem;
+  font-size: 1.1rem;
+  letter-spacing: -0.02em;
+}
+
+.analytics-subject-list {
+  display: grid;
+  gap: 0.6rem;
+  margin-top: 0.6rem;
+}
+
+.analytics-subject-list--compact {
+  margin-top: 0.85rem;
+}
+
+.subject-bar-row__head {
+  display: flex;
+  justify-content: space-between;
+  font-size: 0.85rem;
+  margin-bottom: 0.25rem;
+}
+
+.subject-bar-row__head span:last-child {
+  font-family: var(--font-mono);
+  color: var(--ink-muted);
+}
+
+/* Class cards sit side by side once there is room, so the page uses its width for layout
+   rather than stretching one card's contents across the whole screen. */
+.analytics-sections {
+  display: grid;
+  gap: 1rem;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 24rem), 1fr));
+  align-items: start;
+}
+
+/* `.panel + .panel` adds a top margin to every panel after the first, which is right when
+   panels stack but drops each later card 1rem below its own row here. The grid gap already
+   does that spacing, in both directions. */
+.analytics-sections > .analytics-panel {
+  margin: 0;
+}
+
+.analytics-section-panel__head {
+  display: flex;
+  gap: 1rem;
+  align-items: center;
+  margin-bottom: 0.75rem;
+}
+
+.analytics-section-panel__head h2 {
+  margin: 0;
+  font-size: 1.2rem;
+}
+
+.mastery-ring {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+}
+
+.mastery-ring__track {
+  stroke: var(--surface-2);
+}
+
+.mastery-ring__value {
+  stroke: var(--accent);
+  transition: stroke-dashoffset 500ms ease;
+}
+
+.mastery-ring--strong .mastery-ring__value {
+  stroke: var(--success);
+}
+
+.mastery-ring--average .mastery-ring__value {
+  stroke: var(--warning);
+}
+
+.mastery-ring--struggling .mastery-ring__value {
+  stroke: var(--danger);
+}
+
+.mastery-ring--none .mastery-ring__value {
+  stroke: var(--border);
+}
+
+.mastery-ring__label {
+  position: absolute;
+  display: grid;
+  justify-items: center;
+  gap: 0.05rem;
+  text-align: center;
+}
+
+.mastery-ring__label strong {
+  font-size: 1.05rem;
+  letter-spacing: -0.02em;
+}
+
+.mastery-ring__label span {
+  font-family: var(--font-mono);
+  font-size: 0.6rem;
+  color: var(--ink-muted);
+  text-transform: uppercase;
+}
+
+.distribution-bar {
+  display: flex;
+  height: 0.6rem;
+  border-radius: var(--radius-pill);
+  overflow: hidden;
+  background: var(--surface-2);
+}
+
+.distribution-bar__seg--strong {
+  background: var(--success);
+}
+
+.distribution-bar__seg--average {
+  background: var(--warning);
+}
+
+.distribution-bar__seg--struggling {
+  background: var(--danger);
+}
+
+.distribution-bar__seg--none {
+  background: var(--border);
+}
+
+.distribution-bar__legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  margin-top: 0.5rem;
+}
+
+.dot {
+  display: inline-block;
+  width: 0.5rem;
+  height: 0.5rem;
+  border-radius: 50%;
+}
+
+.dot--strong {
+  background: var(--success);
+}
+
+.dot--average {
+  background: var(--warning);
+}
+
+.dot--struggling {
+  background: var(--danger);
+}
+
+.dot--none {
+  background: var(--border);
+}
+
+.chip--button {
+  cursor: pointer;
+  font: inherit;
+  font-family: var(--font-mono);
+  transition: background 120ms ease, border-color 120ms ease;
+}
+
+.chip--button:hover {
+  border-color: var(--accent);
+}
+
+/* `button.` (not just `.chip--button`) to outrank the global button-hover glass effect above
+   (`button:hover:not(:disabled)`), which otherwise washes this out to near-invisible
+   pale-on-pale text while the pointer sits on an already-active chip. */
+button.chip--button.is-active,
+button.chip--button.is-active:hover {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--bg);
+}
+
+.chip--button.is-active .dot {
+  outline: 2px solid color-mix(in srgb, var(--bg) 60%, transparent);
+}
+
+.tier-drilldown {
+  margin-top: 0.6rem;
+  padding-top: 0.6rem;
+  border-top: 1px dashed var(--border);
+}
+
+/* --- Analytics: class x subject heatmap --- */
+
+.heatmap-scroll {
+  overflow-x: auto;
+  margin-top: 0.75rem;
+}
+
+/* Sized to its contents, not to the panel: a grid of three columns stretched across a wide
+   screen puts 300px of empty space in every cell, which is the opposite of a heatmap. */
+.heatmap {
+  width: auto;
+  border-collapse: separate;
+  border-spacing: 3px;
+}
+
+.heatmap th,
+.heatmap td {
+  padding: 0.45rem 0.7rem;
+  white-space: nowrap;
+}
+
+.heatmap thead th {
+  font-family: var(--font-mono);
+  font-size: 0.66rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--ink-muted);
+  text-align: center;
+}
+
+.heatmap thead th:first-child {
+  text-align: left;
+}
+
+.heatmap tbody th {
+  text-align: left;
+  font-weight: 600;
+  font-size: 0.9rem;
+}
+
+/* Block, not flex on the `th` itself: a table cell set to `display: flex` stops being a
+   table cell and drops out of the column grid. */
+.heatmap__class {
+  display: block;
+}
+
+.heatmap__count {
+  display: block;
+  font-family: var(--font-mono);
+  font-size: 0.66rem;
+  font-weight: 500;
+  color: var(--ink-muted);
+}
+
+.heatmap td {
+  min-width: 5.5rem;
+  font-family: var(--font-mono);
+  font-size: 0.95rem;
+  text-align: center;
+  border-radius: var(--radius-sm);
+  background: var(--surface-2);
+  color: var(--ink);
+}
+
+.heatmap__overall,
+.heatmap__overall-head {
+  border-left: 2px solid var(--border);
+}
+
+.heatmap__row--summary th {
+  color: var(--ink-muted);
+}
+
+.heatmap__row--summary td {
+  font-weight: 700;
+}
+
+/* The site-wide link-hover glass would repaint these cells; keep the heatmap's own colour
+   and just underline, the same reasoning as `a.list-item__title`. */
+a.heatmap__class {
+  color: var(--ink);
+  text-decoration: none;
+}
+
+a.heatmap__class:hover {
+  color: var(--accent);
+  text-decoration: underline;
+}
+
+/* --- Analytics: one square per student --- */
+
+.dot-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin: 0.85rem 0 0.7rem;
+}
+
+/* `a.` and the explicit resets outrank the global `a:hover` glass effect, which would
+   otherwise turn every square the same pale yellow and lose the whole point of the grid. */
+a.dot-grid__dot {
+  display: block;
+  width: 1rem;
+  height: 1rem;
+  border-radius: 3px;
+  background: var(--border);
+  transition: transform 120ms ease;
+}
+
+a.dot-grid__dot:hover,
+a.dot-grid__dot:focus-visible {
+  transform: scale(1.3);
+  outline: 2px solid var(--ink);
+  outline-offset: 1px;
+  background-image: none;
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+  box-shadow: none;
+}
+
+a.dot-grid__dot--strong {
+  background: var(--success);
+}
+
+a.dot-grid__dot--average {
+  background: var(--warning);
+}
+
+a.dot-grid__dot--struggling {
+  background: var(--danger);
+}
+
+a.dot-grid__dot--not_started {
+  background: var(--border);
 }
 
 /* --- Roster: find and sort --- */

@@ -38,6 +38,7 @@ export function TeacherShell() {
 
   const onClasses =
     location.pathname === "/teacher" || location.pathname.startsWith("/teacher/classes");
+  const onAnalytics = location.pathname.startsWith("/teacher/analytics");
   const onAssistant = location.pathname.startsWith("/teacher/assistant");
   const onQuestions = location.pathname.startsWith("/teacher/questions");
   const onAtRisk = location.pathname.startsWith("/teacher/at-risk");
@@ -81,6 +82,16 @@ export function TeacherShell() {
                 C
               </span>
               <span className="rail__link-label">My classes</span>
+            </Link>
+            <Link
+              to="/teacher/analytics"
+              className={`rail__link ${onAnalytics ? "is-active" : ""}`}
+              title="Analytics"
+            >
+              <span className="rail__link-short" aria-hidden="true">
+                D
+              </span>
+              <span className="rail__link-label">Analytics</span>
             </Link>
             <Link
               to="/teacher/assistant"
@@ -139,6 +150,12 @@ export function TeacherShell() {
             <nav className="rail__nav rail__nav--horizontal" aria-label="Mobile teacher">
               <Link to="/teacher" className={`rail__link ${onClasses ? "is-active" : ""}`}>
                 My classes
+              </Link>
+              <Link
+                to="/teacher/analytics"
+                className={`rail__link ${onAnalytics ? "is-active" : ""}`}
+              >
+                Analytics
               </Link>
               <Link
                 to="/teacher/assistant"
