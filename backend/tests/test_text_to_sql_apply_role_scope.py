@@ -1631,6 +1631,8 @@ async def test_ordinary_aliases_are_unaffected_by_the_collision_check() -> None:
         user_id="teacher-1",
     )
     assert "EXISTS" in validated
+
+
 async def test_same_named_cte_inner_base_table_still_gets_institution_scope() -> None:
     """A CTE whose alias collides with a real table must not skip scoping on the
     inner base-table reference — otherwise apply_role_scope emits unscoped SQL and
