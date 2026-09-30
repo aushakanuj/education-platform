@@ -887,8 +887,7 @@ def _find_reserved_alias_collision(tree: exp.Expr) -> str | None:
     for subq in tree.find_all(exp.Subquery):
         if subq.alias and subq.alias.lower().startswith(prefix):
             return (
-                f"subquery alias `{subq.alias}` uses a reserved internal prefix and "
-                "cannot be used"
+                f"subquery alias `{subq.alias}` uses a reserved internal prefix and cannot be used"
             )
     for lateral in tree.find_all(exp.Lateral):
         if lateral.alias and lateral.alias.lower().startswith(prefix):
