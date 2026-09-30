@@ -897,9 +897,7 @@ def _find_reserved_alias_collision(tree: exp.Expr) -> str | None:
             )
     for cte in tree.find_all(exp.CTE):
         if cte.alias and cte.alias.lower().startswith(prefix):
-            return (
-                f"CTE alias `{cte.alias}` uses a reserved internal prefix and cannot be used"
-            )
+            return f"CTE alias `{cte.alias}` uses a reserved internal prefix and cannot be used"
     return None
 
 
