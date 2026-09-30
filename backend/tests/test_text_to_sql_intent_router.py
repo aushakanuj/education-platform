@@ -181,9 +181,7 @@ async def test_question_grounded_attendance_match_still_routes_to_template(
         },
     )
 
-    result = await _MODULE.intent_router(
-        _state("How many students have attendance less than 40%?")
-    )
+    result = await _MODULE.intent_router(_state("How many students have attendance less than 40%?"))
 
     assert result["intent_route"] == "template"
     assert result["intent"] == "students_below_attendance_threshold"
