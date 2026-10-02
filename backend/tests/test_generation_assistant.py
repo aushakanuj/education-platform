@@ -13,17 +13,6 @@ import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine, func, select
 from sqlalchemy.orm import Session
-from test_generation import (
-    ADMIN,
-    TEACHER,
-    TEST_SPEC,
-    _headers,
-    _index_run,
-    _outline_run,
-    _silence_embed,
-    _submit_admin,
-    _write_one_node,
-)
 
 from education_platform.core.config import get_settings
 from education_platform.db.url import to_sync_url
@@ -39,6 +28,17 @@ from education_platform.modules.generation.models import (
 )
 from education_platform.modules.materials import service as materials_service
 from education_platform.modules.synthetic.generator import generate_school
+from test_generation import (
+    ADMIN,
+    TEACHER,
+    TEST_SPEC,
+    _headers,
+    _index_run,
+    _outline_run,
+    _silence_embed,
+    _submit_admin,
+    _write_one_node,
+)
 
 STUDENT = "student25@alnoor.school"
 

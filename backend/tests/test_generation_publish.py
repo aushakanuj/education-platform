@@ -11,8 +11,6 @@ import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
-from test_generation import SEEDED_SLUG
-from test_generation_items import _accept_two_node_run, _silence_embed
 
 from education_platform.core.config import get_settings
 from education_platform.modules.academics.models import Subtopic
@@ -39,6 +37,8 @@ from education_platform.modules.materials.models import (
     SourceMaterialVersion,
     SourceMaterialVersionStatus,
 )
+from test_generation import SEEDED_SLUG
+from test_generation_items import _accept_two_node_run, _silence_embed
 
 
 @pytest.fixture()

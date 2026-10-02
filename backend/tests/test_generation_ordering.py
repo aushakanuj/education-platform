@@ -10,8 +10,6 @@ import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import select
 from sqlalchemy.orm import Session
-from test_generation import SEEDED_SLUG
-from test_generation_items import _accept_two_node_run, _silence_embed
 
 from education_platform.core.config import get_settings
 from education_platform.modules.academics.models import Subtopic
@@ -28,6 +26,8 @@ from education_platform.modules.generation.types import (
     RunPhase,
 )
 from education_platform.modules.generation.worker import process_generation_job_sync
+from test_generation import SEEDED_SLUG
+from test_generation_items import _accept_two_node_run, _silence_embed
 
 
 @pytest.fixture()

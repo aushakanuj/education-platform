@@ -10,15 +10,6 @@ import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine, delete, inspect, select
 from sqlalchemy.orm import Session
-from test_generation import (
-    SEEDED_SLUG,
-    _index_run,
-    _outline_run,
-    _second_chunk,
-    _silence_embed,
-    _submit_admin,
-    _write_two_nodes,
-)
 
 from education_platform.core.config import get_settings
 from education_platform.db.url import to_sync_url
@@ -59,6 +50,15 @@ from education_platform.modules.generation.types import (
 )
 from education_platform.modules.generation.worker import process_generation_job_sync
 from education_platform.modules.materials import service as materials_service
+from test_generation import (
+    SEEDED_SLUG,
+    _index_run,
+    _outline_run,
+    _second_chunk,
+    _silence_embed,
+    _submit_admin,
+    _write_two_nodes,
+)
 
 
 @pytest.fixture()

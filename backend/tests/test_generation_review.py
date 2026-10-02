@@ -10,18 +10,6 @@ import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import Session
-from test_generation import (
-    ADMIN,
-    SCHOOL,
-    TEACHER,
-    TEST_SPEC,
-    _headers,
-    _index_run,
-    _outline_run,
-    _silence_embed,
-    _submit_admin,
-    _write_one_node,
-)
 
 from education_platform.core.config import get_settings
 from education_platform.db.url import to_sync_url
@@ -34,6 +22,18 @@ from education_platform.modules.generation.types import GenerationJobKind
 from education_platform.modules.generation.worker import process_generation_job_sync
 from education_platform.modules.materials import service as materials_service
 from education_platform.modules.synthetic.generator import DEFAULT_PASSWORD, generate_school
+from test_generation import (
+    ADMIN,
+    SCHOOL,
+    TEACHER,
+    TEST_SPEC,
+    _headers,
+    _index_run,
+    _outline_run,
+    _silence_embed,
+    _submit_admin,
+    _write_one_node,
+)
 
 SECOND_TEACHER = "second.teacher@alnoor.school"
 

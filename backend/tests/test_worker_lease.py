@@ -8,7 +8,6 @@ from datetime import UTC, datetime, timedelta
 import pytest
 from sqlalchemy import select
 from sqlalchemy.orm import Session
-from test_generation import SEEDED_SLUG
 
 from education_platform.core.config import get_settings
 from education_platform.modules.academics.models import Subtopic
@@ -21,6 +20,7 @@ from education_platform.modules.generation.types import (
 )
 from education_platform.modules.generation.worker import claim_next_generation_job
 from education_platform.workers.lease import Claimed, claim, heartbeat
+from test_generation import SEEDED_SLUG
 
 
 def _generation_job(

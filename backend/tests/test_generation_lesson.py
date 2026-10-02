@@ -11,8 +11,6 @@ import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import select
 from sqlalchemy.orm import Session
-from test_generation import SEEDED_SLUG
-from test_generation_items import _accept_two_node_run, _silence_embed
 
 from education_platform.core.config import get_settings
 from education_platform.modules.academics.models import Subtopic
@@ -58,6 +56,8 @@ from education_platform.modules.generation.types import (
 from education_platform.modules.generation.worker import process_generation_job_sync
 from education_platform.modules.materials.models import SourceMaterial
 from education_platform.modules.rag.chunking import DIAGRAM_PLACEHOLDER as CHUNK_DIAGRAM_PLACEHOLDER
+from test_generation import SEEDED_SLUG
+from test_generation_items import _accept_two_node_run, _silence_embed
 
 
 @pytest.fixture()
