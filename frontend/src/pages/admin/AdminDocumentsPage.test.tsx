@@ -18,12 +18,12 @@ vi.mock("../../auth/AuthContext", () => ({
 vi.mock("../../api/adminIngest", () => ({
   listKnowledgeDocuments: vi.fn(),
   uploadKnowledgeDocument: vi.fn(),
-  pollKnowledgeDocumentVersionStatus: vi.fn(),
+  watchKnowledgeDocumentVersionStatus: vi.fn(),
 }));
 
 import {
   listKnowledgeDocuments,
-  pollKnowledgeDocumentVersionStatus,
+  watchKnowledgeDocumentVersionStatus,
   uploadKnowledgeDocument,
 } from "../../api/adminIngest";
 
@@ -32,7 +32,7 @@ describe("AdminDocumentsPage", () => {
     authState.isDevMockSession = false;
     vi.mocked(listKnowledgeDocuments).mockReset();
     vi.mocked(uploadKnowledgeDocument).mockReset();
-    vi.mocked(pollKnowledgeDocumentVersionStatus).mockReset();
+    vi.mocked(watchKnowledgeDocumentVersionStatus).mockReset();
     vi.mocked(listKnowledgeDocuments).mockResolvedValue([
       {
         id: "doc-1",
@@ -63,7 +63,7 @@ describe("AdminDocumentsPage", () => {
       lifecycle_status: "processing",
       ingest_job_id: "job-2",
     });
-    vi.mocked(pollKnowledgeDocumentVersionStatus).mockResolvedValue({
+    vi.mocked(watchKnowledgeDocumentVersionStatus).mockResolvedValue({
       id: "ver-2",
       document_id: "doc-2",
       version_number: 1,
@@ -110,7 +110,7 @@ describe("AdminDocumentsPage", () => {
     expect(payload.docType).toBe("handbook");
     expect(payload.file).toBeInstanceOf(File);
     expect(payload.requiredRoles).toEqual(["administrator", "teacher"]);
-    expect(pollKnowledgeDocumentVersionStatus).toHaveBeenCalledWith("ver-2");
+    expect(watchKnowledgeDocumentVersionStatus).toHaveBeenCalledWith("ver-2");
     expect(listKnowledgeDocuments).toHaveBeenCalledTimes(2);
   });
 

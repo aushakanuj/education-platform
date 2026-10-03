@@ -241,12 +241,12 @@ def seed_topic_mastery_quiz(session: Session, parent_topic: Topic) -> None:
         quiz = CommonMasteryQuiz(
             quiz_scope=QuizScope.TOPIC_MASTERY,
             topic_id=parent_topic.id,
-            title="Approved Materials Overall Quiz",
+            title=f"{parent_topic.name} quiz",
         )
         session.add(quiz)
         session.flush()
     else:
-        quiz.title = "Approved Materials Overall Quiz"
+        quiz.title = f"{parent_topic.name} quiz"
 
     latest = latest_released_quiz_version(session, quiz.id)
     latest_ids = []

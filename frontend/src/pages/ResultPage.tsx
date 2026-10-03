@@ -7,7 +7,26 @@ import type { AttemptResult } from "../api/types";
 import { ApiError } from "../api/types";
 import { ConfirmDialog } from "../components/ConfirmDialog";
 import { Crumbs } from "../components/Crumbs";
-import { resolvePathFromAttempt, type LearningPath } from "../lib/learningPath";
+import { resolvePathFromAttempt, learningPathCrumb, type LearningPath } from "../lib/learningPath";
+
+function reviewLessonHref(
+  scope: AttemptResult["scope"],
+  path: LearningPath | null,
+): string | null {
+  if (!path) return null;
+  switch (scope) {
+    case "subtopic_mastery":
+      return path.slidesPath ? `${path.slidesPath}?from=start` : null;
+    case "topic_mastery":
+      return path.lessonPath;
+    case null:
+      return null;
+    default: {
+      const _exhaustive: never = scope;
+      return _exhaustive;
+    }
+  }
+}
 
 export function ResultPage() {
   const { attemptId = "" } = useParams();
@@ -33,7 +52,8 @@ export function ResultPage() {
         const unlockedNow =
           data.scope === "subtopic_mastery" &&
           Boolean(data.passed) &&
-          Boolean(resolved?.overallUnlocked);
+          Boolean(resolved?.overallUnlocked) &&
+          !resolved?.hasTopicLesson;
         setShowUnlockDialog(unlockedNow);
       } catch (err) {
         if (!cancelled) {
@@ -56,12 +76,14 @@ export function ResultPage() {
       : Math.round(Number(result.pass_threshold_percent));
   const held = result != null && !result.review_available;
   const subjectPath = path?.subjectPath ?? "/";
+  const lessonCrumb = path ? learningPathCrumb(path) : null;
   const rawScore =
     result?.score_raw == null
       ? null
       : typeof result.score_raw === "string"
         ? result.score_raw
         : String(result.score_raw);
+  const reviewHref = result ? reviewLessonHref(result.scope, path) : null;
 
   return (
     <>
@@ -86,9 +108,7 @@ export function ResultPage() {
               parts={[
                 { label: "Subjects", to: "/" },
                 { label: path.subjectName, to: path.subjectPath },
-                ...(path.subtopicTitle && path.quizTabPath
-                  ? [{ label: path.subtopicTitle, to: path.quizTabPath }]
-                  : []),
+                ...(lessonCrumb ? [lessonCrumb] : []),
                 { label: "Result" },
               ]}
             />
@@ -103,8 +123,8 @@ export function ResultPage() {
               <h1>{held ? "Result pending release" : "Your score"}</h1>
             </div>
             <div className="page-head__actions">
-              {result.scope === "subtopic_mastery" && path?.slidesPath && (
-                <Link to={`${path.slidesPath}?from=start`} className="btn btn--sm">
+              {reviewHref && (
+                <Link to={reviewHref} className="btn btn--sm">
                   Review lesson
                 </Link>
               )}
@@ -134,7 +154,11 @@ export function ResultPage() {
             </div>
           )}
 
-          {!held && path?.overallUnlocked && result.scope === "subtopic_mastery" && result.passed && (
+          {!held &&
+            path?.overallUnlocked &&
+            result.scope === "subtopic_mastery" &&
+            result.passed &&
+            !path.hasTopicLesson && (
             <div className="alert alert--success">
               All subtopic quizzes passed. The overall topic quiz is now unlocked.
             </div>

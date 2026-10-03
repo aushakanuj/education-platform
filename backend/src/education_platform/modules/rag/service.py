@@ -11,7 +11,6 @@ from pydantic import ValidationError
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from education_platform.core.config import get_settings
 from education_platform.core.errors import DomainError
 from education_platform.modules.academics.models import (
     AcademicPeriod,
@@ -26,9 +25,7 @@ from education_platform.modules.authorization.principal import Principal
 from education_platform.modules.materials.models import (
     SourceChunk,
     SourceMaterial,
-    SourceMaterialStatus,
     SourceMaterialVersion,
-    SourceMaterialVersionStatus,
 )
 from education_platform.modules.rag import storage
 from education_platform.modules.rag.contracts import parse_required_roles
@@ -41,6 +38,7 @@ from education_platform.modules.rag.models import (
     KnowledgeDocumentVersion,
     KnowledgeDocumentVersionStatus,
 )
+from education_platform.modules.rag.queue import queue_source_material_pdf, validate_pdf_upload
 from education_platform.modules.rag.schemas import (
     KnowledgeDocumentDetailOut,
     KnowledgeDocumentOut,
@@ -67,24 +65,6 @@ def _validated_required_roles(raw: str | None) -> list[str]:
             f"Invalid required_roles: {exc.errors()[0]['msg']}",
             status_code=400,
         ) from exc
-
-
-def _validate_upload(file: UploadFile, data: bytes) -> str:
-    settings = get_settings()
-    content_type = (file.content_type or "").split(";")[0].strip().lower() or "application/pdf"
-    if content_type not in settings.ingest_allowed_content_types:
-        raise DomainError(
-            f"Unsupported content type: {content_type}",
-            status_code=400,
-        )
-    if len(data) == 0:
-        raise DomainError("Empty upload", status_code=400)
-    if len(data) > settings.max_upload_bytes:
-        raise DomainError(
-            f"File exceeds max size of {settings.max_upload_bytes} bytes",
-            status_code=400,
-        )
-    return content_type
 
 
 async def _subtopic_in_institution(
@@ -119,8 +99,7 @@ async def upload_curriculum_material(
         raise DomainError("Subtopic not found", status_code=404)
 
     data = await file.read()
-    content_type = _validate_upload(file, data)
-    checksum = storage.sha256_hex(data)
+    content_type = validate_pdf_upload(file, data)
     object_key = storage.build_object_key(
         institution_id=principal.institution_id,
         kind="source_materials",
@@ -128,47 +107,16 @@ async def upload_curriculum_material(
     )
     storage.store_bytes(object_key, data)
 
-    material = await session.scalar(
-        select(SourceMaterial).where(
-            SourceMaterial.subtopic_id == subtopic_id,
-            SourceMaterial.slug == "lesson",
-        )
+    queued = await queue_source_material_pdf(
+        session,
+        subtopic_id=subtopic_id,
+        title=title,
+        data=data,
+        content_type=content_type,
+        object_key=object_key,
+        submitted_by_user_id=None,
     )
-    if material is None:
-        material = SourceMaterial(
-            subtopic_id=subtopic_id,
-            title=title.strip() or "Lesson",
-            slug="lesson",
-            status=SourceMaterialStatus.DRAFT,
-        )
-        session.add(material)
-        await session.flush()
-
-    next_version = await session.scalar(
-        select(func.coalesce(func.max(SourceMaterialVersion.version_number), 0)).where(
-            SourceMaterialVersion.source_material_id == material.id
-        )
-    )
-    version_number = int(next_version or 0) + 1
-    version = SourceMaterialVersion(
-        source_material_id=material.id,
-        version_number=version_number,
-        lifecycle_status=SourceMaterialVersionStatus.PROCESSING,
-        title=title.strip() or material.title,
-        content_format="pdf",
-        blob_object_key=object_key,
-        blob_content_type=content_type,
-        checksum=checksum,
-    )
-    session.add(version)
-    await session.flush()
-
-    job = IngestJob(
-        id=uuid4(),
-        source_material_version_id=version.id,
-        status=IngestJobStatus.QUEUED,
-    )
-    session.add(job)
+    version = queued.version
     await record_event(
         session,
         institution_id=principal.institution_id,
@@ -179,16 +127,14 @@ async def upload_curriculum_material(
         payload={"subtopic_id": str(subtopic_id)},
     )
     await session.flush()
-    await session.refresh(version)
-    await session.refresh(job)
 
     return MaterialIngestAccepted(
-        source_material_id=material.id,
+        source_material_id=version.source_material_id,
         version_id=version.id,
         version_number=version.version_number,
         lifecycle_status=version.lifecycle_status.value,
         title=version.title,
-        ingest_job_id=job.id,
+        ingest_job_id=queued.job.id,
     )
 
 
@@ -206,6 +152,8 @@ async def get_material_version_status(
     if result is None:
         raise DomainError("Version not found", status_code=404)
     version, material = result
+    if material.subtopic_id is None:
+        raise DomainError("Version not found", status_code=404)
     subtopic = await _subtopic_in_institution(
         session, subtopic_id=material.subtopic_id, institution_id=principal.institution_id
     )
@@ -242,7 +190,7 @@ async def upload_knowledge_document(
     file: UploadFile,
 ) -> KnowledgeIngestAccepted:
     data = await file.read()
-    content_type = _validate_upload(file, data)
+    content_type = validate_pdf_upload(file, data)
     checksum = storage.sha256_hex(data)
     object_key = storage.build_object_key(
         institution_id=principal.institution_id,

@@ -13,6 +13,7 @@ from education_platform.modules.academics.models import Subtopic
 from education_platform.modules.academics.service import (
     CurriculumNode,
     load_subtopic_node,
+    load_topic_node,
     require_subject_enrollment,
     subject_enrollment_for,
 )
@@ -28,6 +29,7 @@ from education_platform.modules.materials.models import (
 from education_platform.modules.materials.queries import (
     progress_for,
     published_material_version,
+    published_topic_material_version,
     subtopic_by_slug,
 )
 from education_platform.modules.materials.schemas import (
@@ -90,6 +92,17 @@ async def _covered_subtopic_node(
     return node
 
 
+async def _covered_topic_node(
+    session: AsyncSession, scope: Scope, topic_id: UUID
+) -> CurriculumNode:
+    node = await load_topic_node(session, topic_id)
+    if node is None:
+        raise DomainError("Topic not found", status_code=404)
+    if not scope.covers_offering(node.offering.id, institution_id=node.institution.id):
+        raise DomainError("Topic not found", status_code=404)
+    return node
+
+
 async def get_lesson(session: AsyncSession, scope: Scope, topic_id: str) -> LessonMaterial:
     subtopic = await get_subtopic_by_slug(session, topic_id, scope=scope)
     return await get_subtopic_lesson(session, scope, subtopic.id)
@@ -126,6 +139,38 @@ async def get_subtopic_lesson(
         progress=_progress_out(progress),
         source_material_version_id=version.id,
         quiz_unlocked=progress is not None and progress.status == MaterialProgressStatus.COMPLETED,
+        quiz_id=quiz[0].id if quiz else None,
+    )
+
+
+async def get_topic_lesson(session: AsyncSession, scope: Scope, topic_id: UUID) -> LessonMaterial:
+    """Published topic ``slug=lesson`` markdown. Never joins answer keys."""
+    node = await _covered_topic_node(session, scope, topic_id)
+    version = await published_topic_material_version(session, topic_id)
+    if version is None or not version.content_markdown:
+        raise DomainError("Lesson not found", status_code=404)
+    enrollment = None
+    if scope.self_student_id is not None:
+        enrollment = await subject_enrollment_for(session, scope.self_student_id, node.offering.id)
+    progress = await progress_for(
+        session,
+        enrollment.id if enrollment else None,
+        version.id,
+    )
+    quiz = await released_quiz(session, quiz_scope=QuizScope.TOPIC_MASTERY, target_id=topic_id)
+    markdown = version.content_markdown
+    slides = [
+        LessonSlide(number=slide.number, title=slide.title, content=slide.content)
+        for slide in parse_slides(markdown)
+    ]
+    return LessonMaterial(
+        id=str(topic_id),
+        title=version.title,
+        markdown=markdown,
+        slides=slides,
+        progress=_progress_out(progress),
+        source_material_version_id=version.id,
+        quiz_unlocked=quiz is not None,
         quiz_id=quiz[0].id if quiz else None,
     )
 

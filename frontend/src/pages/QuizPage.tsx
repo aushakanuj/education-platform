@@ -9,7 +9,7 @@ import { ConfirmDialog } from "../components/ConfirmDialog";
 import { Crumbs } from "../components/Crumbs";
 import { MarkdownContent } from "../components/MarkdownContent";
 import { PushButton } from "../components/PushButton";
-import { resolvePathFromAttempt, resolvePathFromQuizId, type LearningPath } from "../lib/learningPath";
+import { resolvePathFromAttempt, resolvePathFromQuizId, learningPathCrumb, type LearningPath } from "../lib/learningPath";
 
 export function QuizPage() {
   const { quizId = "" } = useParams();
@@ -94,7 +94,9 @@ export function QuizPage() {
   }
 
   const lessonPath = path?.lessonPath;
-  const quizTabPath = path?.quizTabPath;
+  const lessonCrumb = path ? learningPathCrumb(path) : null;
+  const backToLesson = lessonPath ?? path?.subjectPath ?? null;
+  const backToLessonLabel = lessonPath ? "Open lesson" : "Back to subject";
 
   return (
     <>
@@ -109,10 +111,10 @@ export function QuizPage() {
           <p className="form__error" role="alert">
             {error}
           </p>
-          {lessonPath && (
+          {backToLesson && (
             <div className="actions" style={{ justifyContent: "center" }}>
-              <Link to={lessonPath} className="btn btn--soft btn--sm">
-                Open lesson
+              <Link to={backToLesson} className="btn btn--soft btn--sm">
+                {backToLessonLabel}
               </Link>
             </div>
           )}
@@ -126,9 +128,7 @@ export function QuizPage() {
               parts={[
                 { label: "Subjects", to: "/" },
                 { label: path.subjectName, to: path.subjectPath },
-                ...(path.subtopicTitle && quizTabPath
-                  ? [{ label: path.subtopicTitle, to: quizTabPath }]
-                  : []),
+                ...(lessonCrumb ? [lessonCrumb] : []),
                 { label: "Quiz" },
               ]}
             />
@@ -230,11 +230,11 @@ export function QuizPage() {
         onDismiss={() => setLockDialog(null)}
         actions={[
           { label: "Got it", variant: "soft" },
-          ...(lessonPath
+          ...(backToLesson
             ? [
                 {
-                  label: "Open lesson",
-                  onClick: () => navigate(lessonPath),
+                  label: backToLessonLabel,
+                  onClick: () => navigate(backToLesson),
                 },
               ]
             : []),

@@ -39,6 +39,24 @@ DEFAULT_TEST_DATABASE_URL = "postgresql+asyncpg://education:education@localhost:
 
 
 @pytest.fixture(autouse=True)
+def _stub_openrouter_unless_live(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
+    """Keep the default suite off a live OpenRouter key from backend/.env.
+
+    Production code treats an empty key as unconfigured (heuristic / stub paths).
+    Opt-in live evals set ``RUN_LIVE_LLM_TESTS=1`` (see
+    ``test_text_to_sql_generate_sql_live.py``). An empty env value must be set —
+    deleting the var would let pydantic-settings fall back to ``.env`` again.
+    """
+    if os.environ.get("RUN_LIVE_LLM_TESTS") == "1":
+        yield
+        return
+    monkeypatch.setenv("OPENROUTER_API_KEY", "")
+    get_settings.cache_clear()
+    yield
+    get_settings.cache_clear()
+
+
+@pytest.fixture(autouse=True)
 def _clear_schema_context_cache() -> Iterator[None]:
     """Not a Postgres fixture — lives here (not in test_text_to_sql_load_schema.py)
     specifically so it applies file-wide, not just to that one test module. Tests that
@@ -189,10 +207,13 @@ def client(seeded_db: Session, clean_db: str) -> Iterator[TestClient]:
                 await session.commit()
 
     app.dependency_overrides[get_session] = _override_session
-    with TestClient(app, raise_server_exceptions=True) as test_client:
-        yield test_client
-    app.dependency_overrides.clear()
-    reset_engine()
+    try:
+        with TestClient(app, raise_server_exceptions=True) as test_client:
+            yield test_client
+    finally:
+        app.dependency_overrides.clear()
+        engine.sync_engine.dispose()
+        reset_engine()
 
 
 @pytest.fixture()
