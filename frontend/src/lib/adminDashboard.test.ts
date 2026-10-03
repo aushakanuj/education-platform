@@ -5,6 +5,7 @@ import type { SubjectSummary } from "../api/insights";
 import type { AdminGrade, AdminTopic } from "./adminCurriculumLive";
 import {
   countTooFewToCompare,
+  coverageMatrix,
   curriculumCoverage,
   formatPercent,
   isLowParticipation,
@@ -149,6 +150,36 @@ describe("curriculumCoverage", () => {
     expect(coverage.grades[0].subjects.map((s) => s.name)).toEqual(["Science", "Mathematics"]);
     // One topic-wide quiz on t1, plus five subtopic quizzes on t2.
     expect(coverage.grades[0].subjects[1].quizzes).toBe(6);
+  });
+});
+
+describe("coverageMatrix", () => {
+  it("lines grades up by subject name and leaves a gap where a grade lacks a subject", () => {
+    const grades: AdminGrade[] = [
+      {
+        key: "grade-8",
+        name: "Grade 8",
+        number: 8,
+        subjects: [
+          { id: "g8-math", name: "Mathematics", code: "MATH", blurb: "", topics: [topic("t1", true)] },
+          { id: "g8-art", name: "Art", code: "ART", blurb: "", topics: [] },
+        ],
+      },
+      {
+        key: "grade-9",
+        name: "Grade 9",
+        number: 9,
+        subjects: [
+          { id: "g9-math", name: "Mathematics", code: "MATH", blurb: "", topics: [topic("t2", false, 2)] },
+        ],
+      },
+    ];
+
+    const matrix = coverageMatrix(curriculumCoverage(grades));
+    expect(matrix.subjects).toEqual(["Art", "Mathematics"]);
+    expect(matrix.rows[0].cells.map((cell) => cell?.id ?? null)).toEqual(["g8-art", "g8-math"]);
+    expect(matrix.rows[1].cells.map((cell) => cell?.id ?? null)).toEqual([null, "g9-math"]);
+    expect(matrix.rows[1].cells[1]?.quizzes).toBe(2);
   });
 });
 

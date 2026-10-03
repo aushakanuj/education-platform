@@ -218,19 +218,34 @@ describe("AdminDashboardPage", () => {
     ).toBeInTheDocument();
   });
 
-  it("highlights subjects with no published content", async () => {
+  it("highlights subjects with no published content in the coverage table", async () => {
     renderPage();
-    expect(await screen.findByText("No content yet")).toBeInTheDocument();
+    expect(await screen.findByText("None yet")).toBeInTheDocument();
     expect(screen.getByText("1 without content")).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "Science" })).toHaveAttribute(
+    expect(
+      screen.getByText("1 of 2 subjects have no published topics yet. 1 topic published in total."),
+    ).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Grade 8 Science: no content yet" })).toHaveAttribute(
       "href",
       "/admin/materials/grades/grade-8/subjects/subj-sci",
     );
   });
 
+  it("confirms with a tick when every subject has content", async () => {
+    vi.mocked(fetchLearningDirectory).mockResolvedValue({
+      subjects: directory.subjects.filter((subject) => subject.id !== "subj-sci"),
+    });
+    renderPage();
+    expect(
+      await screen.findByText("Every subject has published topics: 1 subject, 1 topic in total."),
+    ).toBeInTheDocument();
+  });
+
   it("counts quizzes on subtopics, not only topic-wide ones", async () => {
     renderPage();
-    expect(await screen.findByText("1 topic · 1 quiz")).toBeInTheDocument();
+    expect(
+      await screen.findByRole("link", { name: "Grade 8 Mathematics: 1 topic, 1 quiz" }),
+    ).toBeInTheDocument();
   });
 
   it("says every subject is doing well when none is below 70%", async () => {
@@ -251,7 +266,7 @@ describe("AdminDashboardPage", () => {
     vi.mocked(fetchDashboardSummary).mockRejectedValue(new Error("Server unavailable"));
     renderPage();
     expect(await screen.findByText("Server unavailable")).toBeInTheDocument();
-    expect(await screen.findByText("No content yet")).toBeInTheDocument();
+    expect(await screen.findByText("None yet")).toBeInTheDocument();
     expect(screen.getByText("2 students")).toBeInTheDocument();
   });
 

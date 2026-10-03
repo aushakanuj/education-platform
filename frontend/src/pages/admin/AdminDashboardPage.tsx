@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { Link } from "react-router-dom";
 
 import type { AtRiskFlag } from "../../api/atRisk";
@@ -6,6 +6,7 @@ import { fetchDashboardSummary, type DashboardSummary } from "../../api/insights
 import { Crumbs } from "../../components/Crumbs";
 import {
   countTooFewToCompare,
+  coverageMatrix,
   curriculumCoverage,
   formatPercent,
   hasEnoughEvidence,
@@ -83,20 +84,22 @@ export function AdminDashboardPage() {
           </div>
         )}
         {summary && (
-          <div className="grid grid--2 analytics-kpi-grid">
-            <div className="card is-locked">
-              <p className="progress-label">Students</p>
-              <h2>{summary.total_students}</h2>
-            </div>
-            <div className="card is-locked">
-              <p className="progress-label">Average attendance</p>
-              <h2>{formatPercent(summary.average_attendance)}</h2>
-            </div>
-            <div className="card is-locked">
-              <p className="progress-label">Average mastery</p>
-              <h2>{formatPercent(summary.average_mastery)}</h2>
-              <p className="progress-label">Subjects with at least one quiz</p>
-            </div>
+          <div className="admin-dashboard__stats">
+            <Stat
+              label="Students"
+              value={String(summary.total_students)}
+              note="Enrolled in at least one subject"
+            />
+            <Stat
+              label="Average attendance"
+              value={formatPercent(summary.average_attendance)}
+              note="Whole-day attendance per student"
+            />
+            <Stat
+              label="Average mastery"
+              value={formatPercent(summary.average_mastery)}
+              note="Across subjects with quiz attempts"
+            />
           </div>
         )}
       </section>
@@ -125,6 +128,29 @@ export function AdminDashboardPage() {
   );
 }
 
+/** A headline number. Every card has a note, so the three values line up in a row. */
+function Stat({ label, value, note }: { label: string; value: string; note: string }) {
+  return (
+    <div className="admin-dashboard__stat">
+      <p className="admin-dashboard__stat-label">{label}</p>
+      <p className="admin-dashboard__stat-value">{value}</p>
+      <p className="admin-dashboard__stat-note">{note}</p>
+    </div>
+  );
+}
+
+/** Good news gets its own look, so "nothing to do" reads differently from a warning. */
+function AllGood({ children }: { children: ReactNode }) {
+  return (
+    <div className="admin-dashboard__ok" role="status">
+      <span className="admin-dashboard__ok-icon" aria-hidden="true">
+        ✓
+      </span>
+      <div>{children}</div>
+    </div>
+  );
+}
+
 function AttentionSection({
   loading,
   error,
@@ -147,29 +173,29 @@ function AttentionSection({
           {error}
         </div>
       )}
-      {!loading && !error && (
-        <div className="panel admin-dashboard__attention">
-          {counts.flags === 0 ? (
-            <p className="admin-dashboard__lead">No students are flagged as at risk right now.</p>
-          ) : (
-            <>
-              <p className="admin-dashboard__lead">
-                <strong>{plural(counts.students, "student")}</strong> flagged as at risk (
-                {plural(counts.flags, "active flag")})
-              </p>
-              <div className="meta-row">
-                {counts.urgent > 0 && (
-                  <span className="badge badge--warn">{counts.urgent} urgent</span>
-                )}
-                {counts.attention > 0 && (
-                  <span className="badge badge--info">{counts.attention} attention</span>
-                )}
-                {counts.monitor > 0 && <span className="badge">{counts.monitor} monitor</span>}
-              </div>
-            </>
-          )}
+      {!loading && !error && counts.flags === 0 && (
+        <AllGood>
+          <p>No students are flagged as at risk right now.</p>
           <Link to="/admin/at-risk" className="admin-dashboard__link">
-            {counts.flags === 0 ? "Open at-risk flags →" : "Review at-risk flags →"}
+            Open at-risk flags →
+          </Link>
+        </AllGood>
+      )}
+      {!loading && !error && counts.flags > 0 && (
+        <div className="panel admin-dashboard__attention">
+          <p className="admin-dashboard__lead">
+            <strong>{plural(counts.students, "student")}</strong> flagged as at risk (
+            {plural(counts.flags, "active flag")})
+          </p>
+          <div className="meta-row">
+            {counts.urgent > 0 && <span className="badge badge--warn">{counts.urgent} urgent</span>}
+            {counts.attention > 0 && (
+              <span className="badge badge--info">{counts.attention} attention</span>
+            )}
+            {counts.monitor > 0 && <span className="badge">{counts.monitor} monitor</span>}
+          </div>
+          <Link to="/admin/at-risk" className="admin-dashboard__link">
+            Review at-risk flags →
           </Link>
         </div>
       )}
@@ -189,12 +215,20 @@ function SubjectsToLookInto({ summary }: { summary: DashboardSummary }) {
     const anyComparable = summary.subjects.some(hasEnoughEvidence);
     return (
       <>
-        <div className="banner banner--info" role="status">
-          {anyComparable
-            ? `Every subject with enough quiz results is averaging ${STRONG_MASTERY_PERCENT}% or above.`
-            : `No subject has quiz results from at least ${MIN_SCORED_STUDENTS} students yet, so there is nothing to compare.`}
-        </div>
-        {tooFewNote && <p className="progress-label">{tooFewNote}</p>}
+        {anyComparable ? (
+          <AllGood>
+            <p>
+              Every subject with enough quiz results is averaging {STRONG_MASTERY_PERCENT}% or
+              above.
+            </p>
+          </AllGood>
+        ) : (
+          <div className="banner banner--info" role="status">
+            No subject has quiz results from at least {MIN_SCORED_STUDENTS} students yet, so there
+            is nothing to compare.
+          </div>
+        )}
+        {tooFewNote && <p className="progress-label admin-dashboard__footnote">{tooFewNote}</p>}
       </>
     );
   }
@@ -249,6 +283,7 @@ function SubjectsToLookInto({ summary }: { summary: DashboardSummary }) {
 
 function Coverage({ grades }: { grades: AdminGrade[] }) {
   const coverage = curriculumCoverage(grades);
+  const matrix = coverageMatrix(coverage);
 
   if (coverage.grades.length === 0) {
     return (
@@ -258,41 +293,89 @@ function Coverage({ grades }: { grades: AdminGrade[] }) {
     );
   }
 
+  const complete = coverage.subjectsWithContent === coverage.totalSubjects;
+  const totals = `${plural(coverage.totalTopics, "topic")} published in total.`;
+  const everySubject = `Every subject has published topics: ${plural(coverage.totalSubjects, "subject")}, ${plural(coverage.totalTopics, "topic")} in total.`;
+
   return (
     <>
-      <p className="progress-label">
-        {coverage.subjectsWithContent} of {plural(coverage.totalSubjects, "subject")} have published
-        topics · {plural(coverage.totalTopics, "topic")} in total
-      </p>
-      <div className="admin-dashboard__coverage">
-        {coverage.grades.map((grade) => (
-          <div className="panel" key={grade.key}>
-            <div className="meta-row admin-dashboard__grade-head">
-              <h3>{grade.name}</h3>
-              {grade.emptySubjects > 0 && (
-                <span className="badge badge--warn">
-                  {grade.emptySubjects} without content
-                </span>
-              )}
-            </div>
-            <ul className="admin-dashboard__subjects">
-              {grade.subjects.map((subject) => (
-                <li key={subject.id}>
-                  <Link to={`/admin/materials/grades/${grade.key}/subjects/${subject.id}`}>
-                    {subject.name}
-                  </Link>
-                  {subject.topics === 0 ? (
-                    <span className="badge badge--warn">No content yet</span>
-                  ) : (
-                    <span className="progress-label">
-                      {plural(subject.topics, "topic")} · {plural(subject.quizzes, "quiz", "quizzes")}
-                    </span>
-                  )}
-                </li>
+      {complete ? (
+        <AllGood>
+          <p>{everySubject}</p>
+        </AllGood>
+      ) : (
+        <div className="banner banner--warning" role="status">
+          {coverage.totalSubjects - coverage.subjectsWithContent} of{" "}
+          {plural(coverage.totalSubjects, "subject")} have no published topics yet. {totals}
+        </div>
+      )}
+      <div className="panel admin-dashboard__coverage">
+        <p className="progress-label">
+          Topics and quizzes per grade and subject. Yellow cells have no content yet. Select a cell
+          to open that subject's materials.
+        </p>
+        <div className="heatmap-scroll">
+          <table className="heatmap admin-coverage">
+            <thead>
+              <tr>
+                <th scope="col">Grade</th>
+                {matrix.subjects.map((name) => (
+                  <th scope="col" key={name}>
+                    {name}
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {matrix.rows.map((row) => (
+                <tr key={row.key}>
+                  <th scope="row">
+                    <span className="heatmap__class">{row.name}</span>
+                    {row.emptySubjects > 0 && (
+                      <span className="heatmap__count admin-coverage__gap">
+                        {row.emptySubjects} without content
+                      </span>
+                    )}
+                  </th>
+                  {row.cells.map((cell, index) => {
+                    const subjectName = matrix.subjects[index];
+                    if (cell === null) {
+                      return (
+                        <td
+                          key={subjectName}
+                          className="admin-coverage__none"
+                          title="Not offered in this grade"
+                        >
+                          —
+                        </td>
+                      );
+                    }
+                    const to = `/admin/materials/grades/${row.key}/subjects/${cell.id}`;
+                    if (cell.topics === 0) {
+                      return (
+                        <td key={subjectName} className="admin-coverage__empty">
+                          <Link to={to} aria-label={`${row.name} ${subjectName}: no content yet`}>
+                            None yet
+                          </Link>
+                        </td>
+                      );
+                    }
+                    const topics = plural(cell.topics, "topic");
+                    const quizzes = plural(cell.quizzes, "quiz", "quizzes");
+                    return (
+                      <td key={subjectName}>
+                        <Link to={to} aria-label={`${row.name} ${subjectName}: ${topics}, ${quizzes}`}>
+                          <span className="admin-coverage__topics">{topics}</span>
+                          <span className="heatmap__count">{quizzes}</span>
+                        </Link>
+                      </td>
+                    );
+                  })}
+                </tr>
               ))}
-            </ul>
-          </div>
-        ))}
+            </tbody>
+          </table>
+        </div>
       </div>
     </>
   );

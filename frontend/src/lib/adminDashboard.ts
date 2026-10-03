@@ -137,6 +137,40 @@ export function curriculumCoverage(grades: AdminGrade[]): CurriculumCoverage {
   return { grades: rows, totalSubjects, subjectsWithContent, totalTopics };
 }
 
+export type CoverageMatrix = {
+  /** Every subject name offered in any grade, alphabetical -- the table's columns. */
+  subjects: string[];
+  rows: {
+    key: string;
+    name: string;
+    emptySubjects: number;
+    /** One per column; null where the grade does not offer that subject at all. */
+    cells: (SubjectCoverage | null)[];
+  }[];
+};
+
+/** Grades as rows and subjects as columns, so a gap stands out at a glance. Subjects are
+ * matched by name, since the same subject has a different id in each grade. */
+export function coverageMatrix(coverage: CurriculumCoverage): CoverageMatrix {
+  const names = new Set<string>();
+  for (const grade of coverage.grades) {
+    for (const subject of grade.subjects) names.add(subject.name);
+  }
+  const subjects = [...names].sort((a, b) => a.localeCompare(b));
+
+  return {
+    subjects,
+    rows: coverage.grades.map((grade) => ({
+      key: grade.key,
+      name: grade.name,
+      emptySubjects: grade.emptySubjects,
+      cells: subjects.map(
+        (name) => grade.subjects.find((subject) => subject.name === name) ?? null,
+      ),
+    })),
+  };
+}
+
 export function formatPercent(value: number | null): string {
   return value === null ? "—" : `${value.toFixed(1)}%`;
 }
