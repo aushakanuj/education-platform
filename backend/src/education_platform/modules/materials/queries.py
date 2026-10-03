@@ -45,6 +45,25 @@ async def published_material_version(
     )
 
 
+async def published_topic_material_version(
+    session: AsyncSession, topic_id: UUID
+) -> SourceMaterialVersion | None:
+    """Latest published topic ``slug=lesson`` version, or None for seeded-only topics."""
+    return cast(
+        SourceMaterialVersion | None,
+        await session.scalar(
+            select(SourceMaterialVersion)
+            .join(SourceMaterial, SourceMaterial.id == SourceMaterialVersion.source_material_id)
+            .where(
+                SourceMaterial.topic_id == topic_id,
+                SourceMaterial.slug == "lesson",
+                SourceMaterialVersion.lifecycle_status == SourceMaterialVersionStatus.PUBLISHED,
+            )
+            .order_by(SourceMaterialVersion.version_number.desc())
+        ),
+    )
+
+
 async def progress_for(
     session: AsyncSession,
     subject_enrollment_id: UUID | None,

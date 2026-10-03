@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 import { fetchLearningDirectory } from "../api/materials";
 import { ApiError } from "../api/types";
@@ -18,6 +18,7 @@ export type UseAdminDirectoryResult = {
   grades: AdminGrade[] | null;
   loading: boolean;
   error: string | null;
+  reload: () => Promise<void>;
   getGrade: (gradeKey: string) => AdminGrade | undefined;
   getSubject: (
     gradeKey: string,
@@ -35,10 +36,10 @@ export function useAdminDirectory(): UseAdminDirectoryResult {
   const [grades, setGrades] = useState<AdminGrade[] | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const requestIdRef = useRef(0);
+  const loadedOnceRef = useRef(false);
 
-  useEffect(() => {
-    let cancelled = false;
-
+  const reload = useCallback(async () => {
     if (isDevMockSession) {
       setGrades(null);
       setError(MOCK_SESSION_MATERIALS_ERROR);
@@ -46,35 +47,39 @@ export function useAdminDirectory(): UseAdminDirectoryResult {
       return;
     }
 
-    setLoading(true);
-    void (async () => {
-      try {
-        const directory = await fetchLearningDirectory();
-        if (cancelled) return;
-        setGrades(adaptLearningDirectory(directory));
-        setError(null);
-      } catch (err) {
-        if (cancelled) return;
-        setGrades(null);
-        setError(
-          err instanceof ApiError
-            ? err.message
-            : "Could not load curriculum directory.",
-        );
-      } finally {
-        if (!cancelled) setLoading(false);
-      }
-    })();
-
-    return () => {
-      cancelled = true;
-    };
+    const requestId = ++requestIdRef.current;
+    if (!loadedOnceRef.current) setLoading(true);
+    try {
+      const directory = await fetchLearningDirectory();
+      if (requestId !== requestIdRef.current) return;
+      setGrades(adaptLearningDirectory(directory));
+      setError(null);
+      loadedOnceRef.current = true;
+    } catch (err) {
+      if (requestId !== requestIdRef.current) return;
+      setGrades(null);
+      setError(
+        err instanceof ApiError
+          ? err.message
+          : "Could not load curriculum directory.",
+      );
+    } finally {
+      if (requestId === requestIdRef.current) setLoading(false);
+    }
   }, [isDevMockSession]);
+
+  useEffect(() => {
+    void reload();
+    return () => {
+      requestIdRef.current += 1;
+    };
+  }, [reload]);
 
   return {
     grades,
     loading,
     error,
+    reload,
     getGrade: (gradeKey) => (grades ? getAdminGrade(grades, gradeKey) : undefined),
     getSubject: (gradeKey, subjectId) =>
       grades ? getAdminSubject(grades, gradeKey, subjectId) : undefined,

@@ -22,9 +22,9 @@ principal who happens to also hold another role, not whichever role happened to 
 
 **The compiled graph is built once, at import time** (`_GRAPH`), not per request.
 `build_text_to_sql_graph()` takes no per-request arguments — every node reads identity from
-`state`, not from a closure (contrast `assistant.graph.build_assistant_graph(*, principal,
-...)`, which must rebuild per request because its `retrieve_node` closes over `principal`
-directly). A compiled `StateGraph` is just wiring — a fixed set of node functions and edges
+`state`, not from a closure. The policy assistant graph is compiled the same way
+(`assistant.graph.get_assistant_graph()`): `user_id` / `institution_id` / `roles` ride on
+each turn's state. A compiled `StateGraph` is just wiring — a fixed set of node functions and edges
 — with no per-invocation mutable state of its own (no checkpointer is configured here), so
 it's safe to share across concurrent requests, and re-registering every node/edge on every
 single call would be pure overhead for no benefit.

@@ -18,9 +18,11 @@ from education_platform.modules.at_risk.router import router as at_risk_router
 from education_platform.modules.audit.router import router as audit_router
 from education_platform.modules.auth.router import router as auth_router
 from education_platform.modules.authoring.router import router as authoring_router
+from education_platform.modules.generation.router import router as generation_router
 from education_platform.modules.insights.router import router as insights_router
 from education_platform.modules.materials.router import router as materials_router
 from education_platform.modules.materials.seed import seed_approved_materials
+from education_platform.modules.progress.router import router as progress_router
 from education_platform.modules.rag.router import router as rag_router
 from education_platform.modules.text_to_sql.router import router as text_to_sql_router
 
@@ -29,10 +31,12 @@ _ = _models
 
 def _seed_if_empty() -> None:
     settings = get_settings()
-    engine = create_engine(to_sync_url(settings.database_url))
-    with Session(engine) as session:
-        seed_approved_materials(session, replace=False)
-    engine.dispose()
+    engine = create_engine(to_sync_url(settings.database_url), pool_pre_ping=True)
+    try:
+        with Session(engine) as session:
+            seed_approved_materials(session, replace=False)
+    finally:
+        engine.dispose()
 
 
 @asynccontextmanager
@@ -61,6 +65,8 @@ app.include_router(audit_router, prefix=settings.api_v1_prefix)
 app.include_router(insights_router, prefix=settings.api_v1_prefix)
 app.include_router(authoring_router, prefix=settings.api_v1_prefix)
 app.include_router(text_to_sql_router, prefix=settings.api_v1_prefix)
+app.include_router(generation_router, prefix=settings.api_v1_prefix)
+app.include_router(progress_router, prefix=settings.api_v1_prefix)
 app.include_router(at_risk_router, prefix=settings.api_v1_prefix)
 
 
