@@ -1,4 +1,5 @@
-import type { AttemptResult, LearningDirectory, StartAttemptResponse } from "../api/types";
+import type { AttemptResult, LearningDirectory, StartAttemptResponse, TopicNode } from "../api/types";
+import { hasPublishedTopicLesson, topicLessonPath } from "./subjectMaterial";
 
 export type LearningPath = {
   subjectId: string;
@@ -17,16 +18,23 @@ export type LearningPath = {
   quizHistoryPath: string | null;
   overallUnlocked: boolean;
   topicComplete: boolean;
+  hasTopicLesson: boolean;
 };
 
 function pathForTopic(
   subjectId: string,
   subjectName: string,
-  topic: LearningDirectory["subjects"][number]["topics"][number],
-  subtopic: LearningDirectory["subjects"][number]["topics"][number]["subtopics"][number] | null,
+  topic: TopicNode,
+  subtopic: TopicNode["subtopics"][number] | null,
 ): LearningPath {
   const subjectPath = `/subjects/${subjectId}`;
-  const lessonPath = subtopic ? `${subjectPath}/subtopics/${subtopic.id}/lesson` : null;
+  const hasTopicLesson = hasPublishedTopicLesson(topic);
+  const publishedTopicLessonPath = topicLessonPath(subjectId, topic.id);
+  const lessonPath = subtopic
+    ? `${subjectPath}/subtopics/${subtopic.id}/lesson`
+    : hasTopicLesson
+      ? publishedTopicLessonPath
+      : null;
   return {
     subjectId,
     subjectName,
@@ -38,10 +46,11 @@ function pathForTopic(
     topicPath: subjectPath,
     lessonPath,
     quizTabPath: lessonPath,
-    slidesPath: lessonPath ? `${lessonPath}/slides` : null,
-    quizHistoryPath: lessonPath ? `${lessonPath}/history` : null,
+    slidesPath: subtopic && lessonPath ? `${lessonPath}/slides` : null,
+    quizHistoryPath: subtopic && lessonPath ? `${lessonPath}/history` : null,
     overallUnlocked: Boolean(topic.overall_quiz?.unlocked),
     topicComplete: topic.complete,
+    hasTopicLesson,
   };
 }
 
@@ -52,20 +61,31 @@ export function resolveLearningPath(
 ): LearningPath | null {
   if (!targetId || !scope) return null;
 
-  for (const subject of directory.subjects) {
-    for (const topic of subject.topics) {
-      if (scope === "topic_mastery" && topic.id === targetId) {
-        return pathForTopic(subject.id, subject.name, topic, null);
-      }
-      if (scope === "subtopic_mastery") {
-        const subtopic = topic.subtopics.find((item) => item.id === targetId);
-        if (subtopic) {
-          return pathForTopic(subject.id, subject.name, topic, subtopic);
+  switch (scope) {
+    case "topic_mastery":
+      for (const subject of directory.subjects) {
+        for (const topic of subject.topics) {
+          if (topic.id === targetId) {
+            return pathForTopic(subject.id, subject.name, topic, null);
+          }
         }
       }
+      return null;
+    case "subtopic_mastery":
+      for (const subject of directory.subjects) {
+        for (const topic of subject.topics) {
+          const subtopic = topic.subtopics.find((item) => item.id === targetId);
+          if (subtopic) {
+            return pathForTopic(subject.id, subject.name, topic, subtopic);
+          }
+        }
+      }
+      return null;
+    default: {
+      const _exhaustive: never = scope;
+      return _exhaustive;
     }
   }
-  return null;
 }
 
 export function resolvePathFromAttempt(
@@ -90,6 +110,16 @@ export function resolvePathFromQuizId(
         }
       }
     }
+  }
+  return null;
+}
+
+export function learningPathCrumb(path: LearningPath): { label: string; to: string } | null {
+  if (path.subtopicTitle && path.quizTabPath) {
+    return { label: path.subtopicTitle, to: path.quizTabPath };
+  }
+  if (path.hasTopicLesson && path.lessonPath) {
+    return { label: "Topic lesson", to: path.lessonPath };
   }
   return null;
 }

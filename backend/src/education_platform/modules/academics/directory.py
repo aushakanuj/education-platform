@@ -43,7 +43,11 @@ from education_platform.modules.materials.models import (
     SourceMaterialVersion,
     StudentMaterialProgress,
 )
-from education_platform.modules.materials.queries import progress_for, published_material_version
+from education_platform.modules.materials.queries import (
+    progress_for,
+    published_material_version,
+    published_topic_material_version,
+)
 from education_platform.modules.materials.schemas import MaterialProgressOut
 
 
@@ -111,16 +115,31 @@ async def build_learning_directory(session: AsyncSession, scope: Scope) -> Learn
         for topic in db_topics:
             subtopic_nodes = await _subtopic_nodes(session, scope, topic, subject_enrollment)
             quiz_nodes = [node for node in subtopic_nodes if node.quiz and node.quiz.available]
-            overall_unlocked = bool(quiz_nodes) and all(
-                node.quiz is not None and node.quiz.passed for node in quiz_nodes
+            topic_lesson = await published_topic_material_version(session, topic.id)
+            topic_progress = await progress_for(
+                session,
+                subject_enrollment.id if subject_enrollment else None,
+                topic_lesson.id if topic_lesson else None,
             )
+            topic_lesson_completed = (
+                topic_progress is not None
+                and topic_progress.status == MaterialProgressStatus.COMPLETED
+            )
+            if topic_lesson is not None:
+                overall_unlocked = True
+                locked_reason = "Complete the lesson first"
+            else:
+                overall_unlocked = bool(quiz_nodes) and all(
+                    node.quiz is not None and node.quiz.passed for node in quiz_nodes
+                )
+                locked_reason = "Pass all subtopic quizzes first"
             overall = await _quiz_summary(
                 session,
                 scope,
                 quiz_scope=QuizScope.TOPIC_MASTERY,
                 target_id=topic.id,
                 unlocked=overall_unlocked,
-                locked_reason="Pass all subtopic quizzes first",
+                locked_reason=locked_reason,
             )
             units = [node.progress_percent for node in subtopic_nodes]
             if overall.available:
@@ -139,6 +158,9 @@ async def build_learning_directory(session: AsyncSession, scope: Scope) -> Learn
                     objectives=objectives,
                     subtopics=subtopic_nodes,
                     overall_quiz=overall if overall.available else None,
+                    has_topic_lesson=topic_lesson is not None,
+                    topic_lesson_completed=topic_lesson_completed,
+                    topic_source_material_version_id=topic_lesson.id if topic_lesson else None,
                 )
             )
         subject_progress = (

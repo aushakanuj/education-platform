@@ -1,4 +1,5 @@
 import { apiRequest } from "./client";
+import { versionSubject, watchProgress } from "./progress";
 import type {
   IngestLifecycleStatus,
   KnowledgeDocumentAccepted,
@@ -19,24 +20,6 @@ const TERMINAL_STATUSES = new Set<IngestLifecycleStatus>([
 
 export function isTerminalIngestStatus(status: IngestLifecycleStatus): boolean {
   return TERMINAL_STATUSES.has(status);
-}
-
-function sleep(ms: number, signal?: AbortSignal): Promise<void> {
-  return new Promise((resolve, reject) => {
-    if (signal?.aborted) {
-      reject(new DOMException("Aborted", "AbortError"));
-      return;
-    }
-    const timer = window.setTimeout(() => resolve(), ms);
-    signal?.addEventListener(
-      "abort",
-      () => {
-        window.clearTimeout(timer);
-        reject(new DOMException("Aborted", "AbortError"));
-      },
-      { once: true },
-    );
-  });
 }
 
 export async function uploadSubtopicMaterial(
@@ -61,26 +44,16 @@ export async function getMaterialVersionStatus(
   );
 }
 
-export type PollOptions = {
-  intervalMs?: number;
+export type StreamWatchOptions = {
   signal?: AbortSignal;
 };
 
-export async function pollMaterialVersionStatus(
+export async function watchMaterialVersionStatus(
   versionId: string,
-  options: PollOptions = {},
+  options: StreamWatchOptions = {},
 ): Promise<MaterialVersionStatus> {
-  const intervalMs = options.intervalMs ?? 1500;
-  for (;;) {
-    if (options.signal?.aborted) {
-      throw new DOMException("Aborted", "AbortError");
-    }
-    const status = await getMaterialVersionStatus(versionId);
-    if (isTerminalIngestStatus(status.lifecycle_status)) {
-      return status;
-    }
-    await sleep(intervalMs, options.signal);
-  }
+  const snapshot = await watchProgress(versionSubject(versionId), { signal: options.signal });
+  return snapshot as MaterialVersionStatus;
 }
 
 export type KnowledgeDocumentUploadInput = {
@@ -129,19 +102,10 @@ export async function getKnowledgeDocumentVersionStatus(
   );
 }
 
-export async function pollKnowledgeDocumentVersionStatus(
+export async function watchKnowledgeDocumentVersionStatus(
   versionId: string,
-  options: PollOptions = {},
+  options: StreamWatchOptions = {},
 ): Promise<KnowledgeDocumentVersionStatus> {
-  const intervalMs = options.intervalMs ?? 1500;
-  for (;;) {
-    if (options.signal?.aborted) {
-      throw new DOMException("Aborted", "AbortError");
-    }
-    const status = await getKnowledgeDocumentVersionStatus(versionId);
-    if (isTerminalIngestStatus(status.lifecycle_status)) {
-      return status;
-    }
-    await sleep(intervalMs, options.signal);
-  }
+  const snapshot = await watchProgress(versionSubject(versionId), { signal: options.signal });
+  return snapshot as KnowledgeDocumentVersionStatus;
 }

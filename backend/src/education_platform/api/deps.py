@@ -11,7 +11,7 @@ from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from education_platform.db.session import get_session
+from education_platform.db.session import get_session, get_session_factory
 from education_platform.modules.audit.models import AuditEvent
 from education_platform.modules.audit.service import AuditAction, record_event
 from education_platform.modules.auth.models import (
@@ -27,9 +27,9 @@ from education_platform.modules.authorization.scope import Scope, scope_for
 _bearer = HTTPBearer(auto_error=False)
 
 
-async def get_current_user(
-    credentials: HTTPAuthorizationCredentials | None = Depends(_bearer),
-    session: AsyncSession = Depends(get_session),
+async def principal_from_bearer(
+    session: AsyncSession,
+    credentials: HTTPAuthorizationCredentials | None,
 ) -> Principal:
     if credentials is None or credentials.scheme.lower() != "bearer":
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Not authenticated")
@@ -61,6 +61,24 @@ async def get_current_user(
         student_profile_id=profile_id,
         status=user.status.value,
     )
+
+
+async def get_current_user(
+    credentials: HTTPAuthorizationCredentials | None = Depends(_bearer),
+    session: AsyncSession = Depends(get_session),
+) -> Principal:
+    return await principal_from_bearer(session, credentials)
+
+
+async def get_current_user_detached(
+    credentials: HTTPAuthorizationCredentials | None = Depends(_bearer),
+) -> Principal:
+    """Authenticate without holding the request session for StreamingResponse."""
+    factory = get_session_factory()
+    async with factory() as session:
+        principal = await principal_from_bearer(session, credentials)
+        await session.commit()
+        return principal
 
 
 async def require_administrator(
@@ -144,7 +162,9 @@ __all__ = [
     "Principal",
     "ScopedRequest",
     "get_current_user",
+    "get_current_user_detached",
     "get_scope",
+    "principal_from_bearer",
     "require_administrator",
     "require_role",
     "scoped",

@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState, type DragEvent, type FormEven
 
 import {
   listKnowledgeDocuments,
-  pollKnowledgeDocumentVersionStatus,
+  watchKnowledgeDocumentVersionStatus,
   uploadKnowledgeDocument,
 } from "../../api/adminIngest";
 import { ApiError, type KnowledgeDocumentListItem } from "../../api/types";
@@ -140,7 +140,7 @@ export function AdminDocumentsPage() {
         requiredRoles,
       });
       setUploadStatus(accepted.lifecycle_status);
-      const settled = await pollKnowledgeDocumentVersionStatus(accepted.version_id);
+      const settled = await watchKnowledgeDocumentVersionStatus(accepted.version_id);
       setUploadStatus(settled.lifecycle_status);
       if (settled.failure_reason) {
         setUploadError(settled.failure_reason);

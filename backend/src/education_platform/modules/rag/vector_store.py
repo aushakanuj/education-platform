@@ -7,12 +7,11 @@ from contextlib import contextmanager
 from dataclasses import dataclass
 from uuid import UUID
 
-from sqlalchemy import cast, create_engine, delete, func, select
+from sqlalchemy import cast, delete, func, select
 from sqlalchemy.dialects.postgresql import JSONB, insert
 from sqlalchemy.orm import Session
 
-from education_platform.core.config import get_settings
-from education_platform.db.url import to_sync_url
+from education_platform.db.session import sync_session
 from education_platform.modules.rag.contracts import VectorRow
 from education_platform.modules.rag.models import ChunkEmbedding
 
@@ -37,13 +36,12 @@ class SimilarChunk:
 
 @contextmanager
 def _session() -> Iterator[Session]:
-    settings = get_settings()
-    engine = create_engine(to_sync_url(settings.database_url), pool_pre_ping=True)
+    """Use the shared worker engine so ingest does not open a pool per upsert."""
+    session = sync_session()
     try:
-        with Session(engine) as session:
-            yield session
+        yield session
     finally:
-        engine.dispose()
+        session.close()
 
 
 def delete_by_version(version_id: UUID) -> int:

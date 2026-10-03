@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Navigate, useParams } from "react-router-dom";
+import { Link, Navigate, useParams } from "react-router-dom";
 
 import { getSubtopicMaterial, getSubtopicQuiz } from "../../api/materials";
 import type { LessonMaterial, QuizMaterial, QuizSummary, TopicNode } from "../../api/types";
@@ -184,6 +184,11 @@ export function SubjectMaterialsPage() {
               </div>
 
               <h3 className="teacher-materials__topic-title">{activeTopic.title}</h3>
+              <p>
+                <Link to={`/teacher/topics/${activeTopic.id}/generation`}>
+                  Review generation
+                </Link>
+              </p>
               <TabBody
                 tab={tab}
                 topic={activeTopic}
