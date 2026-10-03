@@ -1,0 +1,104 @@
+/* Admin dashboard -- layout only. Cards, panels, badges, banners and progress bars are the
+   shared classes from app.css, so the page looks like the rest of the admin area. */
+
+.admin-dashboard__section {
+  margin-bottom: 1.75rem;
+}
+
+.admin-dashboard__title {
+  margin: 0 0 0.6rem;
+  font-size: 1.1rem;
+  letter-spacing: -0.02em;
+}
+
+.admin-dashboard__attention {
+  display: grid;
+  gap: 0.5rem;
+}
+
+.admin-dashboard__lead {
+  margin: 0;
+  font-size: 1rem;
+}
+
+.admin-dashboard__link {
+  justify-self: start;
+  color: var(--accent);
+  font-weight: 600;
+  text-decoration: none;
+}
+
+.admin-dashboard__link:hover {
+  color: var(--accent-hover);
+  text-decoration: underline;
+}
+
+.admin-dashboard__weakest {
+  display: grid;
+  gap: 0.9rem;
+  margin: 0.75rem 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.admin-dashboard__weakest .meta-row {
+  margin-top: 0.3rem;
+}
+
+.admin-dashboard__weakest .progress-label {
+  margin: 0;
+}
+
+.admin-dashboard__footnote {
+  margin: 0.9rem 0 0;
+}
+
+.admin-dashboard__coverage {
+  display: grid;
+  gap: 1rem;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 18rem), 1fr));
+  align-items: start;
+  margin-top: 0.6rem;
+}
+
+/* .panel + .panel adds a top margin for stacked panels; in a grid the gap handles it. */
+.admin-dashboard__coverage > .panel + .panel {
+  margin-top: 0;
+}
+
+.admin-dashboard__grade-head {
+  justify-content: space-between;
+  margin: 0 0 0.5rem;
+}
+
+.admin-dashboard__grade-head h3 {
+  margin: 0;
+  font-size: 1rem;
+}
+
+.admin-dashboard__subjects {
+  display: grid;
+  gap: 0.45rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.admin-dashboard__subjects li {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  align-items: center;
+  gap: 0.25rem 0.75rem;
+}
+
+.admin-dashboard__subjects a {
+  color: var(--ink);
+  font-weight: 600;
+  text-decoration: none;
+}
+
+.admin-dashboard__subjects a:hover {
+  color: var(--accent);
+  text-decoration: underline;
+}
