@@ -1366,6 +1366,93 @@ def test_worker_happy_path_knowledge_document(
     get_settings.cache_clear()
 
 
+def test_reprocess_failure_keeps_prior_embeddings_atomic(
+    seeded_db: Session,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Embedding writes must share the worker transaction with chunk writes.
+
+    Previously ``delete_by_version`` / ``upsert_rows`` opened their own sessions and
+    committed immediately. A failed re-ingest then rolled back restored chunks while
+    the committed vector delete stayed — searchable index wiped for that version.
+    """
+    from education_platform.modules.rag import storage
+
+    monkeypatch.setenv("UPLOAD_DIR", str(tmp_path / "uploads"))
+    get_settings.cache_clear()
+    monkeypatch.setattr(
+        "education_platform.workers.ingest.embed_texts",
+        lambda texts: [[0.05] * 384 for _ in texts],
+    )
+
+    document = KnowledgeDocument(
+        institution_id=_institution_id(seeded_db),
+        title="Atomic Policy",
+        slug=f"atomic-{uuid4().hex[:8]}",
+        doc_type="policy",
+        required_roles=["administrator"],
+    )
+    seeded_db.add(document)
+    seeded_db.flush()
+    object_key = storage.build_object_key(
+        institution_id=document.institution_id,
+        kind="knowledge_documents",
+        filename="atomic.pdf",
+    )
+    storage.store_bytes(object_key, TINY_PDF)
+    version = KnowledgeDocumentVersion(
+        document_id=document.id,
+        version_number=1,
+        lifecycle_status=KnowledgeDocumentVersionStatus.PROCESSING,
+        blob_object_key=object_key,
+        blob_content_type="application/pdf",
+        checksum=storage.sha256_hex(TINY_PDF),
+    )
+    seeded_db.add(version)
+    seeded_db.flush()
+    job = IngestJob(
+        knowledge_document_version_id=version.id,
+        status=IngestJobStatus.QUEUED,
+    )
+    seeded_db.add(job)
+    seeded_db.commit()
+
+    process_ingest_job_sync(str(job.id), parse_pdf=lambda _path: _sample_chunks())
+    seeded_db.expire_all()
+    assert count_for_version(version.id) >= 1
+    prior_chunks = seeded_db.scalars(
+        select(KnowledgeChunk).where(KnowledgeChunk.knowledge_document_version_id == version.id)
+    ).all()
+    assert len(prior_chunks) == 1
+    prior_chunk_id = prior_chunks[0].id
+
+    retry = IngestJob(
+        knowledge_document_version_id=version.id,
+        status=IngestJobStatus.QUEUED,
+    )
+    seeded_db.add(retry)
+    seeded_db.commit()
+
+    def _boom_embed(texts: list[str]) -> list[list[float]]:
+        raise RuntimeError("embed failed after chunk clear")
+
+    monkeypatch.setattr("education_platform.workers.ingest.embed_texts", _boom_embed)
+    process_ingest_job_sync(str(retry.id), parse_pdf=lambda _path: _sample_chunks())
+
+    seeded_db.expire_all()
+    done = seeded_db.get(IngestJob, retry.id)
+    assert done is not None
+    assert done.status == IngestJobStatus.FAILED
+    chunks = seeded_db.scalars(
+        select(KnowledgeChunk).where(KnowledgeChunk.knowledge_document_version_id == version.id)
+    ).all()
+    assert len(chunks) == 1
+    assert chunks[0].id == prior_chunk_id
+    assert count_for_version(version.id) >= 1
+    get_settings.cache_clear()
+
+
 def test_worker_failed_parse_marks_failed(
     seeded_db: Session,
     monkeypatch: pytest.MonkeyPatch,

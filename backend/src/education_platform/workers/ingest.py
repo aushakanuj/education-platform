@@ -526,7 +526,9 @@ def _persist_and_embed(
 ) -> None:
     clear_existing()
     session.flush()
-    delete_by_version(version_id)
+    # Keep embedding deletes/upserts on this session so a later rollback cannot
+    # leave orphan vectors (or wipe vectors while restoring chunks).
+    delete_by_version(version_id, session=session)
 
     orm_chunks: list[Any] = []
     for chunk in chunks:
@@ -550,7 +552,7 @@ def _persist_and_embed(
         )
         for orm, embedding, chunk in zip(orm_chunks, embeddings, chunks, strict=True)
     ]
-    upsert_rows(vector_rows)
+    upsert_rows(vector_rows, session=session)
 
 
 def process_ingest_job_sync(

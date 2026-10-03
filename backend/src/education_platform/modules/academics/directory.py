@@ -34,8 +34,12 @@ from education_platform.modules.assessments.models import (
     QuizScope,
     QuizVersion,
 )
-from education_platform.modules.assessments.queries import released_quiz
-from education_platform.modules.assessments.schemas import AttemptHistoryItem, QuizSummaryOut
+from education_platform.modules.assessments.queries import (
+    history_item_for,
+    released_quiz,
+    results_visible,
+)
+from education_platform.modules.assessments.schemas import QuizSummaryOut
 from education_platform.modules.authorization.scope import Scope
 from education_platform.modules.materials.markdown_parser import parse_slides
 from education_platform.modules.materials.models import (
@@ -307,27 +311,22 @@ async def _quiz_summary(
                 .order_by(QuizAttempt.attempt_number.desc())
             )
         )
+    # HELD (admin_release) attempts keep score/pass server-side but must not
+    # surface in the student directory or unlock the next quiz early.
     best = max(
-        (attempt.score_percent for attempt in attempts if attempt.score_percent is not None),
+        (
+            attempt.score_percent
+            for attempt in attempts
+            if results_visible(attempt) and attempt.score_percent is not None
+        ),
         default=None,
     )
-    passed = any(attempt.passed is True for attempt in attempts)
+    passed = any(results_visible(attempt) and attempt.passed is True for attempt in attempts)
     in_progress = next(
         (attempt for attempt in attempts if attempt.status == QuizAttemptStatus.IN_PROGRESS),
         None,
     )
-    recent = [
-        AttemptHistoryItem(
-            id=attempt.id,
-            attempt_number=attempt.attempt_number,
-            status=attempt.status.value,
-            score_percent=attempt.score_percent,
-            passed=attempt.passed,
-            submitted_at=attempt.submitted_at,
-            started_at=attempt.started_at,
-        )
-        for attempt in attempts
-    ]
+    recent = [history_item_for(attempt) for attempt in attempts]
     return QuizSummaryOut(
         id=quiz.id,
         title=quiz.title,
