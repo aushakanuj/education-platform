@@ -18,6 +18,7 @@ from education_platform.modules.at_risk.router import router as at_risk_router
 from education_platform.modules.audit.router import router as audit_router
 from education_platform.modules.auth.router import router as auth_router
 from education_platform.modules.authoring.router import router as authoring_router
+from education_platform.modules.engagement.router import router as engagement_router
 from education_platform.modules.insights.router import router as insights_router
 from education_platform.modules.materials.router import router as materials_router
 from education_platform.modules.materials.seed import seed_approved_materials
@@ -60,6 +61,8 @@ app.include_router(audit_router, prefix=settings.api_v1_prefix)
 app.include_router(insights_router, prefix=settings.api_v1_prefix)
 app.include_router(authoring_router, prefix=settings.api_v1_prefix)
 app.include_router(at_risk_router, prefix=settings.api_v1_prefix)
+
+app.include_router(engagement_router, prefix=settings.api_v1_prefix)
 
 
 @app.exception_handler(DomainError)
