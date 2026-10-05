@@ -18,6 +18,8 @@ from education_platform.modules.assessments.models import (
     CommonMasteryQuiz,
     QuestionAnswerKey,
     QuizItem,
+    QuizResultReleaseMode,
+    QuizVersion,
 )
 from education_platform.modules.auth.models import Institution, RoleName, User, UserRole, UserStatus
 from education_platform.modules.auth.security import hash_password
@@ -217,6 +219,116 @@ def test_unenrolled_cannot_start_attempt(client: TestClient, seeded_db: Session)
     assert quiz is not None
     start = client.post(f"/api/v1/quizzes/{quiz.id}/attempts", headers=headers)
     assert start.status_code == 404
+
+
+def test_admin_release_hides_held_scores_from_list_and_directory(
+    client: TestClient,
+    enrolled_student_headers: dict[str, str],
+    seeded_db: Session,
+) -> None:
+    """admin_release must not leak score/pass via list or learning-directory.
+
+    get_attempt already redacts HELD rows; list_attempts and the directory used to
+    return score_percent/passed and treat a held pass as unlocking the next quiz.
+    """
+    quiz = client.get(
+        "/api/v1/materials/square_numbers_patterns/quiz", headers=enrolled_student_headers
+    )
+    assert quiz.status_code == 200
+    quiz_id = quiz.json()["id"]
+
+    version = seeded_db.scalar(
+        select(QuizVersion)
+        .where(QuizVersion.quiz_id == UUID(str(quiz_id)))
+        .order_by(QuizVersion.version_number.desc())
+    )
+    assert version is not None
+    version.result_release_mode = QuizResultReleaseMode.ADMIN_RELEASE
+    seeded_db.commit()
+
+    directory = client.get("/api/v1/me/learning-directory", headers=enrolled_student_headers)
+    assert directory.status_code == 200
+    subtopic_id = next(
+        subtopic["id"]
+        for subject in directory.json()["subjects"]
+        for topic in subject["topics"]
+        for subtopic in topic["subtopics"]
+        if subtopic["slug"] == "square_numbers_patterns"
+    )
+    progress = client.put(
+        f"/api/v1/subtopics/{subtopic_id}/material-progress",
+        headers=enrolled_student_headers,
+        json={"status": "completed"},
+    )
+    assert progress.status_code == 200, progress.text
+
+    start = client.post(f"/api/v1/quizzes/{quiz_id}/attempts", headers=enrolled_student_headers)
+    assert start.status_code == 200, start.text
+    attempt_id = start.json()["id"]
+    attempt_version_id = start.json()["quiz_version_id"]
+
+    items = seeded_db.scalars(
+        select(QuizItem)
+        .where(QuizItem.quiz_version_id == UUID(str(attempt_version_id)))
+        .order_by(QuizItem.sequence)
+    ).all()
+    answers = []
+    for item in items:
+        key = seeded_db.scalar(
+            select(QuestionAnswerKey).where(
+                QuestionAnswerKey.question_version_id == item.question_version_id
+            )
+        )
+        assert key is not None and key.correct_option_label is not None
+        answers.append(
+            {
+                "question_number": item.sequence,
+                "selected_option_label": key.correct_option_label,
+            }
+        )
+
+    submit = client.post(
+        f"/api/v1/attempts/{attempt_id}/submit",
+        headers=enrolled_student_headers,
+        json={"answers": answers},
+    )
+    assert submit.status_code == 200, submit.text
+    result = submit.json()
+    assert result["status"] == "held"
+    assert result["review_available"] is False
+    assert result["score_percent"] is None
+    assert result["passed"] is None
+
+    history = client.get(f"/api/v1/quizzes/{quiz_id}/attempts", headers=enrolled_student_headers)
+    assert history.status_code == 200, history.text
+    assert history.json()[0]["status"] == "held"
+    assert history.json()[0]["score_percent"] is None
+    assert history.json()[0]["passed"] is None
+
+    directory = client.get("/api/v1/me/learning-directory", headers=enrolled_student_headers)
+    assert directory.status_code == 200
+    quiz_summary = next(
+        subtopic["quiz"]
+        for subject in directory.json()["subjects"]
+        for topic in subject["topics"]
+        for subtopic in topic["subtopics"]
+        if subtopic["slug"] == "square_numbers_patterns"
+    )
+    assert quiz_summary is not None
+    assert quiz_summary["passed"] is False
+    assert quiz_summary["best_score_percent"] is None
+    assert quiz_summary["recent_attempts"][0]["score_percent"] is None
+    assert quiz_summary["recent_attempts"][0]["passed"] is None
+
+    topic_node = next(
+        topic
+        for subject in directory.json()["subjects"]
+        for topic in subject["topics"]
+        for subtopic in topic["subtopics"]
+        if subtopic["slug"] == "square_numbers_patterns"
+    )
+    if topic_node.get("overall_quiz"):
+        assert topic_node["overall_quiz"]["unlocked"] is False
 
 
 def test_teacher_cannot_start_attempt(client: TestClient, seeded_db: Session) -> None:
