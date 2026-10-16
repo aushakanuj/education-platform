@@ -12,7 +12,7 @@ from decimal import Decimal
 from typing import Any
 from uuid import UUID
 
-from sqlalchemy import func, select
+from sqlalchemy import exists, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from education_platform.core.errors import DomainError
@@ -33,11 +33,13 @@ from education_platform.modules.assessments.models import (
     QuestionType,
     QuestionVersion,
     QuestionVersionStatus,
+    QuizItem,
 )
 from education_platform.modules.authoring.schemas import MAX_PER_REQUEST
 from education_platform.modules.authorization.scope import Scope
 
 OPTION_LABELS = ("A", "B", "C", "D")
+_BOUND_TO_QUIZ = exists().where(QuizItem.question_version_id == QuestionVersion.id)
 
 
 class AuthoringError(DomainError):
@@ -301,6 +303,7 @@ async def list_questions(
             .where(
                 Question.subtopic_id == subtopic_id,
                 QuestionVersion.lifecycle_status == status,
+                ~_BOUND_TO_QUIZ,
             )
             .order_by(QuestionVersion.created_at)
         )
@@ -358,7 +361,10 @@ def _status_count(status: QuestionVersionStatus, label: str) -> Any:
     return (
         select(Question.subtopic_id, func.count().label(label))
         .join(QuestionVersion, QuestionVersion.question_id == Question.id)
-        .where(QuestionVersion.lifecycle_status == status)
+        .where(
+            QuestionVersion.lifecycle_status == status,
+            ~_BOUND_TO_QUIZ,
+        )
         .group_by(Question.subtopic_id)
         .subquery()
     )

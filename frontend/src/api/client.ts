@@ -32,6 +32,8 @@ type RequestOptions = {
   body?: unknown;
   auth?: boolean;
   skipRefresh?: boolean;
+  signal?: AbortSignal;
+  headers?: Record<string, string>;
 };
 
 function isFormDataBody(body: unknown): body is FormData {
@@ -65,8 +67,9 @@ async function refreshAccessToken(): Promise<boolean> {
 }
 
 export async function apiRequest<T>(path: string, options: RequestOptions = {}): Promise<T> {
-  const { method = "GET", body, auth = true, skipRefresh = false } = options;
-  const headers: Record<string, string> = {};
+  const { method = "GET", body, auth = true, skipRefresh = false, signal, headers: extraHeaders } =
+    options;
+  const headers: Record<string, string> = { ...extraHeaders };
   const formData = isFormDataBody(body);
   if (body !== undefined && !formData) {
     headers["Content-Type"] = "application/json";
@@ -82,6 +85,7 @@ export async function apiRequest<T>(path: string, options: RequestOptions = {}):
     method,
     headers,
     body: body === undefined ? undefined : formData ? body : JSON.stringify(body),
+    signal,
   });
 
   if (res.status === 401 && auth && !skipRefresh) {
@@ -122,4 +126,54 @@ export async function apiRequest<T>(path: string, options: RequestOptions = {}):
   }
 
   return parsed as T;
+}
+
+export async function apiStream(
+  path: string,
+  options: { signal?: AbortSignal; lastEventId?: string; skipRefresh?: boolean } = {},
+): Promise<Response> {
+  const headers: Record<string, string> = { Accept: "text/event-stream" };
+  const token = getAccessToken();
+  if (token) {
+    headers.Authorization = `Bearer ${token}`;
+  }
+  if (options.lastEventId) {
+    headers["Last-Event-ID"] = options.lastEventId;
+  }
+  const res = await fetch(`${getApiBaseUrl()}/api/v1${path}`, {
+    method: "GET",
+    headers,
+    signal: options.signal,
+  });
+  if (res.status === 401 && !options.skipRefresh) {
+    if (!refreshPromise) {
+      refreshPromise = refreshAccessToken().finally(() => {
+        refreshPromise = null;
+      });
+    }
+    const ok = await refreshPromise;
+    if (ok) {
+      return apiStream(path, { ...options, skipRefresh: true });
+    }
+  }
+  if (!res.ok) {
+    const text = await res.text();
+    let parsed: unknown = null;
+    if (text) {
+      try {
+        parsed = JSON.parse(text) as unknown;
+      } catch {
+        parsed = text;
+      }
+    }
+    const detail =
+      typeof parsed === "object" &&
+      parsed !== null &&
+      "detail" in parsed &&
+      typeof (parsed as { detail: unknown }).detail === "string"
+        ? (parsed as { detail: string }).detail
+        : `Request failed (${res.status})`;
+    throw new ApiError(detail, res.status, parsed);
+  }
+  return res;
 }

@@ -25,6 +25,8 @@ from education_platform.modules.rag.models import (
 )
 from education_platform.modules.rag.vector_store import SimilarChunk, search_similar
 
+RETRIEVE_CHUNK_EXCERPT_MAX = 4000
+
 
 def _load_chunk_payloads(hits: list[SimilarChunk]) -> list[RetrievedChunk]:
     if not hits:
@@ -38,7 +40,7 @@ def _load_chunk_payloads(hits: list[SimilarChunk]) -> list[RetrievedChunk]:
                 label = "Source"
                 excerpt = ""
                 page_number: int | None = None
-                if hit.doc_kind == "knowledge_document":
+                if hit.doc_kind == "knowledge_document_version":
                     knowledge_chunk = session.get(KnowledgeChunk, hit.chunk_id)
                     if knowledge_chunk is None:
                         continue
@@ -49,7 +51,7 @@ def _load_chunk_payloads(hits: list[SimilarChunk]) -> list[RetrievedChunk]:
                         doc = session.get(KnowledgeDocument, knowledge_version.document_id)
                         if doc is not None:
                             label = doc.title
-                elif hit.doc_kind == "source_material":
+                elif hit.doc_kind == "source_material_version":
                     source_chunk = session.get(SourceChunk, hit.chunk_id)
                     if source_chunk is None:
                         continue
@@ -65,7 +67,7 @@ def _load_chunk_payloads(hits: list[SimilarChunk]) -> list[RetrievedChunk]:
                     RetrievedChunk(
                         id=str(hit.chunk_id),
                         label=label,
-                        excerpt=excerpt[:500],
+                        excerpt=excerpt[:RETRIEVE_CHUNK_EXCERPT_MAX],
                         page_number=page_number,
                         doc_kind=hit.doc_kind,
                         doc_id=str(hit.doc_id),

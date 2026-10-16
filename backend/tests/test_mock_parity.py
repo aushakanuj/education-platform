@@ -69,9 +69,11 @@ def test_learning_directory_hierarchy(
     assert len(subject["topics"]) == 1
     topic = subject["topics"][0]
     assert topic["slug"] == "approved_materials"
+    assert topic["title"] == "Approved Materials"
     assert "complete" in topic
     slugs = {subtopic["slug"] for subtopic in topic["subtopics"]}
     assert slugs == {"rectangles_squares_properties", "square_numbers_patterns"}
+    assert topic["has_topic_lesson"] is False
     assert topic["overall_quiz"] is not None
     assert topic["overall_quiz"]["scope"] == "topic_mastery"
     assert topic["overall_quiz"]["unlocked"] is False

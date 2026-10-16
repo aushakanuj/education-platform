@@ -10,17 +10,21 @@ dependencies = [
   "docling>=2.30",
   "email-validator>=2.2",
   "fastapi>=0.115",
+  "google-adk>=1.15.0",
   "httpx>=0.28",
   "langchain-core>=1.5.5",
   "langgraph>=1.2.11",
+  "litellm>=1.70.0",
   "openai>=3.1.0",
   "pgvector>=0.3",
+  "pyyaml>=6.0",
   "psycopg[binary]>=3.2",
   "pydantic-settings>=2.8",
   "pyjwt[crypto]>=2.10",
   "python-multipart>=0.0.20",
   "sentence-transformers>=3.4",
   "sqlalchemy[asyncio]>=2.0",
+  "sqlglot>=30.17.0",
   "tiktoken>=0.13.0",
   "uvicorn[standard]>=0.34",
 ]
@@ -33,6 +37,7 @@ dev = [
   "pytest-asyncio>=0.25",
   "pytest-cov>=6.0",
   "ruff>=0.9",
+  "types-PyYAML>=6.0",
 ]
 
 [build-system]
@@ -56,6 +61,10 @@ known-first-party = ["education_platform"]
 
 [tool.ruff.lint.per-file-ignores]
 "alembic/versions/*.py" = ["E501"]
+# Fixtures imported for reuse (`seeded`, `async_session`) are legitimately
+# "redefined" as same-named test parameters -- that's how pytest fixture
+# injection works, not an actual shadowing bug.
+"tests/test_text_to_sql_row_level_security.py" = ["F811"]
 
 [tool.mypy]
 python_version = "3.12"
@@ -65,8 +74,12 @@ packages = ["education_platform"]
 
 [[tool.mypy.overrides]]
 module = [
+  "asyncpg",
+  "asyncpg.*",
   "docling",
   "docling.*",
+  "docling_core",
+  "docling_core.*",
   "pgvector",
   "pgvector.*",
   "sentence_transformers",
@@ -77,6 +90,14 @@ module = [
   "langchain_core.*",
   "tiktoken",
   "tiktoken.*",
+  "torch",
+  "torch.*",
+  "google.adk",
+  "google.adk.*",
+  "google.genai",
+  "google.genai.*",
+  "litellm",
+  "litellm.*",
 ]
 ignore_missing_imports = true
 
@@ -84,6 +105,7 @@ ignore_missing_imports = true
 addopts = "-q --cov=education_platform --cov-report=term-missing --cov-fail-under=80"
 asyncio_mode = "auto"
 testpaths = ["tests"]
+pythonpath = ["."]
 
 [tool.coverage.run]
 branch = true

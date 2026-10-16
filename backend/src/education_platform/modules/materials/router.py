@@ -70,6 +70,15 @@ async def get_subtopic_material(
     return await service.get_subtopic_lesson(session, scope, subtopic_id)
 
 
+@router.get("/topics/{topic_id}/material", response_model=LessonMaterial)
+async def get_topic_material(
+    topic_id: UUID,
+    scope: Scope = Depends(get_scope),
+    session: AsyncSession = Depends(get_session),
+) -> LessonMaterial:
+    return await service.get_topic_lesson(session, scope, topic_id)
+
+
 @router.get("/subtopics/{subtopic_id}/quiz", response_model=QuizMaterial)
 async def get_subtopic_quiz(
     subtopic_id: UUID,

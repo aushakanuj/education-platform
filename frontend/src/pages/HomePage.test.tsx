@@ -135,14 +135,67 @@ describe("HomePage", () => {
     expect(screen.queryByRole("link", { name: /Back to subjects/i })).not.toBeInTheDocument();
     expect(screen.queryByRole("heading", { name: "Personal material" })).not.toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "Units" })).toBeInTheDocument();
+    expect(screen.getByText("Work through each unit lesson and quiz.")).toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "Subtopics" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "Chapters" })).not.toBeInTheDocument();
     expect(screen.getByText("Properties of Rectangles and Squares")).toBeInTheDocument();
-    expect(screen.getByRole("heading", { name: "Mathematics quiz" })).toBeInTheDocument();
-    expect(screen.getByText("After all units")).toBeInTheDocument();
     expect(screen.queryByText("Approved Materials")).not.toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "Mathematics quiz" })).not.toBeInTheDocument();
+    expect(screen.queryByText("After all units")).not.toBeInTheDocument();
     expect(screen.getByText(/Subject completion/)).toBeInTheDocument();
 
-    expect(
-      screen.getByRole("link", { name: /Properties of Rectangles and Squares/ }),
-    ).toHaveAttribute("href", "/subjects/math-1/subtopics/st-1/lesson");
+    expect(screen.getByRole("link", { name: /Properties of Rectangles and Squares/ })).toHaveAttribute(
+      "href",
+      "/subjects/math-1/subtopics/st-1/lesson",
+    );
+  });
+
+  it("surfaces a published topic lesson and unlocks the overall quiz from that lesson", async () => {
+    vi.mocked(fetchLearningDirectory).mockResolvedValue({
+      ...mockDirectory,
+      subjects: [
+        {
+          ...mockDirectory.subjects[0],
+          topics: [
+            {
+              ...mockDirectory.subjects[0].topics[0],
+              has_topic_lesson: true,
+              topic_lesson_completed: false,
+              topic_source_material_version_id: "ver-topic-1",
+              overall_quiz: {
+                ...mockDirectory.subjects[0].topics[0].overall_quiz!,
+                unlocked: true,
+                locked_reason: null,
+              },
+            },
+          ],
+        },
+      ],
+    } as never);
+
+    render(
+      <MemoryRouter
+        initialEntries={["/subjects/math-1"]}
+        future={{ v7_startTransition: true, v7_relativeSplatPath: true }}
+      >
+        <Routes>
+          <Route path="/subjects/:subjectId" element={<HomePage />} />
+        </Routes>
+      </MemoryRouter>,
+    );
+
+    expect(await screen.findByRole("heading", { name: "Units" })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Open topic lesson" })).toHaveAttribute(
+      "href",
+      "/subjects/math-1/topics/topic-1/lesson",
+    );
+    expect(screen.getByRole("link", { name: /Properties of Rectangles and Squares/ })).toHaveAttribute(
+      "href",
+      "/subjects/math-1/subtopics/st-1/lesson",
+    );
+    expect(screen.getByRole("heading", { name: "Approved Materials" })).toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "Mathematics quiz" })).not.toBeInTheDocument();
+    expect(screen.queryByText("After all units")).not.toBeInTheDocument();
+    expect(screen.queryByText(/correct_rationale/i)).not.toBeInTheDocument();
   });
 });

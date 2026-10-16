@@ -15,6 +15,10 @@ export async function getSubtopicMaterial(subtopicId: string): Promise<LessonMat
   return apiRequest<LessonMaterial>(`/subtopics/${encodeURIComponent(subtopicId)}/material`);
 }
 
+export async function getTopicMaterial(topicId: string): Promise<LessonMaterial> {
+  return apiRequest<LessonMaterial>(`/topics/${encodeURIComponent(topicId)}/material`);
+}
+
 export async function getSubtopicQuiz(subtopicId: string): Promise<QuizMaterial> {
   return apiRequest<QuizMaterial>(`/subtopics/${encodeURIComponent(subtopicId)}/quiz`);
 }

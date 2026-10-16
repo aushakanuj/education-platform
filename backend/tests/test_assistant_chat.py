@@ -30,6 +30,7 @@ from education_platform.modules.assistant.graph import (
     SPECIFIC_QUESTION_REPLY,
     _heuristic_injection,
     _output_leaks_scope,
+    get_assistant_graph,
     injection_guard,
     question_validator,
     retrieve_node,
@@ -42,12 +43,14 @@ from education_platform.modules.assistant.tools.registry import (
     ToolValidationError,
     get_tool_registry,
 )
-from education_platform.modules.assistant.tools.retrieve_chunks import retrieve_chunks_handler
+from education_platform.modules.assistant.tools.retrieve_chunks import (
+    RETRIEVE_CHUNK_EXCERPT_MAX,
+    retrieve_chunks_handler,
+)
 from education_platform.modules.rag.chunking import TextChunk, content_hash
 from education_platform.modules.rag.models import (
     IngestJob,
     IngestJobStatus,
-    IngestTargetKind,
     KnowledgeDocument,
     KnowledgeDocumentVersion,
     KnowledgeDocumentVersionStatus,
@@ -165,8 +168,7 @@ def test_chat_crud_and_message_without_openrouter(client: TestClient) -> None:
     assert detail.status_code == 200
     assert len(detail.json()["messages"]) >= 1
 
-    async def _fake_retrieve(state: dict[str, Any], *, principal: Any = None) -> dict[str, Any]:
-        _ = principal
+    async def _fake_retrieve(state: dict[str, Any]) -> dict[str, Any]:
         return {
             **state,
             "retrieved_chunks": [
@@ -174,7 +176,7 @@ def test_chat_crud_and_message_without_openrouter(client: TestClient) -> None:
                     "id": str(uuid4()),
                     "label": "Attendance Handbook",
                     "excerpt": "Students must notify the office after three absences.",
-                    "doc_kind": "knowledge_document",
+                    "doc_kind": "knowledge_document_version",
                     "doc_id": str(uuid4()),
                     "distance": 0.1,
                 }
@@ -223,8 +225,7 @@ async def test_run_assistant_turn_stub_summarize() -> None:
         status="active",
     )
 
-    async def fake_retrieve(state: dict[str, Any], *, principal: Principal) -> dict[str, Any]:
-        _ = principal
+    async def fake_retrieve(state: dict[str, Any]) -> dict[str, Any]:
         return {**state, "retrieved_chunks": []}
 
     with patch(
@@ -238,6 +239,63 @@ async def test_run_assistant_turn_stub_summarize() -> None:
         )
     assert result["assistant_content"]
     assert result.get("injection_blocked") is False
+    assert result["institution_id"] == str(principal.institution_id)
+    assert result["user_id"] == str(principal.user_id)
+
+
+def test_assistant_graph_is_compiled_once() -> None:
+    assert get_assistant_graph() is get_assistant_graph()
+
+
+@pytest.mark.asyncio
+async def test_retrieve_uses_identity_from_state() -> None:
+    seen: list[Principal] = []
+
+    class _Registry:
+        async def invoke(
+            self,
+            name: str,
+            *,
+            principal: Principal,
+            arguments: dict[str, Any],
+        ) -> dict[str, Any]:
+            _ = name, arguments
+            seen.append(principal)
+            return {"chunks": [], "count": 0}
+
+    first = _principal()
+    second = Principal(
+        user_id=uuid4(),
+        institution_id=uuid4(),
+        email="other@demo.school",
+        roles=frozenset({"administrator"}),
+        student_profile_id=None,
+        status="active",
+    )
+    with patch(
+        "education_platform.modules.assistant.graph.get_tool_registry",
+        return_value=_Registry(),
+    ):
+        await retrieve_node(
+            _guard_state(
+                user_id=str(first.user_id),
+                institution_id=str(first.institution_id),
+                user_email=first.email,
+            )
+        )
+        await retrieve_node(
+            _guard_state(
+                user_id=str(second.user_id),
+                institution_id=str(second.institution_id),
+                user_email=second.email,
+            )
+        )
+
+    assert [row.institution_id for row in seen] == [
+        first.institution_id,
+        second.institution_id,
+    ]
+    assert seen[0].user_id != seen[1].user_id
 
 
 @pytest.mark.asyncio
@@ -250,13 +308,8 @@ async def test_summarize_instructs_markdown_output() -> None:
         return "## Late homework\n\nWork is **due** the next school day [1]."
 
     settings = Settings(openrouter_api_key="test-key")
-    state = {
-        "user_message": "What is the late homework policy?",
-        "history": [],
-        "injection_blocked": False,
-        "question_valid": True,
-        "early_reply": None,
-        "retrieved_chunks": [
+    state = _guard_state(
+        retrieved_chunks=[
             {
                 "id": "chunk-1",
                 "label": "Handbook",
@@ -266,10 +319,7 @@ async def test_summarize_instructs_markdown_output() -> None:
                 "distance": 0.1,
             }
         ],
-        "assistant_content": "",
-        "citations": [],
-        "prompt_tokens": 0,
-    }
+    )
 
     with patch(
         "education_platform.modules.assistant.graph.chat_completion",
@@ -287,13 +337,8 @@ async def test_summarize_instructs_markdown_output() -> None:
 @pytest.mark.asyncio
 async def test_stub_summarize_returns_markdown_list() -> None:
     settings = Settings(openrouter_api_key="")
-    state = {
-        "user_message": "What is the late homework policy?",
-        "history": [],
-        "injection_blocked": False,
-        "question_valid": True,
-        "early_reply": None,
-        "retrieved_chunks": [
+    state = _guard_state(
+        retrieved_chunks=[
             {
                 "id": "chunk-1",
                 "label": "Handbook",
@@ -303,10 +348,7 @@ async def test_stub_summarize_returns_markdown_list() -> None:
                 "distance": 0.1,
             }
         ],
-        "assistant_content": "",
-        "citations": [],
-        "prompt_tokens": 0,
-    }
+    )
 
     result = await summarize_node(state, settings=settings)
 
@@ -315,9 +357,15 @@ async def test_stub_summarize_returns_markdown_list() -> None:
 
 
 def _guard_state(**over: Any) -> dict[str, Any]:
+    actor = _principal()
     state: dict[str, Any] = {
         "user_message": "What is the late homework policy?",
         "history": [],
+        "user_id": str(actor.user_id),
+        "institution_id": str(actor.institution_id),
+        "user_email": actor.email,
+        "roles": sorted(actor.roles),
+        "user_status": actor.status,
         "injection_blocked": False,
         "question_valid": True,
         "early_reply": None,
@@ -470,7 +518,7 @@ async def test_retrieve_skips_when_guard_already_failed() -> None:
         "education_platform.modules.assistant.graph.get_tool_registry",
         return_value=_Registry(),
     ):
-        result = await retrieve_node(state, principal=_principal())
+        result = await retrieve_node(state)
 
     assert invoked["called"] is False
     assert result["retrieved_chunks"] == []
@@ -575,9 +623,9 @@ def test_graph_state_and_tool_contracts() -> None:
     with pytest.raises(ValidationError):
         RetrieveChunksArgs(query="attendance", limit=99)
     with pytest.raises(ValidationError):
-        RetrieveChunksArgs(query="ok", doc_kind="knowledge_document_version")
-    assert RetrieveChunksArgs(query="ok", doc_kind="knowledge_document").doc_kind == (
-        "knowledge_document"
+        RetrieveChunksArgs(query="ok", doc_kind="knowledge_document")
+    assert RetrieveChunksArgs(query="ok", doc_kind="knowledge_document_version").doc_kind == (
+        "knowledge_document_version"
     )
     with pytest.raises(ValidationError):
         RetrieveChunksResult(chunks=[], count=1)
@@ -586,7 +634,7 @@ def test_graph_state_and_tool_contracts() -> None:
         id="c1",
         label="Policy",
         excerpt="Three absences trigger escalation.",
-        doc_kind="knowledge_document",
+        doc_kind="knowledge_document_version",
         doc_id="d1",
         distance=0.2,
     )
@@ -596,6 +644,10 @@ def test_graph_state_and_tool_contracts() -> None:
         {
             "user_message": "What is attendance policy?",
             "history": [{"role": "user", "content": "hello policy"}],
+            "user_id": str(uuid4()),
+            "institution_id": str(uuid4()),
+            "user_email": "admin@demo.school",
+            "roles": ["administrator"],
             "retrieved_chunks": [chunk.model_dump()],
         }
     )
@@ -651,8 +703,7 @@ async def test_retrieve_chunks_hydrates_ingested_knowledge_document(
     seeded_db.add(version)
     seeded_db.flush()
     job = IngestJob(
-        target_kind=IngestTargetKind.KNOWLEDGE_DOCUMENT_VERSION,
-        target_id=version.id,
+        knowledge_document_version_id=version.id,
         status=IngestJobStatus.QUEUED,
     )
     seeded_db.add(job)
@@ -689,5 +740,7 @@ async def test_retrieve_chunks_hydrates_ingested_knowledge_document(
     chunk = result["chunks"][0]
     assert chunk["label"] == "Learner Attendance Policy"
     assert "three absences" in chunk["excerpt"].lower()
-    assert chunk["doc_kind"] == "knowledge_document"
+    assert chunk["doc_kind"] == "knowledge_document_version"
+    assert RETRIEVE_CHUNK_EXCERPT_MAX == 4000
+    assert len(chunk["excerpt"]) <= RETRIEVE_CHUNK_EXCERPT_MAX
     get_settings.cache_clear()

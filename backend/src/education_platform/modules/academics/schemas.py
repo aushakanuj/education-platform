@@ -80,6 +80,9 @@ class TopicNodeOut(BaseModel):
     objectives: list[str] = Field(default_factory=list)
     subtopics: list[SubtopicNodeOut]
     overall_quiz: QuizSummaryOut | None = None
+    has_topic_lesson: bool = False
+    topic_lesson_completed: bool = False
+    topic_source_material_version_id: UUID | None = None
 
 
 class SubjectNodeOut(BaseModel):

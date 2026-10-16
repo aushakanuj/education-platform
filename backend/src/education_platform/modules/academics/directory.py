@@ -34,8 +34,12 @@ from education_platform.modules.assessments.models import (
     QuizScope,
     QuizVersion,
 )
-from education_platform.modules.assessments.queries import released_quiz
-from education_platform.modules.assessments.schemas import AttemptHistoryItem, QuizSummaryOut
+from education_platform.modules.assessments.queries import (
+    history_item_for,
+    released_quiz,
+    results_visible,
+)
+from education_platform.modules.assessments.schemas import QuizSummaryOut
 from education_platform.modules.authorization.scope import Scope
 from education_platform.modules.materials.markdown_parser import parse_slides
 from education_platform.modules.materials.models import (
@@ -43,7 +47,11 @@ from education_platform.modules.materials.models import (
     SourceMaterialVersion,
     StudentMaterialProgress,
 )
-from education_platform.modules.materials.queries import progress_for, published_material_version
+from education_platform.modules.materials.queries import (
+    progress_for,
+    published_material_version,
+    published_topic_material_version,
+)
 from education_platform.modules.materials.schemas import MaterialProgressOut
 
 
@@ -111,16 +119,31 @@ async def build_learning_directory(session: AsyncSession, scope: Scope) -> Learn
         for topic in db_topics:
             subtopic_nodes = await _subtopic_nodes(session, scope, topic, subject_enrollment)
             quiz_nodes = [node for node in subtopic_nodes if node.quiz and node.quiz.available]
-            overall_unlocked = bool(quiz_nodes) and all(
-                node.quiz is not None and node.quiz.passed for node in quiz_nodes
+            topic_lesson = await published_topic_material_version(session, topic.id)
+            topic_progress = await progress_for(
+                session,
+                subject_enrollment.id if subject_enrollment else None,
+                topic_lesson.id if topic_lesson else None,
             )
+            topic_lesson_completed = (
+                topic_progress is not None
+                and topic_progress.status == MaterialProgressStatus.COMPLETED
+            )
+            if topic_lesson is not None:
+                overall_unlocked = True
+                locked_reason = "Complete the lesson first"
+            else:
+                overall_unlocked = bool(quiz_nodes) and all(
+                    node.quiz is not None and node.quiz.passed for node in quiz_nodes
+                )
+                locked_reason = "Pass all subtopic quizzes first"
             overall = await _quiz_summary(
                 session,
                 scope,
                 quiz_scope=QuizScope.TOPIC_MASTERY,
                 target_id=topic.id,
                 unlocked=overall_unlocked,
-                locked_reason="Pass all subtopic quizzes first",
+                locked_reason=locked_reason,
             )
             units = [node.progress_percent for node in subtopic_nodes]
             if overall.available:
@@ -128,6 +151,12 @@ async def build_learning_directory(session: AsyncSession, scope: Scope) -> Learn
             progress_percent = round(sum(units) / len(units)) if units else 0
             topic_complete = overall_unlocked and (not overall.available or overall.passed)
             objectives = await _topic_objectives(session, topic.id)
+            if scope.self_student_id is not None and not _released_to_students(
+                topic_lesson=topic_lesson,
+                subtopic_nodes=subtopic_nodes,
+                overall_available=overall.available,
+            ):
+                continue
             topic_nodes.append(
                 TopicNodeOut(
                     id=topic.id,
@@ -139,8 +168,13 @@ async def build_learning_directory(session: AsyncSession, scope: Scope) -> Learn
                     objectives=objectives,
                     subtopics=subtopic_nodes,
                     overall_quiz=overall if overall.available else None,
+                    has_topic_lesson=topic_lesson is not None,
+                    topic_lesson_completed=topic_lesson_completed,
+                    topic_source_material_version_id=topic_lesson.id if topic_lesson else None,
                 )
             )
+        if scope.self_student_id is not None and not topic_nodes:
+            continue
         subject_progress = (
             round(sum(topic.progress_percent for topic in topic_nodes) / len(topic_nodes))
             if topic_nodes
@@ -178,6 +212,22 @@ async def _topic_objectives(session: AsyncSession, topic_id: UUID) -> list[str]:
         seen.add(text)
         objectives.append(text)
     return objectives
+
+
+def _released_to_students(
+    *,
+    topic_lesson: SourceMaterialVersion | None,
+    subtopic_nodes: list[SubtopicNodeOut],
+    overall_available: bool,
+) -> bool:
+    """Students see a topic once a lesson or quiz is published.
+
+    A generation upload creates the topic before review. Administrators and
+    teachers still see that draft so they can open the review board.
+    """
+    if topic_lesson is not None or overall_available:
+        return True
+    return any(node.has_lesson or node.quiz is not None for node in subtopic_nodes)
 
 
 def _lesson_progress_percent(
@@ -285,27 +335,22 @@ async def _quiz_summary(
                 .order_by(QuizAttempt.attempt_number.desc())
             )
         )
+    # HELD (admin_release) attempts keep score/pass server-side but must not
+    # surface in the student directory or unlock the next quiz early.
     best = max(
-        (attempt.score_percent for attempt in attempts if attempt.score_percent is not None),
+        (
+            attempt.score_percent
+            for attempt in attempts
+            if results_visible(attempt) and attempt.score_percent is not None
+        ),
         default=None,
     )
-    passed = any(attempt.passed is True for attempt in attempts)
+    passed = any(results_visible(attempt) and attempt.passed is True for attempt in attempts)
     in_progress = next(
         (attempt for attempt in attempts if attempt.status == QuizAttemptStatus.IN_PROGRESS),
         None,
     )
-    recent = [
-        AttemptHistoryItem(
-            id=attempt.id,
-            attempt_number=attempt.attempt_number,
-            status=attempt.status.value,
-            score_percent=attempt.score_percent,
-            passed=attempt.passed,
-            submitted_at=attempt.submitted_at,
-            started_at=attempt.started_at,
-        )
-        for attempt in attempts
-    ]
+    recent = [history_item_for(attempt) for attempt in attempts]
     return QuizSummaryOut(
         id=quiz.id,
         title=quiz.title,

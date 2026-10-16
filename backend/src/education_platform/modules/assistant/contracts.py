@@ -86,6 +86,11 @@ class AssistantGraphState(BaseModel):
 
     user_message: str = Field(min_length=1, max_length=8000)
     history: list[ChatHistoryTurn] = Field(default_factory=list)
+    user_id: str = Field(min_length=1)
+    institution_id: str = Field(min_length=1)
+    user_email: str = Field(min_length=1)
+    roles: list[str] = Field(min_length=1)
+    user_status: str = Field(default="active", min_length=1)
     injection_blocked: bool = False
     question_valid: bool = True
     early_reply: str | None = None

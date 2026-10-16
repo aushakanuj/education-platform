@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import json
 import re
+from contextvars import ContextVar
 from typing import Any, Literal, TypedDict
+from uuid import UUID
 
 from langgraph.graph import END, StateGraph
 from pydantic import ValidationError
@@ -51,6 +53,7 @@ _OUTPUT_BLOCK_PATTERNS = re.compile(
 )
 
 _HISTORY_TURNS = 8
+_turn_settings: ContextVar[Settings | None] = ContextVar("assistant_turn_settings", default=None)
 
 INJECTION_BLOCKED_REPLY = (
     "I can't process that request. Ask a concrete question about school "
@@ -75,6 +78,11 @@ class GraphState(TypedDict, total=False):
 
     user_message: str
     history: list[dict[str, str]]
+    user_id: str
+    institution_id: str
+    user_email: str
+    roles: list[str]
+    user_status: str
     injection_blocked: bool
     question_valid: bool
     early_reply: str | None
@@ -103,8 +111,25 @@ def _guards_failed(current: AssistantGraphState) -> bool:
     return bool(current.injection_blocked or current.question_valid is False or current.early_reply)
 
 
+def _settings_for_turn() -> Settings:
+    override = _turn_settings.get()
+    return override if override is not None else get_settings()
+
+
 def _enter(state: GraphState) -> AssistantGraphState:
     return parse_graph_state(dict(state))
+
+
+def _principal_from_state(current: AssistantGraphState) -> Principal:
+    """Rebuild the caller from this turn's tray — never from compile-time closures."""
+    return Principal(
+        user_id=UUID(current.user_id),
+        institution_id=UUID(current.institution_id),
+        email=current.user_email,
+        roles=frozenset(current.roles),
+        student_profile_id=None,
+        status=current.user_status,
+    )
 
 
 def _exit(model: AssistantGraphState) -> GraphState:
@@ -196,7 +221,7 @@ async def question_validator(state: GraphState, *, settings: Settings) -> GraphS
     return _exit(current)
 
 
-async def retrieve_node(state: GraphState, *, principal: Principal) -> GraphState:
+async def retrieve_node(state: GraphState) -> GraphState:
     current = _enter(state)
     if _guards_failed(current):
         current.retrieved_chunks = []
@@ -205,7 +230,7 @@ async def retrieve_node(state: GraphState, *, principal: Principal) -> GraphStat
     try:
         result = await registry.invoke(
             "retrieve_chunks",
-            principal=principal,
+            principal=_principal_from_state(current),
             arguments={"query": current.user_message},
         )
         validated = RetrieveChunksResult.model_validate(result)
@@ -329,20 +354,20 @@ def _route_after_validate(state: GraphState) -> Literal["invalid", "retrieve"]:
     return "retrieve"
 
 
-def build_assistant_graph(*, principal: Principal, settings: Settings | None = None) -> Any:
-    cfg = settings or get_settings()
+def build_assistant_graph() -> Any:
+    """Wire nodes once. Identity and settings are read per invoke, not captured here."""
 
     async def _inj(state: GraphState) -> GraphState:
-        return await injection_guard(state, settings=cfg)
+        return await injection_guard(state, settings=_settings_for_turn())
 
     async def _val(state: GraphState) -> GraphState:
-        return await question_validator(state, settings=cfg)
+        return await question_validator(state, settings=_settings_for_turn())
 
     async def _ret(state: GraphState) -> GraphState:
-        return await retrieve_node(state, principal=principal)
+        return await retrieve_node(state)
 
     async def _sum(state: GraphState) -> GraphState:
-        return await summarize_node(state, settings=cfg)
+        return await summarize_node(state, settings=_settings_for_turn())
 
     graph: StateGraph[GraphState] = StateGraph(GraphState)
     graph.add_node("injection_guard", _inj)
@@ -366,6 +391,38 @@ def build_assistant_graph(*, principal: Principal, settings: Settings | None = N
     return graph.compile()
 
 
+# One recipe for the process. Each turn passes a new tray (state), including who is asking.
+_GRAPH = build_assistant_graph()
+
+
+def get_assistant_graph() -> Any:
+    return _GRAPH
+
+
+def _initial_turn_state(
+    *,
+    principal: Principal,
+    user_message: str,
+    history: list[dict[str, str]],
+) -> dict[str, Any]:
+    return {
+        "user_message": user_message,
+        "history": history,
+        "user_id": str(principal.user_id),
+        "institution_id": str(principal.institution_id),
+        "user_email": principal.email,
+        "roles": sorted(principal.roles),
+        "user_status": principal.status,
+        "injection_blocked": False,
+        "question_valid": True,
+        "early_reply": None,
+        "retrieved_chunks": [],
+        "assistant_content": "",
+        "citations": [],
+        "prompt_tokens": 0,
+    }
+
+
 async def run_assistant_turn(
     *,
     principal: Principal,
@@ -373,20 +430,16 @@ async def run_assistant_turn(
     history: list[dict[str, str]],
     settings: Settings | None = None,
 ) -> GraphState:
-    cfg = settings or get_settings()
-    app = build_assistant_graph(principal=principal, settings=cfg)
-    initial_model = parse_graph_state(
-        {
-            "user_message": user_message,
-            "history": history,
-            "injection_blocked": False,
-            "question_valid": True,
-            "early_reply": None,
-            "retrieved_chunks": [],
-            "assistant_content": "",
-            "citations": [],
-            "prompt_tokens": 0,
-        }
-    )
-    result = await app.ainvoke(_exit(initial_model))
-    return _exit(parse_graph_state(dict(result)))
+    token = _turn_settings.set(settings)
+    try:
+        initial_model = parse_graph_state(
+            _initial_turn_state(
+                principal=principal,
+                user_message=user_message,
+                history=history,
+            )
+        )
+        result = await get_assistant_graph().ainvoke(_exit(initial_model))
+        return _exit(parse_graph_state(dict(result)))
+    finally:
+        _turn_settings.reset(token)

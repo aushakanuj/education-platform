@@ -31,6 +31,7 @@ class SourceMaterialVersionStatus(str, enum.Enum):
     DRAFT = "draft"
     PROCESSING = "processing"
     READY = "ready"
+    AWAITING_APPROVAL = "awaiting_approval"
     PUBLISHED = "published"
     FAILED = "failed"
     SUPERSEDED = "superseded"
@@ -45,10 +46,31 @@ class MaterialProgressStatus(str, enum.Enum):
 class SourceMaterial(UUIDTimestampMixin, Base):
     __tablename__ = "source_materials"
     __table_args__ = (
-        UniqueConstraint("subtopic_id", "slug", name="uq_source_materials_subtopic_slug"),
+        CheckConstraint(
+            "(topic_id IS NOT NULL AND subtopic_id IS NULL) OR "
+            "(topic_id IS NULL AND subtopic_id IS NOT NULL)",
+            name="ck_source_materials_exactly_one_parent",
+        ),
+        partial_unique_index(
+            "uq_source_materials_subtopic_slug",
+            "subtopic_id",
+            "slug",
+            where="subtopic_id IS NOT NULL",
+        ),
+        partial_unique_index(
+            "uq_source_materials_topic_slug",
+            "topic_id",
+            "slug",
+            where="topic_id IS NOT NULL",
+        ),
     )
 
-    subtopic_id: Mapped[UUID] = mapped_column(ForeignKey("subtopics.id"), index=True)
+    subtopic_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("subtopics.id"), nullable=True, index=True
+    )
+    topic_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("topics.id"), nullable=True, index=True
+    )
     title: Mapped[str] = mapped_column(String(200))
     slug: Mapped[str] = mapped_column(String(100))
     status: Mapped[SourceMaterialStatus] = mapped_column(
@@ -72,16 +94,24 @@ class SourceMaterialVersion(UUIDTimestampMixin, Base):
             where="lifecycle_status = 'published'",
         ),
         CheckConstraint("version_number >= 1", name="ck_source_material_versions_version_number"),
+        CheckConstraint(
+            "(lifecycle_status <> 'awaiting_approval') OR "
+            "(content_markdown IS NOT NULL AND length(content_markdown) > 0)",
+            name="ck_source_material_versions_awaiting_has_markdown",
+        ),
     )
 
     source_material_id: Mapped[UUID] = mapped_column(ForeignKey("source_materials.id"), index=True)
     version_number: Mapped[int] = mapped_column(Integer)
     lifecycle_status: Mapped[SourceMaterialVersionStatus] = mapped_column(
-        str_enum(SourceMaterialVersionStatus, "source_material_version_status"),
+        str_enum(SourceMaterialVersionStatus, "source_material_version_status", length=32),
         default=SourceMaterialVersionStatus.DRAFT,
         index=True,
     )
     title: Mapped[str] = mapped_column(String(200))
+    submitted_by_user_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("users.id"), nullable=True, index=True
+    )
     content_markdown: Mapped[str | None] = mapped_column(Text, nullable=True)
     content_format: Mapped[str] = mapped_column(String(50), default="markdown")
     blob_object_key: Mapped[str | None] = mapped_column(String(500), nullable=True)

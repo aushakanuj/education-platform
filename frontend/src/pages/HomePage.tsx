@@ -7,7 +7,7 @@ import { ApiError } from "../api/types";
 import { Crumbs } from "../components/Crumbs";
 import { SchoolMaterialPanel } from "../components/SchoolMaterialPanel";
 import { BACKDROP_CHROME_ANCHOR, setBackdropChrome } from "../lib/backdropChrome";
-import { schoolTopic, subjectProgress } from "../lib/subjectMaterial";
+import { subjectProgress } from "../lib/subjectMaterial";
 
 let directoryCache: LearningDirectory | null = null;
 
@@ -52,39 +52,36 @@ function subjectBlurb(subject: SubjectNode): string {
 function SubjectMaterialView({
   subjectId,
   subjectName,
-  curriculum,
+  topics,
 }: {
   subjectId: string;
   subjectName: string;
-  curriculum: TopicNode | null;
+  topics: TopicNode[];
 }) {
+  const done = topics.filter((topic) => topic.progress_percent === 100).length;
+  const total = topics.length;
+  const pct = total === 0 ? 0 : Math.round(topics.reduce((sum, topic) => sum + topic.progress_percent, 0) / total);
+
   useEffect(() => {
-    if (!curriculum) {
+    if (topics.length === 0) {
       setBackdropChrome(null);
       return;
     }
 
-    const done = curriculum.subtopics.filter((s) => s.progress_percent === 100).length;
-    const total = curriculum.subtopics.length;
     setBackdropChrome({
-      progressPercent: curriculum.progress_percent,
-      progressLabel: `Subject completion · ${Math.round(curriculum.progress_percent)}% · ${done}/${total} units · overall quiz ${
-        curriculum.overall_quiz?.passed ? "passed" : "pending"
-      }`,
-      statusLabel: curriculum.complete ? "Complete" : "In progress",
-      complete: curriculum.complete,
+      progressPercent: pct,
+      progressLabel: `Subject completion · ${pct}% · ${done}/${total} units`,
+      statusLabel: done === total && total > 0 ? "Complete" : "In progress",
+      complete: done === total && total > 0,
     });
 
     return () => setBackdropChrome(null);
-  }, [curriculum]);
+  }, [done, pct, topics.length, total]);
 
   const progressSr =
-    curriculum &&
-    `Subject completion · ${Math.round(curriculum.progress_percent)}% · ${
-      curriculum.subtopics.filter((s) => s.progress_percent === 100).length
-    }/${curriculum.subtopics.length} units · overall quiz ${
-      curriculum.overall_quiz?.passed ? "passed" : "pending"
-    }`;
+    topics.length > 0
+      ? `Subject completion · ${pct}% · ${done}/${total} units`
+      : null;
 
   return (
     <div className="subject-view">
@@ -104,10 +101,10 @@ function SubjectMaterialView({
       </header>
 
       <section className="material-pane material-pane--school" aria-labelledby="school-material-heading">
-        {!curriculum ? (
+        {topics.length === 0 ? (
           <div className="alert alert--info">No school material published yet.</div>
         ) : (
-          <SchoolMaterialPanel subjectId={subjectId} subjectName={subjectName} topic={curriculum} />
+          <SchoolMaterialPanel subjectId={subjectId} subjectName={subjectName} topics={topics} />
         )}
       </section>
     </div>
@@ -153,7 +150,7 @@ export function HomePage() {
       <SubjectMaterialView
         subjectId={selected.id}
         subjectName={selected.name}
-        curriculum={schoolTopic(selected)}
+        topics={selected.topics}
       />
     );
   }

@@ -16,7 +16,16 @@ database_url = to_sync_url(settings.database_url)
 config.set_main_option("sqlalchemy.url", database_url)
 
 if config.config_file_name is not None:
-    fileConfig(config.config_file_name)
+    # disable_existing_loggers defaults to True, which silently sets `.disabled = True`
+    # on every logger that already exists at this point -- harmless when `alembic` runs
+    # as its own CLI process, but this test suite runs migrations in-process (see
+    # conftest.py's `migrated_database` fixture), after pytest has already imported and
+    # created loggers for every `education_platform.*` module under test. Without this,
+    # any of those loggers goes permanently silent for the rest of the test session the
+    # instant the first DB-touching test runs alembic -- not just uncaptured by caplog,
+    # genuinely dropped, since `Logger.disabled` short-circuits before level/propagation
+    # are even checked.
+    fileConfig(config.config_file_name, disable_existing_loggers=False)
 
 target_metadata = Base.metadata
 

@@ -16,23 +16,29 @@ import { QuizHistoryPage } from "./pages/QuizHistoryPage";
 import { QuizPage } from "./pages/QuizPage";
 import { ResultPage } from "./pages/ResultPage";
 import { SubjectFeedbackPage } from "./pages/SubjectFeedbackPage";
+import { TopicLessonPage } from "./pages/TopicLessonPage";
 import { TopicPageRedirect } from "./pages/TopicPageRedirect";
 import { WelcomePage } from "./pages/WelcomePage";
 import { AdminAtRiskPage } from "./pages/admin/AdminAtRiskPage";
+import { AdminDashboardPage } from "./pages/admin/AdminDashboardPage";
 import { AdminDocumentsPage } from "./pages/admin/AdminDocumentsPage";
 import { AdminMaterialsGradesPage } from "./pages/admin/AdminMaterialsGradesPage";
 import { AdminMaterialsSubjectsPage } from "./pages/admin/AdminMaterialsSubjectsPage";
 import { AdminMaterialsTopicDetailPage } from "./pages/admin/AdminMaterialsTopicDetailPage";
 import { AdminMaterialsTopicsPage } from "./pages/admin/AdminMaterialsTopicsPage";
 import { PolicyChatPage } from "./pages/admin/PolicyChatPage";
-import { AssistantStubPage } from "./pages/teacher/AssistantStubPage";
+import { AnalyticsPage } from "./pages/teacher/AnalyticsPage";
+import { AssistantPage } from "./pages/teacher/AssistantPage";
 import { AtRiskPage } from "./pages/teacher/AtRiskPage";
 import { QuestionBankPage } from "./pages/teacher/QuestionBankPage";
 import { ClassesPage } from "./pages/teacher/ClassesPage";
+import { GenerationRunsPage } from "./pages/teacher/GenerationRunsPage";
 import { RosterPage } from "./pages/teacher/RosterPage";
 import { SectionPage } from "./pages/teacher/SectionPage";
 import { StudentPage } from "./pages/teacher/StudentPage";
 import { SubjectMaterialsPage } from "./pages/teacher/SubjectMaterialsPage";
+
+import "./styles/topic-lesson.css";
 
 export function App() {
   return (
@@ -57,7 +63,8 @@ export function App() {
           </RequireAuth>
         }
       >
-        <Route index element={<Navigate to="materials" replace />} />
+        <Route index element={<Navigate to="dashboard" replace />} />
+        <Route path="dashboard" element={<AdminDashboardPage />} />
         <Route path="materials" element={<AdminMaterialsGradesPage />} />
         <Route path="materials/grades/:gradeKey" element={<AdminMaterialsSubjectsPage />} />
         <Route
@@ -84,7 +91,8 @@ export function App() {
         }
       >
         <Route index element={<ClassesPage />} />
-        <Route path="assistant" element={<AssistantStubPage />} />
+        <Route path="analytics" element={<AnalyticsPage />} />
+        <Route path="assistant" element={<AssistantPage />} />
         <Route path="questions" element={<QuestionBankPage />} />
         <Route path="at-risk" element={<AtRiskPage />} />
         <Route path="classes/:sectionId" element={<SectionPage />} />
@@ -94,6 +102,7 @@ export function App() {
           path="classes/:sectionId/subjects/:subjectId"
           element={<SubjectMaterialsPage />}
         />
+        <Route path="topics/:topicId/generation" element={<GenerationRunsPage />} />
       </Route>
 
       <Route
@@ -107,6 +116,10 @@ export function App() {
       >
         <Route index element={<HomePage />} />
         <Route path="subjects/:subjectId" element={<HomePage />} />
+        <Route
+          path="subjects/:subjectId/topics/:topicId/lesson"
+          element={<TopicLessonPage />}
+        />
         <Route path="subjects/:subjectId/topics/:topicId" element={<TopicPageRedirect />} />
         <Route
           path="subjects/:subjectId/subtopics/:subtopicId/lesson/slides"

@@ -151,4 +151,73 @@ describe("QuizPage", () => {
     fireEvent.click(submit);
     expect(submitAttempt).toHaveBeenCalledTimes(1);
   });
+
+  it("links a topic mastery quiz back to the published topic lesson", async () => {
+    startAttempt.mockResolvedValue({
+      ...attempt,
+      quiz_id: "overall-1",
+      title: "Overall topic quiz",
+      scope: "topic_mastery",
+      target_id: "topic-1",
+    });
+    fetchLearningDirectory.mockResolvedValue({
+      subjects: [
+        {
+          id: "subj-1",
+          code: "MATH",
+          name: "Mathematics",
+          grade_name: "Grade 8",
+          academic_period_name: "2026-27",
+          progress_percent: 0,
+          topics: [
+            {
+              id: "topic-1",
+              title: "Approved Materials",
+              slug: "approved_materials",
+              sequence: 1,
+              progress_percent: 0,
+              complete: false,
+              objectives: [],
+              has_topic_lesson: true,
+              topic_source_material_version_id: "ver-topic-1",
+              overall_quiz: {
+                id: "overall-1",
+                title: "Overall",
+                scope: "topic_mastery",
+                available: true,
+                unlocked: true,
+                locked_reason: null,
+                pass_threshold_percent: 70,
+                attempt_count: 0,
+                best_score_percent: null,
+                passed: false,
+                in_progress_attempt_id: null,
+                recent_attempts: [],
+              },
+              subtopics: [],
+            },
+          ],
+        },
+      ],
+    });
+
+    render(
+      <MemoryRouter
+        initialEntries={["/quizzes/overall-1"]}
+        future={{ v7_startTransition: true, v7_relativeSplatPath: true }}
+      >
+        <Routes>
+          <Route path="/quizzes/:quizId" element={<QuizPage />} />
+        </Routes>
+      </MemoryRouter>,
+    );
+
+    expect(await screen.findByText("What is a square?")).toBeInTheDocument();
+    expect(screen.getByText("Quiz · Attempt 1 · overall")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Topic lesson" })).toHaveAttribute(
+      "href",
+      "/subjects/subj-1/topics/topic-1/lesson",
+    );
+    expect(screen.queryByText(/correct_rationale/i)).not.toBeInTheDocument();
+  });
 });

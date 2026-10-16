@@ -310,6 +310,12 @@ def seed_approved_materials(
     if replace and _attempts_exist(session):
         raise RuntimeError("Cannot destructively replace seeded content after attempts exist")
 
+    if parent_topic is None:
+        seed_demo_student(session)
+        seed_demo_admin(session)
+        session.commit()
+        return topic_ids
+
     for sequence, topic_id in enumerate(topic_ids, start=1):
         _seed_subtopic(session, parent_topic, topic_id, sequence, directory)
     seed_topic_mastery_quiz(session, parent_topic)

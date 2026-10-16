@@ -45,6 +45,8 @@ from education_platform.modules.auth.models import (
     User,
     UserRole,
 )
+from education_platform.modules.generation.models import ContentGenerationRun
+from education_platform.modules.generation.types import RunPhase
 from education_platform.modules.materials.models import (
     SourceMaterial,
     SourceMaterialVersion,
@@ -57,6 +59,47 @@ def _institution(session: Session) -> Institution:
     session.add(institution)
     session.flush()
     return institution
+
+
+def _lesson_material(session: Session) -> tuple[SourceMaterial, User]:
+    institution = _institution(session)
+    period = AcademicPeriod(
+        institution_id=institution.id,
+        name="2026-27",
+        start_date=date(2026, 6, 1),
+        end_date=date(2027, 3, 31),
+        status=AcademicPeriodStatus.ACTIVE,
+    )
+    grade = Grade(institution_id=institution.id, name="Grade 8", sort_order=8)
+    subject = Subject(institution_id=institution.id, name="Mathematics", code="MATH")
+    user = User(
+        institution_id=institution.id,
+        email=f"teacher-{uuid4().hex[:8]}@example.com",
+        full_name="Teacher",
+        password_hash="x",
+    )
+    session.add_all([period, grade, subject, user])
+    session.flush()
+    period_grade = PeriodGrade(academic_period_id=period.id, grade_id=grade.id)
+    session.add(period_grade)
+    session.flush()
+    offering = GradeSubjectOffering(period_grade_id=period_grade.id, subject_id=subject.id)
+    session.add(offering)
+    session.flush()
+    topic = Topic(
+        grade_subject_offering_id=offering.id, name="Geometry", slug="geometry", sequence=1
+    )
+    session.add(topic)
+    session.flush()
+    subtopic = Subtopic(
+        topic_id=topic.id, name="Quadrilaterals", slug="rectangles_squares_properties", sequence=1
+    )
+    session.add(subtopic)
+    session.flush()
+    material = SourceMaterial(subtopic_id=subtopic.id, title="Lesson", slug="lesson")
+    session.add(material)
+    session.flush()
+    return material, user
 
 
 def test_migration_creates_core_tables(clean_db: str) -> None:
@@ -84,6 +127,7 @@ def test_migration_creates_core_tables(clean_db: str) -> None:
         "quiz_attempts",
         "attempt_answers",
         "quiz_releases",
+        "curriculum_generation_jobs",
     }:
         assert required in names
 
@@ -247,6 +291,98 @@ def test_one_published_material_version(db_session: Session) -> None:
     )
     with pytest.raises(IntegrityError):
         db_session.commit()
+
+
+def test_one_in_flight_generation_run(db_session: Session) -> None:
+    material, user = _lesson_material(db_session)
+    subtopic = db_session.get(Subtopic, material.subtopic_id)
+    assert subtopic is not None
+
+    db_session.add(
+        ContentGenerationRun(
+            topic_id=subtopic.topic_id,
+            submitted_by_user_id=user.id,
+            title="one",
+            phase=RunPhase.INDEXING,
+            target_item_count=80,
+        )
+    )
+    db_session.commit()
+    db_session.add(
+        ContentGenerationRun(
+            topic_id=subtopic.topic_id,
+            submitted_by_user_id=user.id,
+            title="two",
+            phase=RunPhase.OUTLINING,
+            target_item_count=80,
+        )
+    )
+    with pytest.raises(IntegrityError):
+        db_session.commit()
+
+
+def test_source_material_requires_exactly_one_parent(db_session: Session) -> None:
+    material, _user = _lesson_material(db_session)
+    subtopic = db_session.get(Subtopic, material.subtopic_id)
+    assert subtopic is not None
+    topic_id = subtopic.topic_id
+    subtopic_id = subtopic.id
+    db_session.commit()
+
+    db_session.add(
+        SourceMaterial(
+            topic_id=topic_id,
+            subtopic_id=subtopic_id,
+            title="both",
+            slug="both",
+        )
+    )
+    with pytest.raises(IntegrityError):
+        db_session.commit()
+    db_session.rollback()
+
+    db_session.add(SourceMaterial(title="neither", slug="neither"))
+    with pytest.raises(IntegrityError):
+        db_session.commit()
+    db_session.rollback()
+
+    db_session.add(
+        SourceMaterial(
+            topic_id=topic_id,
+            title="topic source",
+            slug="source",
+        )
+    )
+    db_session.commit()
+
+
+def test_awaiting_approval_requires_markdown(db_session: Session) -> None:
+    material, user = _lesson_material(db_session)
+    db_session.add(
+        SourceMaterialVersion(
+            source_material_id=material.id,
+            version_number=1,
+            lifecycle_status=SourceMaterialVersionStatus.AWAITING_APPROVAL,
+            title="empty",
+            submitted_by_user_id=user.id,
+        )
+    )
+    with pytest.raises(IntegrityError):
+        db_session.commit()
+    db_session.rollback()
+
+    material, user = _lesson_material(db_session)
+    db_session.add(
+        SourceMaterialVersion(
+            source_material_id=material.id,
+            version_number=1,
+            lifecycle_status=SourceMaterialVersionStatus.AWAITING_APPROVAL,
+            title="ready",
+            content_markdown="# Lesson\n\n## Slide 1 — Start\n\nBody.\n",
+            submitted_by_user_id=user.id,
+        )
+    )
+    db_session.commit()
 
 
 def test_answer_key_isolated_and_attempt_history(db_session: Session) -> None:

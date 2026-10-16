@@ -33,6 +33,8 @@ from education_platform.modules.assessments.models import (
     QuizVersionStatus,
 )
 from education_platform.modules.assessments.queries import (
+    PASS_CREDIT_STATUSES,
+    history_item_for,
     open_release_for_quiz_version,
     questions_for_quiz_version,
 )
@@ -53,7 +55,10 @@ from education_platform.modules.materials.models import (
     SourceMaterialVersionStatus,
     StudentMaterialProgress,
 )
-from education_platform.modules.materials.queries import subtopic_by_slug
+from education_platform.modules.materials.queries import (
+    published_topic_material_version,
+    subtopic_by_slug,
+)
 
 
 async def _released_quiz_version_by_quiz_id(
@@ -151,6 +156,7 @@ async def _ensure_subtopic_quizzes_passed(
                 QuizAttempt.student_id == student_id,
                 QuizAttempt.quiz_version_id.in_(version_ids),
                 QuizAttempt.passed.is_(True),
+                QuizAttempt.status.in_(PASS_CREDIT_STATUSES),
             )
         )
         if passed is None:
@@ -190,7 +196,9 @@ async def start_attempt(
                 session, subtopic_id=node.subtopic.id, enrollment_id=enrollment_id
             )
     else:
-        await _ensure_subtopic_quizzes_passed(session, student_id, node.topic.id)
+        topic_lesson = await published_topic_material_version(session, node.topic.id)
+        if topic_lesson is None:
+            await _ensure_subtopic_quizzes_passed(session, student_id, node.topic.id)
     release = await open_release_for_quiz_version(session, quiz_version.id)
     if release is None:
         raise DomainError("Quiz is not open", status_code=403)
@@ -542,15 +550,4 @@ async def list_attempts_for_quiz(
             .order_by(QuizAttempt.attempt_number.desc())
         )
     ).all()
-    return [
-        AttemptHistoryItem(
-            id=attempt.id,
-            attempt_number=attempt.attempt_number,
-            status=attempt.status.value,
-            score_percent=attempt.score_percent,
-            passed=attempt.passed,
-            submitted_at=attempt.submitted_at,
-            started_at=attempt.started_at,
-        )
-        for attempt in attempts
-    ]
+    return [history_item_for(attempt) for attempt in attempts]

@@ -38,6 +38,11 @@ class QuestionDifficulty(str, enum.Enum):
     HARD = "hard"
 
 
+class QuestionItemKind(str, enum.Enum):
+    THEORY = "theory"
+    PROBLEM = "problem"
+
+
 class QuestionVersionStatus(str, enum.Enum):
     DRAFT = "draft"
     PUBLISHED = "published"
@@ -93,6 +98,10 @@ class QuestionVersion(UUIDTimestampMixin, Base):
         ),
         CheckConstraint("version_number >= 1", name="ck_question_versions_version_number"),
         CheckConstraint("marks >= 0", name="ck_question_versions_marks"),
+        CheckConstraint(
+            "item_kind IS NULL OR item_kind IN ('theory', 'problem')",
+            name="ck_question_versions_item_kind",
+        ),
     )
 
     question_id: Mapped[UUID] = mapped_column(ForeignKey("questions.id"), index=True)
@@ -101,6 +110,10 @@ class QuestionVersion(UUIDTimestampMixin, Base):
     question_type: Mapped[QuestionType] = mapped_column(str_enum(QuestionType, "question_type"))
     difficulty: Mapped[QuestionDifficulty | None] = mapped_column(
         str_enum(QuestionDifficulty, "question_difficulty"),
+        nullable=True,
+    )
+    item_kind: Mapped[QuestionItemKind | None] = mapped_column(
+        str_enum(QuestionItemKind, "question_item_kind", length=16),
         nullable=True,
     )
     marks: Mapped[Decimal] = mapped_column(Numeric(8, 2), default=Decimal("1.00"))
@@ -139,6 +152,8 @@ class QuestionAnswerKey(UUIDTimestampMixin, Base):
     correct_numeric: Mapped[Decimal | None] = mapped_column(Numeric(18, 6), nullable=True)
     correct_mapping: Mapped[dict[str, Any] | None] = mapped_column(JsonDict, nullable=True)
     scoring_rubric: Mapped[dict[str, Any] | None] = mapped_column(JsonDict, nullable=True)
+    correct_rationale: Mapped[str | None] = mapped_column(Text, nullable=True)
+    distractor_rationales: Mapped[dict[str, Any] | None] = mapped_column(JsonDict, nullable=True)
 
 
 class QuestionOutcomeTag(UUIDTimestampMixin, Base):

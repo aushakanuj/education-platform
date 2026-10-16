@@ -5,6 +5,8 @@ import { fetchLearningDirectory, getSubtopicMaterial, updateMaterialProgress } f
 import type { LessonMaterial, LessonSlide, QuizSummary } from "../api/types";
 import { ApiError } from "../api/types";
 
+export { findSummarySlide } from "./lessonSlides";
+
 type CachedSubtopicLesson = {
   lesson: LessonMaterial;
   subjectName: string;
@@ -20,10 +22,6 @@ function cacheKey(subjectId: string, subtopicId: string): string {
 
 export function clearSubtopicLessonCache(): void {
   cache.clear();
-}
-
-export function findSummarySlide(slides: LessonSlide[]): LessonSlide | null {
-  return slides.find((slide) => /lesson summary/i.test(slide.title)) ?? slides.at(-1) ?? null;
 }
 
 export function resumeSlideIndex(lesson: LessonMaterial, slides: LessonSlide[]): number {

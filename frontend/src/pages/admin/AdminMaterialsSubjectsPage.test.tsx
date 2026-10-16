@@ -69,7 +69,7 @@ describe("AdminMaterialsSubjectsPage", () => {
     });
 
     expect(screen.getByText("MATH")).toBeInTheDocument();
-    expect(screen.getByText("1 published")).toBeInTheDocument();
+    expect(screen.getByText("1 topics")).toBeInTheDocument();
     expect(screen.queryByText(/draft/i)).not.toBeInTheDocument();
     expect(screen.getByRole("link", { name: /Mathematics/i })).toHaveAttribute(
       "href",

@@ -3,6 +3,8 @@ from pathlib import Path
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+from education_platform.db.url import with_credentials
+
 # backend/src/education_platform/core/config.py → backend/ is parents[3], repo root parents[4]
 _BACKEND_ROOT = Path(__file__).resolve().parents[3]
 _REPO_ROOT = Path(__file__).resolve().parents[4]
@@ -49,12 +51,30 @@ class Settings(BaseSettings):
     openrouter_api_key: str | None = None
     openrouter_base_url: str = "https://openrouter.ai/api/v1"
     openrouter_model: str = "openai/gpt-4o-mini"
+    adk_model: str = "openrouter/openai/gpt-4o-mini"
+    adk_max_review_rounds: int = 4
+    worker_lease_seconds: int = 300
+    # Different model family from adk_model, so the check is not grading its own items.
+    blind_solver_model: str = "anthropic/claude-sonnet-4.5"
     chat_context_limit_tokens: int = 20_000
     chat_retrieval_limit: int = 6
 
     # Attendance below this percentage of the term makes a student exam-ineligible.
     # Sourced from Attendance Policy v3 section 2.1; the early-warning engine reads it.
     attendance_eligibility_percent: float = 75.0
+
+    # A separate, least-privilege Postgres role for the text-to-SQL pipeline's own reads
+    # (see execute_sql.py and migration c9d0e1f2a3b4) -- SELECT-only, granted on exactly
+    # `load_schema.REQUIRED_TABLES`, with `users.password_hash`/`refresh_sessions.token_hash`
+    # excluded at the column-privilege level and `question_answer_keys` excluded entirely.
+    # `text_to_sql_db_password` reads the `TEXT_TO_SQL_DB_PASSWORD` env var (pydantic-settings'
+    # default field->env mapping), and migration c9d0e1f2a3b4 reads that exact same env var
+    # when it creates the role -- set it once before `alembic upgrade head` in any real
+    # deployment and both sides agree automatically. The literal default below is a dev-only
+    # fallback for when nothing sets that env var, same tier as `jwt_secret` above; it is
+    # never used once the env var is set.
+    text_to_sql_db_user: str = "text_to_sql_reader"
+    text_to_sql_db_password: str = "text_to_sql_reader"
 
     @property
     def is_development(self) -> bool:
@@ -63,6 +83,17 @@ class Settings(BaseSettings):
     @property
     def openrouter_configured(self) -> bool:
         return bool(self.openrouter_api_key and self.openrouter_api_key.strip())
+
+    @property
+    def text_to_sql_database_url(self) -> str:
+        """`database_url`'s own host/port/database, authenticated as the restricted
+        text-to-SQL reader role instead of the application's full-access role.
+        """
+        return with_credentials(
+            self.database_url,
+            user=self.text_to_sql_db_user,
+            password=self.text_to_sql_db_password,
+        )
 
 
 @lru_cache
