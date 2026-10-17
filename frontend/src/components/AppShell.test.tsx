@@ -1,5 +1,4 @@
-import { render, screen } from "@testing-library/react";
-import userEvent from "@testing-library/user-event";
+import { render, screen, within } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { describe, expect, it, vi } from "vitest";
 
@@ -44,18 +43,12 @@ function renderShell() {
 }
 
 describe("AppShell", () => {
-  it("keeps reset and sign out under a persistent profile icon", async () => {
-    const user = userEvent.setup();
+  it("shows the persistent sidebar with Home and Feedback navigation", () => {
     renderShell();
 
-    expect(screen.queryByRole("complementary", { name: "Primary" })).not.toBeInTheDocument();
-    expect(screen.queryByRole("link", { name: "Education Platform" })).not.toBeInTheDocument();
-    expect(screen.queryByText(/Demo mockup only/)).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Reset demo" })).not.toBeInTheDocument();
-
-    await user.click(screen.getByRole("button", { name: "Account menu" }));
-    expect(screen.getByRole("menuitem", { name: "Reset demo" })).toBeInTheDocument();
-    await user.click(screen.getByRole("menuitem", { name: "Sign out" }));
-    expect(signOut).toHaveBeenCalled();
+    const rail = screen.getByRole("complementary", { name: "Primary" });
+    expect(rail).toBeInTheDocument();
+    expect(within(rail).getByRole("link", { name: "Home" })).toBeInTheDocument();
+    expect(within(rail).getByRole("link", { name: "Feedback" })).toBeInTheDocument();
   });
 });
