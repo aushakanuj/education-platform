@@ -1739,6 +1739,11 @@ a.list-item__title:hover {
   animation: route-page-in 0.35s ease-out both;
 }
 
+.feedback-summary__text a {
+  color: var(--accent);
+  font-weight: 600;
+}
+
 .feedback-summary__status {
   margin: 0 0 0.7rem;
   color: var(--ink-muted);

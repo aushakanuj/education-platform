@@ -6,6 +6,7 @@ import type { FeedbackTopicDetail, GoalOut } from "../api/types";
 import { ApiError } from "../api/types";
 import { Crumbs } from "../components/Crumbs";
 import { AttemptBadge, GoalSection, Milestone } from "../components/FeedbackExtras";
+import { MarkdownContent } from "../components/MarkdownContent";
 import { PastAttempts } from "../components/PastAttempts";
 import { ScoreMetrics } from "../components/ScoreMetrics";
 import { formatScore, formatTrend } from "../lib/feedbackHierarchy";
@@ -92,7 +93,9 @@ export function TopicFeedbackPage() {
           onGoalChange={changeGoal}
         />
         <div className="feedback-summary__text">
-          <p>{detail.summary}</p>
+          <MarkdownContent inline internalLinks>
+            {detail.summary}
+          </MarkdownContent>
         </div>
         <div className="meta-row">
           {detail.has_lesson && (

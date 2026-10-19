@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   attemptBadge,
   attemptTitle,
+  calibrationMessage,
   focusSentence,
   formatDuration,
   formatScore,
@@ -40,6 +41,26 @@ describe("feedback hierarchy display", () => {
     expect(attemptTitle(4, 90)).toMatchObject({ label: "Breakthrough", color: "#b45309" });
     expect(attemptBadge("keep_going", 1, 40)).toBe("Keep going");
     expect(attemptBadge("not_attempted", 0, null)).toBe("Not attempted");
+  });
+
+  it("calibrates a subject rating with topic names and no concept names", () => {
+    const aligned = calibrationMessage("confident", [
+      { name: "Decimals", percent: 85 },
+      { name: "Fractions", percent: 74 },
+    ]);
+    expect(aligned).toBe(
+      "You said Confident, and the topics you have tried are at 70% or above.",
+    );
+    const gap = calibrationMessage("confident", [
+      { name: "Decimals", percent: 85 },
+      { name: "Fractions", percent: 58 },
+      { name: "Ratios", percent: 62 },
+    ]);
+    expect(gap).toBe("You said Confident, but Fractions and Ratios are under 70%.");
+    expect(gap).not.toMatch(/Cuboid|concept/i);
+    expect(calibrationMessage("still_learning", [{ name: "Algebra", percent: 90 }])).toBe(
+      "You said Still learning, but the topics you have tried are at 70% or above.",
+    );
   });
 
   it("averages the gain from the first attempt to the latest", () => {

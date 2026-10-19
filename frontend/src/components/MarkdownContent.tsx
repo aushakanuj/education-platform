@@ -1,5 +1,6 @@
 import { Children, isValidElement, type ReactNode } from "react";
 import ReactMarkdown, { type Components } from "react-markdown";
+import { Link } from "react-router-dom";
 import rehypeKatex from "rehype-katex";
 import remarkGfm from "remark-gfm";
 import remarkMath from "remark-math";
@@ -11,6 +12,8 @@ type MarkdownContentProps = {
   children: string;
   className?: string;
   inline?: boolean;
+  /** In-app paths become router links. Other hrefs stay normal anchors. */
+  internalLinks?: boolean;
 };
 
 function fenceLanguage(className: string | undefined): string | undefined {
@@ -21,11 +24,25 @@ function isMermaidDiagram(node: ReactNode): boolean {
   return isValidElement(node) && node.type === MermaidDiagram;
 }
 
-function markdownComponents(inline: boolean): Components {
+function markdownComponents(inline: boolean, internalLinks: boolean): Components {
   return {
     ...(inline
       ? {
           p: ({ children: nodes }) => <>{nodes}</>,
+        }
+      : {}),
+    ...(internalLinks
+      ? {
+          a({ href, children }) {
+            if (href && href.startsWith("/") && !href.startsWith("//")) {
+              return <Link to={href}>{children}</Link>;
+            }
+            return (
+              <a href={href} rel="noreferrer" target="_blank">
+                {children}
+              </a>
+            );
+          },
         }
       : {}),
     pre({ children }) {
@@ -59,6 +76,7 @@ export function MarkdownContent({
   children,
   className,
   inline = false,
+  internalLinks = false,
 }: MarkdownContentProps) {
   const classes = ["markdown-content", inline ? "markdown-content--inline" : "", className]
     .filter(Boolean)
@@ -69,7 +87,7 @@ export function MarkdownContent({
       <ReactMarkdown
         remarkPlugins={[remarkGfm, remarkMath]}
         rehypePlugins={[[rehypeKatex, { throwOnError: false, strict: "ignore" }]]}
-        components={markdownComponents(inline)}
+        components={markdownComponents(inline, internalLinks)}
       >
         {normalizeMarkdownMath(children)}
       </ReactMarkdown>

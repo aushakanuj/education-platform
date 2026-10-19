@@ -6,7 +6,8 @@ import { fetchLearningDirectory } from "../api/materials";
 import type { FeedbackOverview, FeedbackSubjectCard, ReviewNudgeOut } from "../api/types";
 import { ApiError } from "../api/types";
 import { Crumbs } from "../components/Crumbs";
-import { AchievementBanner, FocusLine } from "../components/FeedbackExtras";
+import { AchievementBanner } from "../components/FeedbackExtras";
+import { MarkdownContent } from "../components/MarkdownContent";
 import { formatScore, formatTrend } from "../lib/feedbackHierarchy";
 
 function SubjectCard({ subject }: { subject: FeedbackSubjectCard }) {
@@ -22,21 +23,8 @@ function SubjectCard({ subject }: { subject: FeedbackSubjectCard }) {
           : `${subject.quizzes_taken} topic ${subject.quizzes_taken === 1 ? "quiz" : "quizzes"} taken`}
       </p>
       {trend && <p className="feedback-card__trend">{trend}</p>}
-      <FocusLine focus={subject.focus} />
       <AchievementBanner tier={subject.achievement} />
       <span className="badge badge--info">View feedback</span>
-      {subject.strongest_topic && (
-        <p className="progress-label">
-          Strongest topic: {subject.strongest_topic.topic_name} (
-          {formatScore(subject.strongest_topic.best_score_percent)})
-        </p>
-      )}
-      {subject.weakest_topic && (
-        <p className="progress-label">
-          Weakest topic: {subject.weakest_topic.topic_name} (
-          {formatScore(subject.weakest_topic.best_score_percent)})
-        </p>
-      )}
     </Link>
   );
 }
@@ -132,6 +120,11 @@ export function FeedbackSubjectPickerPage() {
             <p className="progress-label">
               Average of each subject you have attempted. A subject with no topic quiz yet is left out.
             </p>
+            <div className="feedback-summary__text">
+              <MarkdownContent inline internalLinks>
+                {overview.summary}
+              </MarkdownContent>
+            </div>
           </section>
           {overview.subjects.length === 0 ? (
             <div className="alert alert--info">No enrolled subjects yet.</div>
