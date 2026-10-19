@@ -12,6 +12,7 @@ from sqlalchemy.orm import Session
 from education_platform.core.llm import OpenRouterError
 from education_platform.db.session import sync_session
 from education_platform.modules.assessments import feedback_summary
+from education_platform.modules.assessments.feedback_analysis import accept_model_text
 from education_platform.modules.assessments.models import (
     FeedbackSummaryJob,
     FeedbackSummaryJobStatus,
@@ -33,12 +34,9 @@ def process_feedback_summary_job_sync(job_id: UUID) -> None:
         except OpenRouterError as exc:
             logger.warning("feedback summary generation failed: %s", exc)
             text = ""
-        if text.strip():
-            feedback_summary.apply_summary(session, job, text.strip(), FeedbackSummaryOrigin.MODEL)
-        else:
-            feedback_summary.apply_summary(
-                session, job, job.template_summary, FeedbackSummaryOrigin.TEMPLATE
-            )
+        prose, from_model = accept_model_text(text, job.template_summary, job.prompt)
+        origin = FeedbackSummaryOrigin.MODEL if from_model else FeedbackSummaryOrigin.TEMPLATE
+        feedback_summary.apply_summary(session, job, prose, origin)
         job.status = FeedbackSummaryJobStatus.SUCCEEDED
         job.error = None
         session.commit()

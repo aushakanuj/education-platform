@@ -49,6 +49,7 @@ import { getSelfEvaluation, recordSelfEvaluation } from "../api/selfEvaluation";
 
 const overview = {
   score_percent: "75",
+  summary: "Mathematics is going well.",
   subjects: [
     {
       subject_id: "math-1",
@@ -100,7 +101,8 @@ const subject = {
   trend: "improving" as const,
   trend_delta: "20",
   topics_needing_attention: ["Algebra"],
-  summary: "You're doing well in Mensuration.",
+  summary:
+    "Mensuration is going well. Scores are up 20 points across topics since the previous attempts.",
   summary_status: "fallback" as const,
   concepts_mastered: 1,
   concepts_attempted: 2,
@@ -190,7 +192,8 @@ const topic = {
   badge: "passed" as const,
   quiz_id: "quiz-1",
   has_lesson: true,
-  summary: "Strong on Cuboid.",
+  summary:
+    "Concentrate on Area of a polygon (1 of 4 correct). Review the published [Mensuration lesson](/subjects/math-1/topics/mensuration/lesson?slide=2).",
   concepts_mastered: 1,
   concepts_attempted: 2,
   goal: null,
@@ -283,10 +286,15 @@ describe("feedback hierarchy", () => {
       </MemoryRouter>,
     );
 
-    expect(await screen.findByRole("region", { name: "Across all subjects" })).toHaveTextContent("75%");
+    const across = await screen.findByRole("region", { name: "Across all subjects" });
+    expect(across).toHaveTextContent("75%");
+    expect(across).toHaveTextContent("Mathematics is going well.");
+    expect(across).not.toHaveTextContent("Mensuration");
+    expect(across).not.toHaveTextContent("Algebra");
     expect(screen.getByRole("heading", { name: "Mathematics" })).toBeInTheDocument();
-    expect(screen.getByText(/Strongest topic: Mensuration/)).toBeInTheDocument();
-    expect(screen.getByText(/Weakest topic: Algebra/)).toBeInTheDocument();
+    expect(screen.queryByText(/Strongest topic/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Weakest topic/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/goal on Algebra/)).not.toBeInTheDocument();
     expect(screen.getByText("Up 20 points since the previous attempt")).toBeInTheDocument();
     const science = screen.getByRole("link", { name: /Science/ });
     expect(science).toHaveTextContent("Not attempted");
@@ -294,7 +302,6 @@ describe("feedback hierarchy", () => {
     expect(science).not.toHaveTextContent("declining");
     expect(screen.queryByText(/· -/)).not.toBeInTheDocument();
     expect(screen.getAllByText("View feedback").length).toBeGreaterThan(0);
-    expect(screen.getByText("You're just 8% from your goal on Algebra.")).toBeInTheDocument();
   });
 
   it("lists topics in order and leaves an unattempted topic blank", async () => {
@@ -312,10 +319,12 @@ describe("feedback hierarchy", () => {
     );
 
     expect(await screen.findByRole("heading", { name: "Mathematics" })).toBeInTheDocument();
-    expect(screen.getByRole("region", { name: "Subject summary" })).toHaveTextContent(
-      "You're doing well in Mensuration.",
-    );
-    expect(screen.getByText("Needs attention: Algebra")).toBeInTheDocument();
+    const summary = screen.getByRole("region", { name: "Subject summary" });
+    expect(summary).toHaveTextContent("Mensuration is going well");
+    expect(summary).toHaveTextContent("Scores are up 20 points across topics");
+    expect(summary).not.toHaveTextContent("Needs attention");
+    expect(summary).not.toHaveTextContent("Cuboid");
+    expect(summary).not.toHaveTextContent("Area of a polygon");
     const links = screen.getAllByRole("link");
     const topicLinks = links.filter((link) => link.getAttribute("href")?.includes("/topics/"));
     expect(topicLinks.map((link) => link.textContent)).toEqual(["Mensuration", "Decimals"]);
@@ -380,7 +389,7 @@ describe("feedback hierarchy", () => {
     expect(screen.getByText("0 of 1 correct, 0%")).toBeInTheDocument();
     expect(screen.queryByText("Medium")).not.toBeInTheDocument();
     expect(screen.getByText("Cuboid")).toBeInTheDocument();
-    expect(screen.getByText("Area of a polygon")).toBeInTheDocument();
+    expect(screen.getAllByText(/Area of a polygon/).length).toBeGreaterThan(0);
     expect(screen.getByText("1 of 4 correct, 25%")).toBeInTheDocument();
     expect(screen.getByText("3 of 4 correct, 75%")).toBeInTheDocument();
     const concepts = within(screen.getByRole("list", { name: "Concepts" })).getAllByRole("listitem");
@@ -394,7 +403,13 @@ describe("feedback hierarchy", () => {
       within(screen.getByRole("list", { name: "Concepts" })).queryByRole("button", { name: "Set a goal" }),
     ).not.toBeInTheDocument();
     expect(screen.getAllByRole("button", { name: "Set a goal" })).toHaveLength(1);
-    expect(screen.getByText("Strong on Cuboid.")).toBeInTheDocument();
+    const topicSummary = screen.getByRole("region", { name: "Topic summary" });
+    expect(topicSummary).toHaveTextContent("Area of a polygon (1 of 4 correct)");
+    expect(topicSummary).not.toHaveTextContent("Decimals");
+    expect(screen.getByRole("link", { name: "Mensuration lesson" })).toHaveAttribute(
+      "href",
+      "/subjects/math-1/topics/mensuration/lesson?slide=2",
+    );
     expect(screen.getByRole("link", { name: "Review the lesson" })).toHaveAttribute(
       "href",
       "/subjects/math-1/topics/mensuration/lesson",
@@ -544,9 +559,16 @@ describe("feedback hierarchy", () => {
     expect(mensuration).toHaveTextContent("Up 20 points since the previous attempt");
     expect(screen.getByRole("button", { name: "View report card" })).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "Confident" }));
-    expect(
-      await screen.findByText("Confident and scoring high — you really do know this. Nice."),
-    ).toBeInTheDocument();
+    const note = await screen.findByText(
+      "You said Confident, and the topics you have tried are at 70% or above.",
+    );
+    expect(note).toBeInTheDocument();
+    expect(screen.getByRole("region", { name: "Self-check for Mathematics" })).not.toHaveTextContent(
+      "Cuboid",
+    );
+    expect(screen.getByRole("region", { name: "Self-check for Mathematics" })).not.toHaveTextContent(
+      "Area of a polygon",
+    );
     expect(recordSelfEvaluation).toHaveBeenCalledWith("math-1", "confident");
   });
 });

@@ -161,6 +161,21 @@ describe("TopicLessonPage", () => {
     );
   });
 
+  it("opens the slide named in the lesson link", async () => {
+    getTopicMaterial.mockResolvedValue({
+      ...lessonPayload,
+      slides: [
+        { number: 1, title: "This topic", content: "Intro only" },
+        { number: 2, title: "Ideas in this topic", content: "Place value sits here" },
+      ],
+    });
+    renderTopicLesson("/subjects/subj-1/topics/topic-1/lesson?slide=2");
+
+    expect(await screen.findByRole("heading", { name: "Ideas in this topic" })).toBeInTheDocument();
+    expect(screen.getByText("Place value sits here")).toBeInTheDocument();
+    expect(screen.queryByText("Intro only")).not.toBeInTheDocument();
+  });
+
   it("shows a mensuration-style topic lesson as slides and unlocks the quiz on the last slide", async () => {
     const formula = [
       "$$\\text{Required area} = (l + 2w)(b + 2w) - lb",

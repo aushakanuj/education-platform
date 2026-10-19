@@ -8,6 +8,7 @@ import type { FeedbackSubjectDetail, FeedbackTopicScore } from "../api/types";
 import { ApiError } from "../api/types";
 import { Crumbs } from "../components/Crumbs";
 import { AttemptBadge, AchievementBanner, FocusLine, Milestone, SubjectEngagement } from "../components/FeedbackExtras";
+import { MarkdownContent } from "../components/MarkdownContent";
 import { TopicScoreCard, topicStatusLabel } from "../components/TopicScoreCard";
 import {
   calibrationMessage,
@@ -63,12 +64,12 @@ function TopicSummaryTable({
 function SelfCheck({
   subjectId,
   subjectName,
-  score,
+  topics,
   initial,
 }: {
   subjectId: string;
   subjectName: string;
-  score: number | null;
+  topics: { name: string; percent: number | null }[];
   initial: ConfidenceLevel | null;
 }) {
   const [confidence, setConfidence] = useState<ConfidenceLevel | null>(initial);
@@ -104,7 +105,9 @@ function SelfCheck({
           </button>
         ))}
       </div>
-      {confidence && <p className="feedback-self-check__note">{calibrationMessage(confidence, score)}</p>}
+      {confidence && (
+        <p className="feedback-self-check__note">{calibrationMessage(confidence, topics)}</p>
+      )}
     </section>
   );
 }
@@ -176,17 +179,14 @@ export function SubjectFeedbackPage() {
         <p className="feedback-summary__kicker">Subject</p>
         <p className="feedback-card__score">{formatScore(detail.score_percent)}</p>
         {trend && <p className="feedback-card__trend">{trend}</p>}
-        {detail.topics_needing_attention.length > 0 && (
-          <p className="progress-label">
-            Needs attention: {detail.topics_needing_attention.join(", ")}
-          </p>
-        )}
         <Milestone mastered={detail.concepts_mastered} attempted={detail.concepts_attempted} />
         <SubjectEngagement rates={engagement} />
         <FocusLine focus={detail.focus} />
         <AchievementBanner tier={detail.achievement} />
         <div className="feedback-summary__text">
-          <p>{detail.summary}</p>
+          <MarkdownContent inline internalLinks>
+            {detail.summary}
+          </MarkdownContent>
         </div>
         {gain !== null && gain > 0 && (
           <p className="feedback-momentum">↑ up {gain}% since you started</p>
@@ -204,7 +204,10 @@ export function SubjectFeedbackPage() {
       <SelfCheck
         subjectId={subjectId}
         subjectName={detail.subject_name}
-        score={scoreNumber(detail.score_percent)}
+        topics={detail.topics.map((topic) => ({
+          name: topic.topic_name,
+          percent: scoreNumber(topic.best_score_percent),
+        }))}
         initial={confidence}
       />
 

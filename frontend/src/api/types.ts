@@ -277,6 +277,7 @@ export type FeedbackSubjectCard = {
 
 export type FeedbackOverview = {
   score_percent: string | number | null;
+  summary: string;
   subjects: FeedbackSubjectCard[];
 };
 
@@ -290,7 +291,7 @@ export type FeedbackSubjectDetail = {
   trend_delta: string | number | null;
   topics_needing_attention: string[];
   summary: string;
-  summary_status: "ready" | "fallback";
+  summary_status: "ready" | "pending" | "fallback";
   topics: FeedbackTopicScore[];
   concepts_mastered: number;
   concepts_attempted: number;

@@ -47,6 +47,12 @@ export function TopicLessonPage() {
     const nextSlides = slidesForLessonView(lesson);
     if (nextSlides.length === 0) return;
     positioned.current = true;
+    const requested = Number(searchParams.get("slide"));
+    if (Number.isInteger(requested) && requested > 0) {
+      const found = nextSlides.findIndex((item) => item.number === requested);
+      setSlideIndex(found >= 0 ? found : 0);
+      return;
+    }
     const fromStart = searchParams.get("from") === "start";
     setSlideIndex(fromStart ? 0 : resumeSlideIndex(lesson, nextSlides));
   }, [lesson, searchParams]);

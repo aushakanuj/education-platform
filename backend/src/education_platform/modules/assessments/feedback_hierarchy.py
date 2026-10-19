@@ -52,6 +52,21 @@ from education_platform.modules.academics.models import (
     Subtopic,
     Topic,
 )
+from education_platform.modules.assessments.feedback_analysis import (
+    ConceptFact,
+    GoalFact,
+    OverviewContext,
+    ScoredItem,
+    StudyLink,
+    SubjectContext,
+    TopicContext,
+    overview_analysis,
+    subject_analysis,
+    subtopic_lesson_href,
+    topic_analysis,
+    topic_lesson_href,
+)
+from education_platform.modules.assessments.feedback_summary import facts_hash, resolve_summary
 from education_platform.modules.assessments.goals_service import goal_out, goals_for_topics
 from education_platform.modules.assessments.models import (
     AttemptAnswer,
@@ -64,7 +79,6 @@ from education_platform.modules.assessments.models import (
     QuizScope,
     QuizVersion,
     StudentSubtopicGoal,
-    SubjectFeedbackSummary,
 )
 from education_platform.modules.assessments.schemas import (
     FeedbackAttemptScore,
@@ -88,6 +102,8 @@ from education_platform.modules.materials.models import (
     SourceMaterialVersion,
     SourceMaterialVersionStatus,
 )
+from education_platform.modules.materials.queries import published_topic_material_version
+from education_platform.modules.self_evaluation.models import SelfEvaluation
 
 PASS_PERCENT = Decimal("70")
 OKAY_PERCENT = Decimal("50")
@@ -427,42 +443,6 @@ def achievement_tier(
     return "on_track"
 
 
-def topic_summary(topic_name: str, strengths: list[FeedbackSubtopicStrength]) -> str:
-    strong = [row.name for row in strengths if row.band == "strong"]
-    work = [row.name for row in strengths if row.band == "needs_work"]
-    parts: list[str] = []
-    if strong:
-        parts.append(f"Strong on {', '.join(strong[:3])}.")
-    if work:
-        parts.append(f"Needs work on {', '.join(work[:3])}.")
-    if not parts:
-        if strengths:
-            parts.append(
-                f"{topic_name} is in between. Another attempt will show which ideas are sticking."
-            )
-        else:
-            parts.append(
-                f"Take the {topic_name} quiz to see which ideas are strong and which need work."
-            )
-    return " ".join(parts)
-
-
-def subject_template(subject_name: str, strongest: str | None, needing: tuple[str, ...]) -> str:
-    parts: list[str] = []
-    if strongest:
-        parts.append(f"You're doing well in {strongest}.")
-    if needing:
-        parts.append(f"Focus next on {', '.join(needing[:3])}.")
-    elif strongest:
-        parts.append(
-            "Nothing you have tried is below the pass mark. "
-            "Keep going on topics you have not attempted."
-        )
-    else:
-        parts.append(f"Take a topic quiz in {subject_name} to see where you stand.")
-    return " ".join(parts)
-
-
 @dataclass(frozen=True, slots=True)
 class _OfferingSubject:
     offering_id: UUID
@@ -600,20 +580,96 @@ async def _lesson_topic_ids(session: AsyncSession, topic_ids: list[UUID]) -> set
     return {topic_id for topic_id in rows if topic_id is not None}
 
 
-async def _stored_summaries(
+async def _confidences(
     session: AsyncSession, student_id: UUID, subject_ids: list[UUID]
 ) -> dict[UUID, str]:
+    """Latest self-rating value per subject. A subject with no rating is absent."""
     if not subject_ids:
         return {}
     rows = (
-        await session.scalars(
-            select(SubjectFeedbackSummary).where(
-                SubjectFeedbackSummary.student_id == student_id,
-                SubjectFeedbackSummary.subject_id.in_(subject_ids),
+        await session.execute(
+            select(
+                SelfEvaluation.subject_id,
+                SelfEvaluation.confidence,
+                SelfEvaluation.recorded_at,
             )
+            .where(
+                SelfEvaluation.student_id == student_id,
+                SelfEvaluation.subject_id.in_(subject_ids),
+            )
+            .order_by(SelfEvaluation.recorded_at.desc())
         )
     ).all()
-    return {row.subject_id: row.summary for row in rows if row.summary}
+    found: dict[UUID, str] = {}
+    for subject_id, confidence, _recorded_at in rows:
+        if subject_id in found:
+            continue
+        found[subject_id] = confidence.value
+    return found
+
+
+async def _published_lesson(session: AsyncSession, topic_id: UUID) -> tuple[str | None, str | None]:
+    """Title and markdown of the published topic lesson, when the student can open it."""
+    version = await published_topic_material_version(session, topic_id)
+    if version is None or not version.content_markdown:
+        return None, None
+    return version.title, version.content_markdown
+
+
+async def _concept_lesson_links(
+    session: AsyncSession, subject_id: UUID, subtopic_ids: list[UUID]
+) -> tuple[StudyLink, ...]:
+    """Published subtopic lessons the student can open. Other slugs have no page."""
+    if not subtopic_ids:
+        return ()
+    rows = (
+        await session.execute(
+            select(
+                SourceMaterial.subtopic_id,
+                SourceMaterialVersion.title,
+                SourceMaterialVersion.content_markdown,
+                SourceMaterialVersion.version_number,
+            )
+            .join(SourceMaterial, SourceMaterial.id == SourceMaterialVersion.source_material_id)
+            .where(
+                SourceMaterial.subtopic_id.in_(subtopic_ids),
+                SourceMaterialVersion.lifecycle_status == SourceMaterialVersionStatus.PUBLISHED,
+                SourceMaterialVersion.content_markdown.is_not(None),
+            )
+            .order_by(SourceMaterialVersion.version_number.desc())
+        )
+    ).all()
+    links: list[StudyLink] = []
+    seen: set[UUID] = set()
+    for subtopic_id, title, markdown, _version in rows:
+        if subtopic_id is None or subtopic_id in seen or not markdown:
+            continue
+        seen.add(subtopic_id)
+        links.append(
+            StudyLink(
+                label=title.strip() or "Lesson",
+                href=subtopic_lesson_href(str(subject_id), str(subtopic_id)),
+            )
+        )
+    return tuple(links)
+
+
+def _goal_facts(
+    topics: list[_TopicRow],
+    rollups: dict[UUID, TopicRollup],
+    goals: dict[UUID, StudentSubtopicGoal],
+) -> tuple[GoalFact, ...]:
+    facts: list[GoalFact] = []
+    for topic in topics:
+        goal = goals.get(topic.id)
+        best = rollups[topic.id].best_score_percent
+        if goal is None or best is None:
+            continue
+        gap = int((goal.target_percent - best).quantize(Decimal("1"), rounding=ROUND_HALF_UP))
+        if gap <= 0:
+            continue
+        facts.append(GoalFact(topic.name, goal.target_percent, gap))
+    return tuple(facts)
 
 
 def _topic_score(
@@ -755,6 +811,7 @@ async def get_overview(session: AsyncSession, scope: Scope) -> FeedbackOverview:
     topic_ids = [topic.id for topic in topics]
     by_topic = await _concept_strengths(session, student_id, topic_ids)
     goals = await goals_for_topics(session, student_id, topic_ids)
+    ratings = await _confidences(session, student_id, [row.subject_id for row in offerings])
     cards: list[FeedbackSubjectCard] = []
     for offering in offerings:
         subject_topics = _subject_topics(offering, topics)
@@ -772,10 +829,24 @@ async def get_overview(session: AsyncSession, scope: Scope) -> FeedbackOverview:
                 achievement_tier(subject.score_percent, strengths),
             )
         )
+    draft = overview_analysis(
+        OverviewContext(
+            subjects=tuple(
+                ScoredItem(card.subject_name, card.score_percent, card.trend_delta)
+                for card in cards
+            ),
+            ratings=tuple(
+                (card.subject_name, ratings.get(card.subject_id), card.score_percent)
+                for card in cards
+            ),
+            forbidden_names=tuple(topic.name for topic in topics),
+        )
+    )
     return FeedbackOverview(
         score_percent=_mean(
             [card.score_percent for card in cards if card.score_percent is not None]
         ),
+        summary=draft.text,
         subjects=cards,
     )
 
@@ -875,12 +946,38 @@ async def get_subject(
     regressions = await _topic_regression_counts(session, student_id, topic_ids)
     class_averages = await _classmate_best_averages(session, student_id, topic_ids)
     strengths = _subject_concepts(subject_topics, by_topic)
-    stored = await _stored_summaries(session, student_id, [subject_id])
-    summary = stored.get(subject_id)
-    status: Literal["ready", "fallback"] = "ready" if summary else "fallback"
-    if not summary:
-        strongest_name = subject.strongest[1] if subject.strongest else None
-        summary = subject_template(offering.subject_name, strongest_name, subject.needing_attention)
+    confidence = (await _confidences(session, student_id, [subject_id])).get(subject_id)
+    draft = subject_analysis(
+        SubjectContext(
+            subject_name=offering.subject_name,
+            topics=tuple(
+                ScoredItem(
+                    topic.name,
+                    rollups[topic.id].best_score_percent,
+                    rollups[topic.id].trend_delta,
+                )
+                for topic in subject_topics
+            ),
+            trend_delta=subject.trend_delta,
+            confidence=confidence,
+            goals=_goal_facts(subject_topics, rollups, goals),
+            forbidden_names=tuple(row.name for row in strengths),
+        )
+    )
+    if subject.quizzes_taken == 0:
+        summary = draft.text
+        status: Literal["ready", "pending", "fallback"] = "fallback"
+    else:
+        resolved = await resolve_summary(
+            session,
+            student_id,
+            subject_id,
+            facts_hash(draft.prompt),
+            draft.prompt,
+            draft.text,
+        )
+        summary = resolved.text
+        status = resolved.status
     mastered, attempted = milestone_counts(strengths)
     return FeedbackSubjectDetail(
         subject_id=offering.subject_id,
@@ -982,6 +1079,31 @@ async def get_topic(session: AsyncSession, scope: Scope, topic_id: UUID) -> Feed
     answered, correct, accuracy, difficulty = answer_metrics(
         await _topic_answer_facts(session, student_id, topic.id)
     )
+    lesson_title, lesson_markdown = await _published_lesson(session, topic.id)
+    weak_ids = [row.subtopic_id for row in strengths if row.percent < PASS_PERCENT]
+    confidence = (await _confidences(session, student_id, [offering.subject_id])).get(
+        offering.subject_id
+    )
+    draft = topic_analysis(
+        TopicContext(
+            topic_name=topic.name,
+            concepts=tuple(
+                ConceptFact(row.name, row.correct_count, row.answered_count, row.percent)
+                for row in strengths
+            ),
+            trend_delta=rollup.trend_delta,
+            goal_target=goal.target_percent if goal is not None else None,
+            best_percent=rollup.best_score_percent,
+            confidence=confidence,
+            lesson_title=lesson_title,
+            lesson_href=topic_lesson_href(str(offering.subject_id), str(topic.id))
+            if lesson_markdown
+            else None,
+            lesson_markdown=lesson_markdown,
+            extra_links=await _concept_lesson_links(session, offering.subject_id, weak_ids),
+            forbidden_names=tuple(row.name for row in topics if row.id != topic.id),
+        )
+    )
     return FeedbackTopicDetail(
         subject_id=offering.subject_id,
         subject_name=offering.subject_name,
@@ -995,7 +1117,7 @@ async def get_topic(session: AsyncSession, scope: Scope, topic_id: UUID) -> Feed
         badge=rollup.badge,
         quiz_id=quiz_ids.get(topic.id),
         has_lesson=topic.id in lessons,
-        summary=topic_summary(topic.name, strengths),
+        summary=draft.text,
         subtopics=concepts_weakest_first(strengths),
         goal=goal_out(goal, topic.name, rollup.best_score_percent) if goal is not None else None,
         concepts_mastered=mastered,

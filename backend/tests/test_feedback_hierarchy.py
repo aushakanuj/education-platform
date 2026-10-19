@@ -433,6 +433,21 @@ def test_seeded_topic_quiz_reports_four_attempts_and_an_unattempted_topic(
     )
     difficulty_answered = sum(row["answered_count"] for row in payload["difficulty_accuracy"])
     assert difficulty_answered <= payload["questions_answered"]
+    assert "summary" in overview.json()
+    assert seeded["topic_name"] not in overview.json()["summary"]
+    assert "Mensuration" not in overview.json()["summary"]
+    assert "Cuboid" not in overview.json()["summary"]
+    assert seeded["topic_name"] in detail.json()["summary"]
+    assert "Cuboid" not in detail.json()["summary"]
+    assert "Mensuration" not in detail.json()["summary"]
+    assert "Mensuration" not in payload["summary"]
+    if payload["has_lesson"]:
+        lesson = f"/subjects/{payload['subject_id']}/topics/{payload['topic_id']}/lesson"
+        assert lesson in payload["summary"]
+    else:
+        assert "/lesson" not in payload["summary"]
+    assert "http://" not in payload["summary"]
+    assert "https://" not in payload["summary"]
 
 
 def _subject_topics(

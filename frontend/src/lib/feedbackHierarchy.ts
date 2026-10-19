@@ -197,25 +197,71 @@ export function achievementCopy(
   }
 }
 
+type ConfidenceLevel = "still_learning" | "getting_it" | "confident";
+
+/** Topic rows the subject self-check may name. Concept names are not accepted. */
+export type CalibrationTopic = {
+  name: string;
+  percent: number | null;
+};
+
+function joinNames(names: string[]): string {
+  if (names.length <= 1) return names[0] ?? "";
+  if (names.length === 2) return `${names[0]} and ${names[1]}`;
+  return `${names.slice(0, -1).join(", ")}, and ${names[names.length - 1]}`;
+}
+
+function are(names: string[]): string {
+  return names.length === 1 ? "is" : "are";
+}
+
+/**
+ * Subject-level self-check note. Names topics that are under 70%, never concepts.
+ * Wording matches `subject_calibration` in the backend analysis module.
+ */
 export function calibrationMessage(
-  confidence: "still_learning" | "getting_it" | "confident",
-  score: number | null,
+  confidence: ConfidenceLevel,
+  topics: CalibrationTopic[],
 ): string {
-  if (score !== null) {
-    if (confidence === "confident" && score < 70) {
-      return "You're feeling confident — a quick review will help your scores catch up to that confidence.";
-    }
-    if (confidence === "still_learning" && score >= 80) {
-      return 'You said "still learning," but your scores say you\'ve got this — trust yourself a little more!';
-    }
-    if (confidence === "still_learning" && score >= 70) {
-      return "You're doing better than you feel — keep going, you're closer than you think.";
-    }
-    if (confidence === "confident" && score >= 80) {
-      return "Confident and scoring high — you really do know this. Nice.";
+  const scored = topics.filter((topic): topic is CalibrationTopic & { percent: number } => topic.percent !== null);
+  const well = scored
+    .filter((topic) => topic.percent >= 70)
+    .sort((left, right) => right.percent - left.percent || left.name.localeCompare(right.name));
+  const focus = scored
+    .filter((topic) => topic.percent < 70)
+    .sort((left, right) => left.percent - right.percent || left.name.localeCompare(right.name))
+    .slice(0, 3);
+  const named = focus.map((topic) => topic.name);
+  switch (confidence) {
+    case "confident":
+      if (named.length > 0) {
+        return `You said Confident, but ${joinNames(named)} ${are(named)} under 70%.`;
+      }
+      if (well.length > 0) {
+        return "You said Confident, and the topics you have tried are at 70% or above.";
+      }
+      return "You said Confident. A topic quiz will show how that lines up.";
+    case "still_learning":
+      if (well.length > 0 && named.length === 0) {
+        return "You said Still learning, but the topics you have tried are at 70% or above.";
+      }
+      if (named.length > 0) {
+        return `You said Still learning, and ${joinNames(named)} ${are(named)} under 70%.`;
+      }
+      return "You said Still learning. A topic quiz will show how that lines up.";
+    case "getting_it":
+      if (named.length > 0) {
+        return `You said Getting it. ${joinNames(named)} ${are(named)} under 70%.`;
+      }
+      if (well.length > 0) {
+        return "You said Getting it, and the topics you have tried are at 70% or above.";
+      }
+      return "You said Getting it. A topic quiz will show how that lines up.";
+    default: {
+      const unreachable: never = confidence;
+      return unreachable;
     }
   }
-  return "Thanks — we saved how you're feeling. You can change it anytime.";
 }
 
 export function bandLabel(band: FeedbackBand): string {
