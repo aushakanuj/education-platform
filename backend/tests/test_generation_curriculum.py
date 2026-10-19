@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import sys
 from collections.abc import Sequence
 from types import SimpleNamespace
 from uuid import UUID, uuid4
@@ -14,9 +15,11 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from education_platform.core.config import get_settings
-from education_platform.modules.academics.models import Subtopic
+from education_platform.modules.academics.models import Subject, Subtopic
 from education_platform.modules.assessments.models import (
     CommonMasteryQuiz,
+    FeedbackSummaryJob,
+    FeedbackSummaryJobStatus,
     Question,
     QuestionDifficulty,
     QuestionItemKind,
@@ -25,7 +28,13 @@ from education_platform.modules.assessments.models import (
     QuizScope,
     QuizVersion,
 )
-from education_platform.modules.auth.models import RoleName, User, UserRole, UserStatus
+from education_platform.modules.auth.models import (
+    RoleName,
+    StudentProfile,
+    User,
+    UserRole,
+    UserStatus,
+)
 from education_platform.modules.auth.security import hash_password
 from education_platform.modules.generation.adk import (
     INSTRUCTIONAL_DESIGNER,
@@ -36,6 +45,7 @@ from education_platform.modules.generation.adk import (
     LESSON_REVIEW_LOOP,
     LESSON_REVIEWER,
     LESSON_WRITER,
+    LIVE_ADK_UNAVAILABLE_MESSAGE,
     MISCONCEPTION_SIMULATOR,
     MISSING_OPENROUTER_MESSAGE,
     NO_INGESTED_CHUNKS_MESSAGE,
@@ -83,11 +93,17 @@ from education_platform.modules.generation.blueprint import (
 from education_platform.modules.generation.curriculum import persist_gate_error
 from education_platform.modules.generation.curriculum_worker import process_curriculum_job_sync
 from education_platform.modules.generation.lesson_checks import check_lesson_quality
-from education_platform.modules.generation.models import CurriculumGenerationJob
+from education_platform.modules.generation.models import (
+    ContentGenerationRun,
+    CurriculumGenerationJob,
+    GenerationJob,
+)
 from education_platform.modules.generation.types import (
     SUBTOPIC_GENERATION_GONE,
+    GenerationJobKind,
     GenerationJobStatus,
     ReviewStatus,
+    RunPhase,
 )
 from education_platform.modules.materials.models import (
     SourceChunk,
@@ -97,6 +113,7 @@ from education_platform.modules.materials.models import (
 )
 from education_platform.modules.materials.seed import POC_INSTITUTION_NAME
 from education_platform.modules.rag.chunking import content_hash
+from education_platform.modules.rag.models import IngestJob, IngestJobStatus
 from education_platform.workers.runner import poll_once
 
 SEEDED_SLUG = "rectangles_squares_properties"
@@ -1015,3 +1032,143 @@ def test_approval_persists_lesson_bank_and_ten_item_quiz(
     assert "correct_option_label" not in serialized
     assert "correct_rationale" not in serialized
     assert "answer_key" not in serialized
+
+
+def test_poll_once_claims_curriculum_job_when_runner_is_omitted(
+    seeded_db: Session, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    seen: list[tuple[UUID, object]] = []
+
+    def _capture(job_id: UUID, *, runner: object = None) -> None:
+        seen.append((job_id, runner))
+
+    monkeypatch.setattr(
+        "education_platform.workers.runner.process_curriculum_job_sync",
+        _capture,
+    )
+    subtopic = _subtopic(seeded_db)
+    job_id = _enqueue_job(seeded_db, subtopic.id).id
+    claimed = poll_once(session=seeded_db)
+    assert claimed == job_id
+    assert seen == [(job_id, None)]
+
+
+def test_poll_once_with_injected_runner_completes_curriculum_job(seeded_db: Session) -> None:
+    subtopic = _subtopic(seeded_db)
+    _attach_ingested_chunks(seeded_db, subtopic.id)
+    job_id = _enqueue_job(seeded_db, subtopic.id).id
+    runner = FakeRunner(_approved_result())
+    claimed = poll_once(session=seeded_db, curriculum_runner=runner)
+    assert claimed == job_id
+    assert runner.calls == 1
+    job = _job_row(seeded_db, job_id)
+    assert job.status is GenerationJobStatus.SUCCEEDED
+    assert job.source_material_version_id is not None
+    assert job.quiz_version_id is not None
+
+
+def test_poll_once_without_openrouter_fails_pending_curriculum_job(seeded_db: Session) -> None:
+    subtopic = _subtopic(seeded_db)
+    _attach_ingested_chunks(seeded_db, subtopic.id)
+    before = seeded_db.scalar(select(func.count()).select_from(QuestionVersion))
+    job_id = _enqueue_job(seeded_db, subtopic.id).id
+    claimed = poll_once(session=seeded_db)
+    assert claimed == job_id
+    job = _job_row(seeded_db, job_id)
+    assert job.status is GenerationJobStatus.FAILED
+    assert job.error == MISSING_OPENROUTER_MESSAGE
+    assert seeded_db.scalar(select(func.count()).select_from(QuestionVersion)) == before
+
+
+def test_earlier_queues_take_priority_over_curriculum(
+    seeded_db: Session, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    handled: list[str] = []
+
+    def _record(kind: str):
+        def _inner(*_args: object, **_kwargs: object) -> None:
+            handled.append(kind)
+
+        return _inner
+
+    monkeypatch.setattr(
+        "education_platform.workers.runner.process_feedback_summary_job_sync",
+        _record("feedback"),
+    )
+    monkeypatch.setattr(
+        "education_platform.workers.runner.process_ingest_job_sync",
+        _record("ingest"),
+    )
+    monkeypatch.setattr(
+        "education_platform.workers.runner.process_generation_job_sync",
+        _record("generation"),
+    )
+    monkeypatch.setattr(
+        "education_platform.workers.runner.process_curriculum_job_sync",
+        _record("curriculum"),
+    )
+
+    subtopic = _subtopic(seeded_db)
+    curriculum_id = _enqueue_job(seeded_db, subtopic.id).id
+    profile = seeded_db.scalar(select(StudentProfile).limit(1))
+    subject = seeded_db.scalar(select(Subject).limit(1))
+    version_id = seeded_db.scalar(select(SourceMaterialVersion.id).limit(1))
+    admin = _admin_user(seeded_db)
+    assert profile is not None
+    assert subject is not None
+    assert version_id is not None
+    feedback = FeedbackSummaryJob(
+        student_id=profile.id,
+        subject_id=subject.id,
+        facts_hash="a" * 64,
+        prompt="Summarize the scores.",
+        template_summary="Template summary.",
+        status=FeedbackSummaryJobStatus.QUEUED,
+    )
+    ingest = IngestJob(
+        source_material_version_id=version_id,
+        status=IngestJobStatus.QUEUED,
+    )
+    run = ContentGenerationRun(
+        topic_id=subtopic.topic_id,
+        submitted_by_user_id=admin.id,
+        title="Priority",
+        phase=RunPhase.GENERATING,
+        target_item_count=60,
+    )
+    seeded_db.add(run)
+    seeded_db.flush()
+    generation = GenerationJob(
+        run_id=run.id,
+        kind=GenerationJobKind.LESSON,
+        status=GenerationJobStatus.QUEUED,
+    )
+    seeded_db.add_all([feedback, ingest, generation])
+    seeded_db.commit()
+
+    assert poll_once(session=seeded_db) == feedback.id
+    assert poll_once(session=seeded_db) == ingest.id
+    assert poll_once(session=seeded_db) == generation.id
+    seeded_db.expire_all()
+    waiting = seeded_db.get(CurriculumGenerationJob, curriculum_id)
+    assert waiting is not None
+    assert waiting.status is GenerationJobStatus.QUEUED
+    assert poll_once(session=seeded_db) == curriculum_id
+    assert handled == ["feedback", "ingest", "generation", "curriculum"]
+
+
+def test_live_runner_import_failure_fails_job_and_returns(
+    seeded_db: Session, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("OPENROUTER_API_KEY", "test-key")
+    get_settings.cache_clear()
+    monkeypatch.setitem(sys.modules, "education_platform.modules.generation.adk_live", None)
+    subtopic = _subtopic(seeded_db)
+    _attach_ingested_chunks(seeded_db, subtopic.id)
+    job_id = _enqueue_job(seeded_db, subtopic.id).id
+    claimed = poll_once(session=seeded_db)
+    assert claimed == job_id
+    job = _job_row(seeded_db, job_id)
+    assert job.status is GenerationJobStatus.FAILED
+    assert job.error is not None
+    assert job.error.startswith(LIVE_ADK_UNAVAILABLE_MESSAGE)

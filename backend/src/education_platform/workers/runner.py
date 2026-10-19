@@ -76,7 +76,10 @@ def poll_once(
     """Claim at most one feedback, ingest, topic-generation, or curriculum job.
 
     Feedback prose is short and student-visible, so it is claimed before a PDF
-    ingest that can hold the worker for a long parse.
+    ingest that can hold the worker for a long parse. Topic generation is next.
+    Curriculum jobs are always claimed after those queues. ``curriculum_runner``
+    is forwarded as-is; ``None`` means ``process_curriculum_job_sync`` resolves
+    the live runner, or fails the job when OpenRouter or google.adk is missing.
     """
     owns_session = session is None
     db = session or _sync_session()
@@ -111,15 +114,14 @@ def poll_once(
                     blind_solver=blind_solver,
                 )
             return generation.job_id
-        if curriculum_runner is not None:
-            curriculum = claim(db, CurriculumGenerationJob)
-            if isinstance(curriculum, Exhausted):
-                fail_exhausted_curriculum_job(db, curriculum.job_id)
-                return curriculum.job_id
-            if isinstance(curriculum, Claimed):
-                with heartbeat(CurriculumGenerationJob, curriculum.job_id):
-                    process_curriculum_job_sync(curriculum.job_id, runner=curriculum_runner)
-                return curriculum.job_id
+        curriculum = claim(db, CurriculumGenerationJob)
+        if isinstance(curriculum, Exhausted):
+            fail_exhausted_curriculum_job(db, curriculum.job_id)
+            return curriculum.job_id
+        if isinstance(curriculum, Claimed):
+            with heartbeat(CurriculumGenerationJob, curriculum.job_id):
+                process_curriculum_job_sync(curriculum.job_id, runner=curriculum_runner)
+            return curriculum.job_id
         return None
     finally:
         if owns_session:
@@ -127,10 +129,11 @@ def poll_once(
 
 
 def run_forever(*, poll_interval_seconds: float = DEFAULT_POLL_INTERVAL_SECONDS) -> None:
-    """Poll feedback summaries, then ingest jobs, then generation jobs."""
+    """Poll feedback summaries, then ingest, then generation, then curriculum jobs."""
     logging.basicConfig(level=logging.INFO)
     logger.info(
-        "Worker started (poll every %.1fs; feedback, then ingest, then generation)",
+        "Worker started (poll every %.1fs; feedback, then ingest, then generation, "
+        "then curriculum)",
         poll_interval_seconds,
     )
     while True:

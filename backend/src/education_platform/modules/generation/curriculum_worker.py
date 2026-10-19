@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session
 from education_platform.core.config import get_settings
 from education_platform.db.session import sync_session
 from education_platform.modules.generation.adk import (
+    LIVE_ADK_UNAVAILABLE_MESSAGE,
     MISSING_OPENROUTER_MESSAGE,
     NO_INGESTED_CHUNKS_MESSAGE,
     CurriculumRunner,
@@ -51,10 +52,15 @@ def _resolve_runner(runner: CurriculumRunner | None) -> CurriculumRunner | str:
         return runner
     if not get_settings().openrouter_configured:
         return MISSING_OPENROUTER_MESSAGE
-    # Live ADK is imported only when a job actually needs the model, so unit tests
-    # that inject a fake CurriculumRunner never construct google.adk agents.
-    from education_platform.modules.generation.adk_live import LiveAdkRunner
-
+    try:
+        # Live ADK is imported only when a job actually needs the model, so unit tests
+        # that inject a fake CurriculumRunner never construct google.adk agents.
+        # A failed import fails this job; it must not escape and stop the worker loop.
+        from education_platform.modules.generation.adk_live import LiveAdkRunner
+    except Exception as exc:
+        logger.exception("Live ADK runner import failed")
+        detail = str(exc).strip() or exc.__class__.__name__
+        return f"{LIVE_ADK_UNAVAILABLE_MESSAGE} ({detail})"
     return LiveAdkRunner()
 
 

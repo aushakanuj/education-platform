@@ -38,6 +38,11 @@ MISSING_OPENROUTER_MESSAGE = (
     "live model; stub quizzes are not written."
 )
 
+LIVE_ADK_UNAVAILABLE_MESSAGE = (
+    "The live curriculum runner could not be imported. google.adk is missing or failed "
+    "to load, so this job was marked failed and the worker kept polling."
+)
+
 REVIEWER_NOT_APPROVED_MESSAGE = (
     "The teacher-reviewer did not approve the draft. Lesson and quiz were not persisted."
 )
