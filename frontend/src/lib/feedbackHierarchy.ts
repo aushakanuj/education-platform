@@ -37,6 +37,15 @@ export function formatScore(value: string | number | null | undefined): string {
   return `${Math.round(number)}%`;
 }
 
+/** Short tile value. The sign is a minus, not a hyphen, so it stays one line. */
+export function formatPointChange(delta: string | number | null | undefined): string | null {
+  const number = scoreNumber(delta);
+  if (number === null) return null;
+  const points = Math.abs(Math.round(number));
+  if (points === 0) return "0 pts";
+  return number > 0 ? `+${points} pts` : `−${points} pts`;
+}
+
 /** One phrase. A missing trend stays blank instead of "declining · -100%". */
 export function formatTrend(
   trend: FeedbackTrend,

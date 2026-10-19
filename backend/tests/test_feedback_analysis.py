@@ -63,11 +63,14 @@ def test_topic_template_names_weak_concepts_and_only_real_links() -> None:
     assert "Comparing decimals (0 of 5 correct)" in draft.text
     assert "Adding and subtracting decimals (2 of 4 correct)" in draft.text
     assert "Place value (" not in draft.text
-    assert f"[Decimals]({_HREF})" in draft.text
-    assert "Slide 2 — Ideas in this topic" in draft.text
+    assert "Focus on" in draft.text
+    assert "Decimals lesson, slide 2" in draft.text
+    assert "Slide 2 —" not in draft.text
+    assert "Review the published" not in draft.text
     assert f"{_HREF}?slide=2" in draft.text
     assert "?slide=1" not in draft.text
     assert draft.text.count("?slide=2") == 1
+    assert "The last attempt dropped 12 points." in draft.text
     assert "22 points remain" in draft.text
     assert "You said Confident, but 1 concept is under 30%; worth a review." in draft.text
     assert "Fractions" not in draft.text
@@ -89,7 +92,7 @@ def test_topic_template_omits_links_when_nothing_is_published() -> None:
             trend_delta=None,
         )
     )
-    assert "Concentrate on" in draft.text
+    assert "Focus on" in draft.text
     assert "/lesson" not in draft.text
     assert "http" not in draft.text
     assert "goal" not in draft.text.lower()
@@ -106,7 +109,8 @@ def test_topic_slide_link_is_omitted_when_the_name_is_not_in_the_lesson() -> Non
         )
     )
     assert "Solid shapes (0 of 5 correct)" in draft.text
-    assert f"[Decimals]({_HREF})" in draft.text
+    assert f"[Decimals lesson]({_HREF})" in draft.text
+    assert "Review the published" not in draft.text
     assert "?slide=" not in draft.text
 
 
@@ -131,13 +135,37 @@ def test_subject_template_stays_on_topics() -> None:
     assert (
         draft.text == "Decimals, Percentages, and Algebra are going well; "
         "focus next on Fractions and Ratios. "
-        "Scores are down 65 points across topics since the previous attempts. "
+        "Decimals dropped 65 points on the last attempt. "
         "You said Confident, but Fractions and Ratios are under 70%."
     )
+    assert "across topics" not in draft.text
     for banned in ("Place value", "Comparing decimals", "Cuboid", "Mensuration"):
         assert banned not in draft.text
     assert "/lesson" not in draft.text
     assert "goals" in draft.prompt
+
+
+def test_subject_trend_averages_only_when_several_topics_moved() -> None:
+    draft = subject_analysis(
+        SubjectContext(
+            subject_name="Mathematics",
+            topics=(
+                ScoredItem("Fractions", Decimal("70"), Decimal("-10")),
+                ScoredItem("Decimals", Decimal("80"), Decimal("-20")),
+                ScoredItem("Algebra", Decimal("90")),
+            ),
+            trend_delta=Decimal("-15"),
+            confidence=None,
+            goals=(),
+            forbidden_names=("Place value",),
+        )
+    )
+    assert (
+        "The average change is down 15 points across the 2 topics with more than one attempt."
+        in draft.text
+    )
+    assert "across every" not in draft.text
+    assert "Place value" not in draft.text
 
 
 def test_overview_template_stays_on_subjects() -> None:
@@ -162,7 +190,8 @@ def test_overview_template_stays_on_subjects() -> None:
         "Social Studies, Arabic, and Mathematics are going well; "
         "English and Science are where to focus."
     )
-    assert "Scores are down 65 points across subjects" in draft.text
+    assert "across subjects" not in draft.text
+    assert "65" not in draft.text
     for banned in ("Fractions", "Decimals", "Algebra", "Place value"):
         assert banned not in draft.text
     assert "You said Confident in Mathematics" not in draft.text
@@ -186,6 +215,42 @@ def test_overview_calibration_names_the_subject_when_the_rating_disagrees() -> N
     assert "You said Confident in Mathematics, but that subject is under 70%." in draft.text
     assert "You said Still learning in Science, but that subject is at 88%." in draft.text
     assert "Algebra" not in draft.text
+
+
+def test_overview_trend_uses_subject_aggregates_and_never_names_topics() -> None:
+    one = overview_analysis(
+        OverviewContext(
+            subjects=(
+                ScoredItem("Mathematics", Decimal("71"), Decimal("-12"), 2),
+                ScoredItem("Science", Decimal("80"), Decimal("-40"), 1),
+            ),
+            ratings=(),
+            forbidden_names=("Decimals", "Fractions"),
+        )
+    )
+    assert (
+        "Mathematics is down 12 points on average across its topics with more than one attempt."
+        in one.text
+    )
+    assert "40" not in one.text
+    assert "Decimals" not in one.text
+    assert "across subjects" not in one.text
+
+    both = overview_analysis(
+        OverviewContext(
+            subjects=(
+                ScoredItem("Mathematics", Decimal("71"), Decimal("-10"), 2),
+                ScoredItem("Science", Decimal("80"), Decimal("20"), 3),
+            ),
+            ratings=(),
+            forbidden_names=("Decimals",),
+        )
+    )
+    assert (
+        "The average change is up 5 points across the 2 subjects with more than one repeated topic."
+        in both.text
+    )
+    assert "Decimals" not in both.text
 
 
 def test_model_text_that_names_the_wrong_level_or_an_unknown_link_is_dropped() -> None:

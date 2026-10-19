@@ -1,5 +1,11 @@
 import type { FeedbackDifficulty, FeedbackTopicDetail } from "../api/types";
-import { bandLabel, formatDuration, formatScore, formatTrend, scoreNumber } from "../lib/feedbackHierarchy";
+import {
+  bandLabel,
+  formatDuration,
+  formatPointChange,
+  formatScore,
+  scoreNumber,
+} from "../lib/feedbackHierarchy";
 
 function countLine(correct: number, answered: number, percent: string | number): string {
   return `${correct} of ${answered} correct, ${Math.round(scoreNumber(percent) ?? 0)}%`;
@@ -22,7 +28,7 @@ function difficultyLabel(level: FeedbackDifficulty): string {
 
 export function ScoreMetrics({ detail }: { detail: FeedbackTopicDetail }) {
   const hasAttempts = detail.attempt_count > 0 && scoreNumber(detail.best_score_percent) !== null;
-  const change = formatTrend(detail.trend, detail.trend_delta);
+  const change = detail.trend === null ? null : formatPointChange(detail.trend_delta);
   const concepts = [...detail.subtopics].sort((left, right) => {
     const leftPercent = scoreNumber(left.percent) ?? 0;
     const rightPercent = scoreNumber(right.percent) ?? 0;

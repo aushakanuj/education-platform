@@ -102,7 +102,7 @@ const subject = {
   trend_delta: "20",
   topics_needing_attention: ["Algebra"],
   summary:
-    "Mensuration is going well. Scores are up 20 points across topics since the previous attempts.",
+    "Mensuration is going well. Mensuration rose 20 points on the last attempt.",
   summary_status: "fallback" as const,
   concepts_mastered: 1,
   concepts_attempted: 2,
@@ -193,7 +193,7 @@ const topic = {
   quiz_id: "quiz-1",
   has_lesson: true,
   summary:
-    "Concentrate on Area of a polygon (1 of 4 correct). Review the published [Mensuration lesson](/subjects/math-1/topics/mensuration/lesson?slide=2).",
+    "Focus on Area of a polygon (1 of 4 correct). It is on [Mensuration lesson, slide 2](/subjects/math-1/topics/mensuration/lesson?slide=2).",
   concepts_mastered: 1,
   concepts_attempted: 2,
   goal: null,
@@ -321,7 +321,8 @@ describe("feedback hierarchy", () => {
     expect(await screen.findByRole("heading", { name: "Mathematics" })).toBeInTheDocument();
     const summary = screen.getByRole("region", { name: "Subject summary" });
     expect(summary).toHaveTextContent("Mensuration is going well");
-    expect(summary).toHaveTextContent("Scores are up 20 points across topics");
+    expect(summary).toHaveTextContent("Mensuration rose 20 points on the last attempt");
+    expect(summary).not.toHaveTextContent("across topics");
     expect(summary).not.toHaveTextContent("Needs attention");
     expect(summary).not.toHaveTextContent("Cuboid");
     expect(summary).not.toHaveTextContent("Area of a polygon");
@@ -356,6 +357,8 @@ describe("feedback hierarchy", () => {
     expect(screen.getByText("Average score")).toBeInTheDocument();
     expect(screen.getByText("64%")).toBeInTheDocument();
     expect(screen.getByText("Since the previous attempt")).toBeInTheDocument();
+    expect(screen.getByText("+20 pts")).toBeInTheDocument();
+    expect(screen.queryByText("Up 20 points since the previous attempt")).not.toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "Past attempts" })).toBeInTheDocument();
     expect(await screen.findByRole("heading", { name: "Performance over time" })).toBeInTheDocument();
     expect(
@@ -406,7 +409,7 @@ describe("feedback hierarchy", () => {
     const topicSummary = screen.getByRole("region", { name: "Topic summary" });
     expect(topicSummary).toHaveTextContent("Area of a polygon (1 of 4 correct)");
     expect(topicSummary).not.toHaveTextContent("Decimals");
-    expect(screen.getByRole("link", { name: "Mensuration lesson" })).toHaveAttribute(
+    expect(screen.getByRole("link", { name: "Mensuration lesson, slide 2" })).toHaveAttribute(
       "href",
       "/subjects/math-1/topics/mensuration/lesson?slide=2",
     );

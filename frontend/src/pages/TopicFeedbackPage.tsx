@@ -9,7 +9,7 @@ import { AttemptBadge, GoalSection, Milestone } from "../components/FeedbackExtr
 import { MarkdownContent } from "../components/MarkdownContent";
 import { PastAttempts } from "../components/PastAttempts";
 import { ScoreMetrics } from "../components/ScoreMetrics";
-import { formatScore, formatTrend } from "../lib/feedbackHierarchy";
+import { formatScore } from "../lib/feedbackHierarchy";
 import { topicHistoryPath } from "../lib/subjectMaterial";
 
 export function TopicFeedbackPage() {
@@ -52,8 +52,6 @@ export function TopicFeedbackPage() {
     setDetail((current) => (current ? { ...current, goal } : current));
   }
 
-  const trend = formatTrend(detail.trend, detail.trend_delta);
-
   return (
     <div className="feedback-view">
       <Crumbs
@@ -83,7 +81,6 @@ export function TopicFeedbackPage() {
             ? "Not attempted"
             : `Best score · latest ${formatScore(detail.latest_score_percent)}`}
         </p>
-        {trend && <p className="feedback-card__trend">{trend}</p>}
         <Milestone mastered={detail.concepts_mastered} attempted={detail.concepts_attempted} />
         <GoalSection
           topicId={detail.topic_id}

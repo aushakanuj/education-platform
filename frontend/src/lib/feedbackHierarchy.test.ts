@@ -6,6 +6,7 @@ import {
   calibrationMessage,
   focusSentence,
   formatDuration,
+  formatPointChange,
   formatScore,
   formatTrend,
   momentumGain,
@@ -14,6 +15,13 @@ import {
 describe("feedback hierarchy display", () => {
   it("says not attempted instead of 0%", () => {
     expect(formatScore(null)).toBe("Not attempted");
+  });
+
+  it("turns a topic change into a one-line tile value", () => {
+    expect(formatPointChange("-65.09")).toBe("−65 pts");
+    expect(formatPointChange("20")).toBe("+20 pts");
+    expect(formatPointChange("0")).toBe("0 pts");
+    expect(formatPointChange(null)).toBeNull();
   });
 
   it("does not print a signed percent next to the trend word", () => {

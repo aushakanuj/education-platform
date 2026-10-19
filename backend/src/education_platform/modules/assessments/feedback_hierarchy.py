@@ -813,6 +813,7 @@ async def get_overview(session: AsyncSession, scope: Scope) -> FeedbackOverview:
     goals = await goals_for_topics(session, student_id, topic_ids)
     ratings = await _confidences(session, student_id, [row.subject_id for row in offerings])
     cards: list[FeedbackSubjectCard] = []
+    scored_subjects: list[ScoredItem] = []
     for offering in offerings:
         subject_topics = _subject_topics(offering, topics)
         strengths = _subject_concepts(subject_topics, by_topic)
@@ -829,12 +830,17 @@ async def get_overview(session: AsyncSession, scope: Scope) -> FeedbackOverview:
                 achievement_tier(subject.score_percent, strengths),
             )
         )
+        scored_subjects.append(
+            ScoredItem(
+                offering.subject_name,
+                subject.score_percent,
+                subject.trend_delta,
+                sum(1 for topic in subject_topics if rollups[topic.id].trend_delta is not None),
+            )
+        )
     draft = overview_analysis(
         OverviewContext(
-            subjects=tuple(
-                ScoredItem(card.subject_name, card.score_percent, card.trend_delta)
-                for card in cards
-            ),
+            subjects=tuple(scored_subjects),
             ratings=tuple(
                 (card.subject_name, ratings.get(card.subject_id), card.score_percent)
                 for card in cards

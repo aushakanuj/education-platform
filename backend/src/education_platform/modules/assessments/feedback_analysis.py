@@ -38,11 +38,16 @@ AnalysisLevel = Literal["topic", "subject", "overview"]
 
 @dataclass(frozen=True, slots=True)
 class ScoredItem:
-    """One row at the level being described: a concept is not a row here."""
+    """One row at the level being described: a concept is not a row here.
+
+    ``trend_samples`` is how many child rows produced ``trend_delta``. A subject
+    trend is an aggregate only when that count is at least 2.
+    """
 
     name: str
     percent: Decimal | None
     trend_delta: Decimal | None = None
+    trend_samples: int = 0
 
 
 @dataclass(frozen=True, slots=True)
@@ -127,8 +132,8 @@ def topic_analysis(context: TopicContext) -> AnalysisDraft:
     links = _topic_links(context)
     text = _compose(
         _topic_focus(context),
+        _study_sentence(links, context.topic_name),
         _topic_trend(context.trend_delta),
-        _study_sentence(links),
         _goal_sentence(context.goal_target, context.best_percent),
         _topic_calibration(context.confidence, context.concepts),
     )
@@ -171,7 +176,7 @@ def subject_analysis(context: SubjectContext) -> AnalysisDraft:
     text = _compose(
         _performance(well, focus, focus_phrase="next")
         or f"Take a topic quiz in {context.subject_name} to see where you stand.",
-        _trend_sentence(context.trend_delta, "across topics since the previous attempts"),
+        _subject_trend(context.topics),
         _subject_calibration(context.confidence, context.topics),
     )
     guard = _guard(
@@ -190,7 +195,11 @@ def subject_analysis(context: SubjectContext) -> AnalysisDraft:
             }
             for topic in context.topics
         ],
-        "trend_delta": _number(context.trend_delta),
+        "repeated_topics": [
+            {"name": topic.name, "change": _number(topic.trend_delta)}
+            for topic in context.topics
+            if topic.trend_delta is not None
+        ],
         "self_rating": _confidence_label(context.confidence),
         "goals": [
             {
@@ -204,7 +213,9 @@ def subject_analysis(context: SubjectContext) -> AnalysisDraft:
     rules = (
         "Stay at topic level. Say which topics are going well and which to focus on next. "
         "Do not name concepts or subtopics. Do not include any link or URL. "
-        "Mention the trend across topics when a trend is present. "
+        "If one topic has a change since its previous attempt, name that topic and the points. "
+        "If two or more topics have a change, give the average and say how many topics it covers. "
+        "Do not describe one topic's change as a change across every topic. "
         "Calibrate the self-rating using topics."
     )
     return AnalysisDraft(text, _prompt("subject", rules, facts, text, guard), guard)
@@ -213,12 +224,10 @@ def subject_analysis(context: SubjectContext) -> AnalysisDraft:
 def overview_analysis(context: OverviewContext) -> AnalysisDraft:
     """Subject-level paragraph. Topic names stay in the guard, not the prose."""
     well, focus = _split(context.subjects)
-    deltas = [item.trend_delta for item in context.subjects if item.trend_delta is not None]
-    overall = None if not deltas else (sum(deltas, Decimal("0")) / Decimal(len(deltas)))
     text = _compose(
         _performance(well, focus, focus_phrase="where")
         or "Take a topic quiz to see where you stand across subjects.",
-        _trend_sentence(overall, "across subjects since the previous attempts"),
+        _overview_trend(context.subjects),
         _overview_calibration(context.ratings),
     )
     guard = _guard(
@@ -232,7 +241,10 @@ def overview_analysis(context: OverviewContext) -> AnalysisDraft:
             {
                 "name": subject.name,
                 "percent": _number(subject.percent),
-                "trend_delta": _number(subject.trend_delta),
+                "aggregate_change": _number(subject.trend_delta)
+                if subject.trend_samples >= 2
+                else None,
+                "topics_in_that_average": subject.trend_samples,
             }
             for subject in context.subjects
         ],
@@ -249,7 +261,9 @@ def overview_analysis(context: OverviewContext) -> AnalysisDraft:
     rules = (
         "Stay at subject level. Say which subjects are going well and which is where to focus. "
         "Do not name topics or concepts. Do not include any link or URL. "
-        "Mention overall momentum when a trend is present. "
+        "Mention momentum only from aggregate_change, which is already a mean of two or more "
+        "topics. If that field is null, leave momentum out. Never describe one topic's change "
+        "as a change across subjects. "
         "Calibrate self-ratings using subject names only."
     )
     return AnalysisDraft(text, _prompt("overview", rules, facts, text, guard), guard)
@@ -276,7 +290,7 @@ def accept_model_text(model_text: str, template: str, prompt: str) -> tuple[str,
 def _topic_links(context: TopicContext) -> tuple[StudyLink, ...]:
     if not context.lesson_href or not context.lesson_markdown:
         return _unique_links(context.extra_links)
-    label = _markdown_label(context.lesson_title or f"{context.topic_name} lesson")
+    label = _markdown_label(f"{context.topic_name} lesson")
     links: list[StudyLink] = [StudyLink(label, context.lesson_href)]
     weak = _weak_concepts(context.concepts)
     slides = parse_slides(context.lesson_markdown)
@@ -287,9 +301,9 @@ def _topic_links(context: TopicContext) -> tuple[StudyLink, ...]:
             if _mentions(haystack, concept.name):
                 grouped.setdefault((slide.number, slide.title), []).append(concept.name)
                 break
-    for (number, title), names in grouped.items():
+    for (number, _title), names in grouped.items():
         href = f"{context.lesson_href}?slide={number}"
-        slide_label = _markdown_label(f"Slide {number} — {title}")
+        slide_label = _markdown_label(f"{context.topic_name} lesson, slide {number}")
         links.append(StudyLink(slide_label, href, tuple(names)))
     links.extend(context.extra_links)
     return _unique_links(tuple(links))
@@ -306,22 +320,33 @@ def _unique_links(links: tuple[StudyLink, ...]) -> tuple[StudyLink, ...]:
     return tuple(kept)
 
 
-def _study_sentence(links: tuple[StudyLink, ...]) -> str | None:
+def _study_sentence(links: tuple[StudyLink, ...], topic_name: str) -> str | None:
     if not links:
         return None
-    lesson = next((link for link in links if not link.concept_names), None)
+    lesson = next((link for link in links if link.href and "?slide=" not in link.href), None)
+    slides = [link for link in links if "?slide=" in link.href]
     parts: list[str] = []
-    if lesson is not None:
-        parts.append(f"Review the published {_md(lesson)}.")
+    if len(slides) == 1:
+        covered = slides[0].concept_names
+        if len(covered) <= 1:
+            parts.append(f"It is on {_md(slides[0])}.")
+        elif len(covered) == 2:
+            parts.append(f"Both are on {_md(slides[0])}.")
+        else:
+            parts.append(f"All {len(covered)} are on {_md(slides[0])}.")
+    else:
+        for link in slides:
+            names = _join(list(link.concept_names))
+            verb = "is" if len(link.concept_names) == 1 else "are"
+            parts.append(f"{names} {verb} on {_md(link)}.")
+    if not slides and lesson is not None and topic_name:
+        parts.append(f"Review the {_md(lesson)}.")
     for link in links:
-        if not link.concept_names:
-            if lesson is not None and link.href == lesson.href:
-                continue
-            parts.append(f"There is also a published {_md(link)}.")
+        if link in slides or (lesson is not None and link.href == lesson.href):
             continue
-        names = _join(list(link.concept_names))
-        verb = "is" if len(link.concept_names) == 1 else "are"
-        parts.append(f"{names} {verb} covered on {_md(link)}.")
+        parts.append(f"There is also a published {_md(link)}.")
+    if not parts:
+        return None
     return " ".join(parts)
 
 
@@ -332,7 +357,7 @@ def _topic_focus(context: TopicContext) -> str:
             f"{concept.name} ({concept.correct_count} of {concept.answered_count} correct)"
             for concept in weak
         ]
-        return f"Concentrate on {_join(bits)}."
+        return f"Focus on {_join(bits)}."
     if context.concepts:
         best = max(context.concepts, key=lambda concept: (concept.percent, concept.name))
         return (
@@ -353,10 +378,68 @@ def _topic_trend(delta: Decimal | None) -> str | None:
         return None
     points = _points(delta)
     if points == 0:
-        return "The latest attempt matches the one before."
+        return "The last attempt matches the one before."
     if delta > 0:
-        return f"The latest attempt is up {points} points from the one before."
-    return f"The latest attempt is down {points} points from the one before."
+        return f"The last attempt rose {points} points."
+    return f"The last attempt dropped {points} points."
+
+
+def _subject_trend(topics: tuple[ScoredItem, ...]) -> str | None:
+    """Name a single mover. Average only when two or more topics actually moved."""
+    moved = [topic for topic in topics if topic.trend_delta is not None]
+    if not moved:
+        return None
+    if len(moved) == 1:
+        topic = moved[0]
+        delta = topic.trend_delta
+        assert delta is not None
+        points = _points(delta)
+        if points == 0:
+            return f"{topic.name} matched its previous attempt."
+        verb = "rose" if delta > 0 else "dropped"
+        return f"{topic.name} {verb} {points} points on the last attempt."
+    deltas = [topic.trend_delta for topic in moved if topic.trend_delta is not None]
+    return _average_change(deltas, f"the {len(moved)} topics with more than one attempt")
+
+
+def _overview_trend(subjects: tuple[ScoredItem, ...]) -> str | None:
+    """Use subject averages that already combine two or more topics. Otherwise stay quiet."""
+    aggregates = [
+        subject
+        for subject in subjects
+        if subject.trend_delta is not None and subject.trend_samples >= 2
+    ]
+    if not aggregates:
+        return None
+    if len(aggregates) == 1:
+        subject = aggregates[0]
+        delta = subject.trend_delta
+        assert delta is not None
+        points = _points(delta)
+        if points == 0:
+            return (
+                f"{subject.name} is unchanged on average across its topics "
+                "with more than one attempt."
+            )
+        direction = "up" if delta > 0 else "down"
+        return (
+            f"{subject.name} is {direction} {points} points on average across its topics "
+            "with more than one attempt."
+        )
+    deltas = [subject.trend_delta for subject in aggregates if subject.trend_delta is not None]
+    return _average_change(
+        deltas,
+        f"the {len(aggregates)} subjects with more than one repeated topic",
+    )
+
+
+def _average_change(deltas: list[Decimal], covered: str) -> str:
+    mean = sum(deltas, Decimal("0")) / Decimal(len(deltas))
+    points = _points(mean)
+    if points == 0:
+        return f"The average change is 0 points across {covered}."
+    direction = "up" if mean > 0 else "down"
+    return f"The average change is {direction} {points} points across {covered}."
 
 
 def _goal_sentence(target: Decimal | None, best: Decimal | None) -> str | None:
@@ -479,16 +562,6 @@ def _performance(
     if focus:
         return f"{_join(focus)} {_are(focus)} where to focus."
     return ""
-
-
-def _trend_sentence(delta: Decimal | None, across: str) -> str | None:
-    if delta is None:
-        return None
-    points = _points(delta)
-    if points == 0:
-        return f"Scores are unchanged {across}."
-    direction = "up" if delta > 0 else "down"
-    return f"Scores are {direction} {points} points {across}."
 
 
 def _prompt(
