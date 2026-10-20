@@ -1,0 +1,81 @@
+# HIGH and CRITICAL allowlist for the base-image scan in .github/workflows/ci.yml.
+# Trivy 0.76.0 on 2026-10-20. Each CVE below has no FixedVersion in
+# python:3.12-slim-bookworm or ghcr.io/cloudnative-pg/postgresql:16.15-standard-trixie.
+# Do not add a CVE that already has a fixed package in any scanned image.
+# nginx:1.27-alpine and cloudflare/cloudflared:2026.10.1 findings are not listed:
+# those images publish a fixed package, so the gate must keep failing on them.
+
+# zlib zipOpenNewFileInZip4_64, shipped inside zlib1g. No patched bookworm package.
+CVE-2023-45853
+
+# ncurses buffer overflow. No patched package in bookworm or the CNPG trixie image.
+CVE-2025-69720
+
+# SQLite integer overflow in libsqlite3-0. No patched bookworm package.
+CVE-2025-7458
+
+# pgvector IVFFLAT out-of-bounds write in the CNPG image. No patched package.
+CVE-2026-103484
+
+# SQLite FTS5 code execution. No patched bookworm package.
+CVE-2026-11822
+
+# SQLite heap overflow. No patched bookworm package.
+CVE-2026-11824
+
+# systemd-homed local privilege escalation in libsystemd0/libudev1. No patched package.
+CVE-2026-16742
+
+# GnuPG tpm2daemon overflow in the CNPG image. No patched package.
+CVE-2026-24882
+
+# gzip LZH decompression overflow. No patched bookworm package.
+CVE-2026-41992
+
+# util-linux mount TOCTOU in the python base image. No patched bookworm package.
+CVE-2026-53613
+
+# util-linux partition metadata integer overflow. No patched bookworm package.
+CVE-2026-53615
+
+# libacl symlink traversal. No patched package in bookworm or the CNPG image.
+CVE-2026-54369
+
+# libxml2 denial of service in the CNPG image. No patched package.
+CVE-2026-6653
+
+# libxml2 double-free in the CNPG image. No patched package.
+CVE-2026-74860
+
+# util-linux failed mount helper in the CNPG image. No patched package.
+CVE-2026-76642
+
+# util-linux nsenter cgroup leak in the CNPG image. No patched package.
+CVE-2026-78408
+
+# util-linux X-mount.subdir escape in the CNPG image. No patched package.
+CVE-2026-78409
+
+# util-linux restricted bind-mount escape in the CNPG image. No patched package.
+CVE-2026-78410
+
+# libxml2 heap overflow in the CNPG image. No patched package.
+CVE-2026-86138
+
+# libxml2 integer overflow in xmlURIEscapeStr. No patched package.
+CVE-2026-86139
+
+# libxml2 stack overflow in the CNPG image. No patched package.
+CVE-2026-86140
+
+# libxml2 xpointer heap overflow. No patched package.
+CVE-2026-86142
+
+# libxml2 write-callback integer overflow. No patched package.
+CVE-2026-86143
+
+# libxml2 URI handling. No patched package.
+CVE-2026-86144
+
+# perl Archive::Tar header denial of service. No patched package in bookworm or trixie.
+CVE-2026-9538
