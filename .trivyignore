@@ -86,4 +86,5 @@ CVE-2026-9538
 # python:3.12.15-slim-bookworm are the same digest
 # sha256:34386ef0cb081344d7ec1c103ba398e6e9f64e9ab3a1509accc92a4e24a07258
 # and still ship 3.0.22-1~deb12u1.
+# review-by 2026-11-19: drop once bookworm ships a fixed openssl/libssl3
 CVE-2026-84782
