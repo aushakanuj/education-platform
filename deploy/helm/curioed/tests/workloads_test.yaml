@@ -168,8 +168,11 @@ tests:
           path: spec.replicas
           value: 1
       - equal:
+          path: spec.strategy.type
+          value: Recreate
+      - equal:
           path: spec.template.spec.terminationGracePeriodSeconds
-          value: 300
+          value: 40
       - isNull:
           path: spec.template.spec.containers[0].livenessProbe
       - isNull:

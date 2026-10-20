@@ -106,7 +106,7 @@ tests:
           path: spec.template.spec.containers[0].env
           content:
             name: TEXT_TO_SQL_DB_POOL_SIZE
-      - greaterOrEqual:
+      - equal:
           path: spec.template.spec.terminationGracePeriodSeconds
           value: 40
   - it: prod sets every api pool env and does not inherit app defaults
@@ -173,9 +173,9 @@ tests:
           path: spec.template.spec.containers[0].env
           content:
             name: TEXT_TO_SQL_DB_POOL_SIZE
-      - greaterOrEqual:
+      - equal:
           path: spec.template.spec.terminationGracePeriodSeconds
-          value: 40
+          value: 600
   - it: prod llm worker uses grace 25 when it is turned on
     values:
       - ../values-prod.yaml
@@ -203,7 +203,7 @@ tests:
           content:
             name: WORKER_SHUTDOWN_GRACE_SECONDS
             value: "25"
-      - greaterOrEqual:
+      - equal:
           path: spec.template.spec.terminationGracePeriodSeconds
           value: 40
   - it: loadtest sets every api pool env and does not inherit app defaults
@@ -268,9 +268,9 @@ tests:
           content:
             name: WORKER_SHUTDOWN_GRACE_SECONDS
             value: "570"
-      - greaterOrEqual:
+      - equal:
           path: spec.template.spec.terminationGracePeriodSeconds
-          value: 40
+          value: 600
   - it: loadtest llm worker uses grace 25 if it is enabled
     values:
       - ../values-loadtest.yaml
@@ -298,6 +298,6 @@ tests:
           content:
             name: WORKER_SHUTDOWN_GRACE_SECONDS
             value: "25"
-      - greaterOrEqual:
+      - equal:
           path: spec.template.spec.terminationGracePeriodSeconds
           value: 40

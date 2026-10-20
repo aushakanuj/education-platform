@@ -220,8 +220,17 @@ if ! printf '%s\n' "$seed_on" | grep -q 'name: wait-for-db'; then
   echo "curriculum seed is missing the database wait" >&2
   exit 1
 fi
-if ! printf '%s\n' "$seed_on" | grep -q 'postgres:16.10-bookworm'; then
-  echo "database wait image is not the pinned postgres tag" >&2
+if ! printf '%s\n' "$seed_on" | grep -q 'ghcr.io/cloudnative-pg/postgresql:16.15-standard-trixie'; then
+  echo "database wait image is not the pinned CNPG trixie tag" >&2
+  exit 1
+fi
+if with_ci_tags template curioed "${chart}" --namespace curioed --set databaseWait.image.tag=latest >"${out}.latest" 2>&1; then
+  echo "latest database wait tag was accepted" >&2
+  exit 1
+fi
+if ! grep -q 'databaseWait.image.tag must be a pinned tag' "${out}.latest"; then
+  echo "latest database wait tag failed for the wrong reason" >&2
+  cat "${out}.latest" >&2
   exit 1
 fi
 if ! printf '%s\n' "$seed_on" | grep -q 'backoffLimit: 1'; then
@@ -307,7 +316,7 @@ for doc in docs:
 if len(matches) != 1:
     raise SystemExit(f"workers.llm.enabled=true should render one LLM worker, found {len(matches)}")
 doc = matches[0]
-for snippet in ("replicas: 1", "memory: 1.5Gi", "terminationGracePeriodSeconds: 300"):
+for snippet in ("replicas: 1", "memory: 1.5Gi", "terminationGracePeriodSeconds: 40", "strategy:\n    type: Recreate"):
     if snippet not in doc:
         raise SystemExit(f"enabled LLM worker is missing {snippet}")
 if "livenessProbe:" in doc or "readinessProbe:" in doc or "db_ping" in doc:

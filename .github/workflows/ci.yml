@@ -110,9 +110,15 @@ jobs:
           version: v0.76.0
       - name: Scan base images
         run: |
-          trivy image --exit-code 1 --severity HIGH,CRITICAL \
-            --ignorefile .trivyignore \
+          # Trivy 0.76 accepts one image per invocation.
+          set -eu
+          for image in \
             python:3.12-slim-bookworm \
             nginx:1.27-alpine \
             cloudflare/cloudflared:2026.10.1 \
             ghcr.io/cloudnative-pg/postgresql:16.15-standard-trixie
+          do
+            trivy image --scanners vuln --exit-code 1 --severity HIGH,CRITICAL \
+              --ignorefile .trivyignore \
+              "$image"
+          done

@@ -12,8 +12,10 @@ spec:
   selector:
     matchLabels:
       {{- include "curioed.selectorLabels" (dict "root" . "component" "worker-docling") | nindent 6 }}
+  # Recreate so the old and new 3Gi pods never run together on one node.
   strategy:
     type: Recreate
+  progressDeadlineSeconds: {{ .Values.workerDocling.progressDeadlineSeconds }}
   template:
     metadata:
       labels:

@@ -138,9 +138,9 @@ config:
 # keep api maxReplicas at 4 until that image includes #200.
 # No PgBouncer. LISTEN needs a direct connection.
 # Workers do not open the text-to-SQL pool. The llm worker uses
-# WORKER_SHUTDOWN_GRACE_SECONDS 25 and a pod grace of at least 40.
-# Docling keeps terminationGracePeriodSeconds 600 and
-# WORKER_SHUTDOWN_GRACE_SECONDS 570.
+# WORKER_SHUTDOWN_GRACE_SECONDS 25 and terminationGracePeriodSeconds 40.
+# Docling, the prod all-queue worker, keeps 600 and 570. CD deploys on
+# every merge, and a 25s grace would requeue a long ingest on every deploy.
 dbPool:
   api:
     size: 5
@@ -159,11 +159,13 @@ dbPool:
 revisionHistoryLimit: 3
 
 # pg_isready initContainer on the migrate hook and the curriculum seed Job.
-# The tag is pinned. latest is rejected.
+# Same image the prod CNPG cluster runs, and the image the CI scan already
+# covers. The tag is pinned. latest and an empty tag fail the render.
+# The initContainer uses that workload's container securityContext.
 databaseWait:
   image:
-    repository: postgres
-    tag: "16.10-bookworm"
+    repository: ghcr.io/cloudnative-pg/postgresql
+    tag: "16.15-standard-trixie"
   timeoutSeconds: 120
 
 # Shared hardening. runAsNonRoot, runAsUser, runAsGroup, and fsGroup are set
@@ -390,12 +392,16 @@ workerDocling:
     runAsGroup: null
     fsGroup: null
     readOnlyRootFilesystem: false
-  # This is the compose `worker`: python -m education_platform.workers,
-  # same volumes and app env, no db_ping healthcheck. It drains every queue
-  # until WORKER_QUEUES exists. 600s covers a long ingest.
-  # 570 is the pod grace minus 30, and stays under terminationGracePeriodSeconds.
+  # This is the compose `worker` and the prod all-queue worker:
+  # python -m education_platform.workers. It drains every queue until
+  # WORKER_QUEUES exists. CD deploys on every merge, so the pod grace stays
+  # 600. A 25s grace would requeue a long ingest on every deploy.
+  # 570 is that grace minus 30. progressDeadlineSeconds is 900, matching
+  # helm --timeout 15m. The Kubernetes default of 600 would expire as the
+  # old pod finishes draining.
   terminationGracePeriodSeconds: 600
   shutdownGraceSeconds: 570
+  progressDeadlineSeconds: 900
   resources:
     requests:
       cpu: "2"
@@ -418,11 +424,11 @@ workers:
       runAsGroup: null
       fsGroup: null
       readOnlyRootFilesystem: false
-    # Off in prod until WORKER_QUEUES exists. Same all-queue command as
-    # docling, so a Docling job claimed here can exceed this limit.
-    # Shutdown grace stays 25. Pod grace stays at least 40.
-    terminationGracePeriodSeconds: 300
+    # Off in prod. Load-test can turn it on. Shutdown grace is 25 and the
+    # pod grace is 40. Recreate, same as docling, so two pods never overlap.
+    terminationGracePeriodSeconds: 40
     shutdownGraceSeconds: 25
+    progressDeadlineSeconds: 900
     resources:
       requests:
         cpu: 100m

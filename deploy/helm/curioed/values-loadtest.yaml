@@ -79,6 +79,9 @@ workerDocling:
 workers:
   llm:
     enabled: false
+    # Same 25s shutdown grace and 40s pod grace as the chart default.
+    terminationGracePeriodSeconds: 40
+    shutdownGraceSeconds: 25
 
 migrate:
   enabled: false

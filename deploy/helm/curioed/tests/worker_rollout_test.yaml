@@ -1,0 +1,120 @@
+suite: worker rollout does not overlap pods
+templates:
+  - worker-docling-deployment.yaml
+  - worker-llm-deployment.yaml
+set:
+  api.image.tag: ci
+  web.image.tag: ci
+release:
+  name: curioed
+  namespace: curioed
+tests:
+  - it: the all-queue docling worker recreates and keeps 600/570
+    template: worker-docling-deployment.yaml
+    asserts:
+      - equal:
+          path: spec.strategy.type
+          value: Recreate
+      - equal:
+          path: spec.progressDeadlineSeconds
+          value: 900
+      - equal:
+          path: spec.template.spec.terminationGracePeriodSeconds
+          value: 600
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: WORKER_SHUTDOWN_GRACE_SECONDS
+            value: "570"
+  - it: the llm worker recreates and uses 40/25
+    template: worker-llm-deployment.yaml
+    set:
+      workers.llm.enabled: true
+    asserts:
+      - equal:
+          path: spec.strategy.type
+          value: Recreate
+      - equal:
+          path: spec.progressDeadlineSeconds
+          value: 900
+      - equal:
+          path: spec.template.spec.terminationGracePeriodSeconds
+          value: 40
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: WORKER_SHUTDOWN_GRACE_SECONDS
+            value: "25"
+  - it: prod docling is the all-queue worker at 600/570
+    values:
+      - ../values-prod.yaml
+    template: worker-docling-deployment.yaml
+    asserts:
+      - equal:
+          path: spec.strategy.type
+          value: Recreate
+      - equal:
+          path: spec.progressDeadlineSeconds
+          value: 900
+      - equal:
+          path: spec.template.spec.terminationGracePeriodSeconds
+          value: 600
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: WORKER_SHUTDOWN_GRACE_SECONDS
+            value: "570"
+  - it: prod llm worker recreates at 40/25 when enabled
+    values:
+      - ../values-prod.yaml
+    template: worker-llm-deployment.yaml
+    set:
+      workers.llm.enabled: true
+    asserts:
+      - equal:
+          path: spec.strategy.type
+          value: Recreate
+      - equal:
+          path: spec.template.spec.terminationGracePeriodSeconds
+          value: 40
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: WORKER_SHUTDOWN_GRACE_SECONDS
+            value: "25"
+  - it: loadtest docling recreates at 600/570 when enabled
+    values:
+      - ../values-loadtest.yaml
+    template: worker-docling-deployment.yaml
+    set:
+      workerDocling.enabled: true
+    asserts:
+      - equal:
+          path: spec.strategy.type
+          value: Recreate
+      - equal:
+          path: spec.template.spec.terminationGracePeriodSeconds
+          value: 600
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: WORKER_SHUTDOWN_GRACE_SECONDS
+            value: "570"
+  - it: loadtest llm worker recreates at 40/25 when enabled
+    values:
+      - ../values-loadtest.yaml
+    template: worker-llm-deployment.yaml
+    set:
+      workers.llm.enabled: true
+    asserts:
+      - equal:
+          path: spec.strategy.type
+          value: Recreate
+      - equal:
+          path: spec.template.spec.terminationGracePeriodSeconds
+          value: 40
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: WORKER_SHUTDOWN_GRACE_SECONDS
+            value: "25"

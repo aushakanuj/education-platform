@@ -71,6 +71,7 @@ echo "Importing images into k3s"
 docker save "curioed-api:${sha}" "curioed-web:${sha}" | sudo k3s ctr images import -
 
 echo "Helm upgrade ${release} in ${namespace}"
+# Helm's default --timeout is 5m. 15m covers the docling worker's 600s drain.
 helm upgrade --install "${release}" deploy/helm/curioed \
   --namespace "${namespace}" \
   --create-namespace \

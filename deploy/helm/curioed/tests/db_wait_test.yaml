@@ -37,7 +37,7 @@ tests:
           value: wait-for-db
       - equal:
           path: spec.template.spec.initContainers[0].image
-          value: postgres:16.10-bookworm
+          value: ghcr.io/cloudnative-pg/postgresql:16.15-standard-trixie
       - matchRegex:
           path: spec.template.spec.initContainers[0].args[0]
           pattern: pg_isready -h "\$\{POSTGRES_HOST\}" -p 5432
@@ -51,7 +51,7 @@ tests:
           value: wait-for-db
       - equal:
           path: spec.template.spec.initContainers[0].image
-          value: postgres:16.10-bookworm
+          value: ghcr.io/cloudnative-pg/postgresql:16.15-standard-trixie
       - equal:
           path: spec.template.spec.containers[0].securityContext.runAsNonRoot
           value: false

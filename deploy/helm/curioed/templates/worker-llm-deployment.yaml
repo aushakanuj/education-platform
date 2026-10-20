@@ -12,6 +12,11 @@ spec:
   selector:
     matchLabels:
       {{- include "curioed.selectorLabels" (dict "root" . "component" "worker-llm") | nindent 6 }}
+  # Recreate so an old and a new pod never overlap. RollingUpdate's default
+  # surge would schedule both during a deploy.
+  strategy:
+    type: Recreate
+  progressDeadlineSeconds: {{ .Values.workers.llm.progressDeadlineSeconds }}
   template:
     metadata:
       labels:
