@@ -36,7 +36,7 @@ kubectl label namespace curioed \
 | web | false | unset | `nginx:1.31.7-alpine-slim` has no `USER` and listens on port 80. `CHOWN`, `SETUID`, `SETGID`, and `NET_BIND_SERVICE` are added back. |
 | llm-mock | false | unset | `python:3.12.15-slim-bookworm` image config User is empty. |
 | cloudflared | true | 65532 | `cloudflare/cloudflared:2026.10.2` image config User is `65532:65532`. |
-| k6 | true | 12345 | `grafana/k6:2.3.0` image config User is 12345. |
+| k6 | true | 12345 | `grafana/k6:master` from 2026-10-20, pinned by digest. Image config User is 12345. |
 | CNPG | not set by this chart | 26 via the operator | Image config User is 26. The operator sets `runAsNonRoot` and `runAsUser`. The chart does not override that. |
 
 Other defaults: `allowPrivilegeEscalation: false`, capabilities `drop: [ALL]`, `seccompProfile: RuntimeDefault`. `readOnlyRootFilesystem` stays false. The API Hugging Face cache, uploads, and inductor cache are already volumes. Nginx still writes under `/var` when the flag is on, via the emptyDirs above.
@@ -204,7 +204,7 @@ API_URL=http://192.0.2.10:30080 WEB_URL=http://192.0.2.10:30080 HOST=curioed.onl
   k6 run deploy/loadtest/k6-api.js
 ```
 
-In cluster, `values-loadtest.yaml` runs the same script from a ConfigMap in a Job capped at 2 CPU and 1Gi, image `grafana/k6:2.3.0`. `API_URL` and `WEB_URL` are the in-cluster Service URLs.
+In cluster, `values-loadtest.yaml` runs the same script from a ConfigMap in a Job capped at 2 CPU and 1Gi, image `grafana/k6:master@sha256:2ae541d19310c97aa5b3d633b8ff6763833cc657617a83a52110eb73b607b46e`. `API_URL` and `WEB_URL` are the in-cluster Service URLs.
 
 `deploy/loadtest/collect.sh` appends a CSV every 5 seconds: HPA current and desired replicas, `kubectl top`, MemAvailable from `/proc/meminfo`, `pg_stat_activity` counts by state, and p50/p95/p99 from the k6 summary when the Job has printed one. Below 3 GiB MemAvailable, or if `PROD_HEALTH_URL` fails, it deletes the k6 Job and exits non-zero.
 

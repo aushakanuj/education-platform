@@ -157,6 +157,9 @@ tests:
       - equal:
           path: spec.template.spec.containers[0].securityContext.runAsUser
           value: 12345
+      - equal:
+          path: spec.template.spec.containers[0].image
+          value: grafana/k6:master@sha256:2ae541d19310c97aa5b3d633b8ff6763833cc657617a83a52110eb73b607b46e
   - it: renders the llm worker without probes when enabled
     template: worker-llm-deployment.yaml
     set:

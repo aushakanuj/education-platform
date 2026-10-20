@@ -17,7 +17,7 @@ for required in \
   python:3.12-slim-bookworm \
   ghcr.io/cloudnative-pg/postgresql:16.15-standard-trixie \
   python:3.12.15-slim-bookworm \
-  grafana/k6:2.3.0 \
+  grafana/k6:master@sha256:2ae541d19310c97aa5b3d633b8ff6763833cc657617a83a52110eb73b607b46e \
   cloudflare/cloudflared:2026.10.2
 do
   if ! printf '%s\n' "${images}" | grep -qx "${required}"; then

@@ -700,10 +700,11 @@ demoData:
 loadtest:
   k6:
     enabled: false
-    image: grafana/k6:2.3.0
-    # grafana/k6:2.3.0 image config User is 12345. 0.57.0 and 1.8.2 have
-    # more fixable HIGH findings. 2.3.0 is the newest pinned release and
-    # still has fixable HIGH findings; there is no newer release tag.
+    # Image config User is 12345 on amd64 and arm64. Release 2.3.0 still
+    # has fixable HIGH findings. The master build from 2026-10-20
+    # (alpine 3.24.2) is clean under Trivy 0.76.0. The digest pins that
+    # build; the master tag itself moves.
+    image: "grafana/k6:master@sha256:2ae541d19310c97aa5b3d633b8ff6763833cc657617a83a52110eb73b607b46e"
     securityContext:
       runAsNonRoot: true
       runAsUser: 12345
