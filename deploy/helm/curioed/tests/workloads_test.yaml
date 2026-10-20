@@ -159,7 +159,7 @@ tests:
           value: 12345
       - equal:
           path: spec.template.spec.containers[0].image
-          value: grafana/k6:master@sha256:2ae541d19310c97aa5b3d633b8ff6763833cc657617a83a52110eb73b607b46e
+          value: grafana/k6:2.3.0@sha256:9c2dee7f8ed74d317e4027c06a10f169b625638189de8d4555d0b3486a5aeb34
   - it: renders the llm worker without probes when enabled
     template: worker-llm-deployment.yaml
     set:

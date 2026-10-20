@@ -1,0 +1,19 @@
+# Ignore file for grafana/k6:2.3.0 only. deploy/k8s/scan-base-images.sh
+# passes this file with --ignorefile only while scanning that image.
+# Other images keep .trivyignore.
+# Trivy 0.76.0 reports six fixable HIGH findings on this image. Two CVE
+# ids are repeated across packages, so four ids cover all six:
+# CVE-2026-14456 (libcrypto3 and libssl3), CVE-2026-78669 (golang.org/x/net
+# and stdlib), CVE-2026-78667 (stdlib), CVE-2026-97031 (stdlib).
+
+# CVE-2026-14456 loadtest-only drop on k6 >2.3.0
+CVE-2026-14456 exp:2026-11-19
+
+# CVE-2026-78669 loadtest-only drop on k6 >2.3.0
+CVE-2026-78669 exp:2026-11-19
+
+# CVE-2026-78667 loadtest-only drop on k6 >2.3.0
+CVE-2026-78667 exp:2026-11-19
+
+# CVE-2026-97031 loadtest-only drop on k6 >2.3.0
+CVE-2026-97031 exp:2026-11-19

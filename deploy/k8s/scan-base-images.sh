@@ -6,6 +6,7 @@ set -euo pipefail
 
 root="$(CDPATH='' cd -- "$(dirname "$0")/../.." && pwd)"
 ignore="${root}/.trivyignore"
+k6_ignore="${root}/.trivyignore.k6"
 trivy_bin="${TRIVY:-trivy}"
 outdir="${SCAN_DIR:-$(mktemp -d)}"
 
@@ -92,8 +93,16 @@ for image in "${images[@]}"; do
   index=$((index + 1))
   report="${outdir}/$(printf '%02d' "${index}").json"
   rm -f "${report}"
+  # The k6 file lists fixable HIGH findings in grafana/k6:2.3.0. It is not
+  # an allowlist for nginx or the other images.
+  image_ignore="${ignore}"
+  case "${image}" in
+    grafana/k6:*|grafana/k6@*)
+      image_ignore="${k6_ignore}"
+      ;;
+  esac
   if ! "${trivy_bin}" image --scanners vuln --exit-code 1 --severity HIGH,CRITICAL \
-    --ignorefile "${ignore}" \
+    --ignorefile "${image_ignore}" \
     --format json -o "${report}" \
     "${image}"; then
     echo "trivy failed for ${image}" >&2

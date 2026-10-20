@@ -700,11 +700,9 @@ demoData:
 loadtest:
   k6:
     enabled: false
-    # Image config User is 12345 on amd64 and arm64. Release 2.3.0 still
-    # has fixable HIGH findings. The master build from 2026-10-20
-    # (alpine 3.24.2) is clean under Trivy 0.76.0. The digest pins that
-    # build; the master tag itself moves.
-    image: "grafana/k6:master@sha256:2ae541d19310c97aa5b3d633b8ff6763833cc657617a83a52110eb73b607b46e"
+    # Image config User is 12345 on amd64 and arm64. Digest pins release 2.3.0.
+    # Its six fixable HIGH findings are ignored only from .trivyignore.k6.
+    image: "grafana/k6:2.3.0@sha256:9c2dee7f8ed74d317e4027c06a10f169b625638189de8d4555d0b3486a5aeb34"
     securityContext:
       runAsNonRoot: true
       runAsUser: 12345
