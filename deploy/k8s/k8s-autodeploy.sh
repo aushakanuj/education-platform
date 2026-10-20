@@ -35,6 +35,34 @@ if [[ -f "${state_file}" && "$(cat "${state_file}")" == "${sha}" ]]; then
   exit 0
 fi
 
+# First install is manual. Autodeploy only upgrades a cluster that is already healthy.
+echo "Checking CNPG in ${namespace}"
+if ! cluster_json="$(kubectl get cluster.postgresql.cnpg.io -n "${namespace}" -o json)"; then
+  echo "CNPG in ${namespace} is not Ready. First install is manual, in this order: CNPG, then restore, then helm install." >&2
+  exit 1
+fi
+if ! python3 -c '
+import json, sys
+doc = json.loads(sys.argv[1])
+items = doc.get("items")
+if items is None:
+    items = [doc]
+if not items:
+    sys.exit(1)
+for item in items:
+    status = item.get("status") or {}
+    phase = str(status.get("phase") or "")
+    instances = status.get("instances")
+    if instances is None:
+        instances = (item.get("spec") or {}).get("instances")
+    ready = status.get("readyInstances")
+    if "healthy" not in phase.lower() or ready != instances:
+        sys.exit(1)
+' "${cluster_json}"; then
+  echo "CNPG in ${namespace} is not Ready (status must be healthy, with readyInstances equal to instances). First install is manual, in this order: CNPG, then restore, then helm install." >&2
+  exit 1
+fi
+
 echo "Building api and web ${sha}"
 export DOCKER_BUILDKIT=1
 docker build -f deploy/Dockerfile.api -t "curioed-api:${sha}" .
