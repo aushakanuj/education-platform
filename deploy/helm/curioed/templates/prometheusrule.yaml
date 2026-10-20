@@ -1,0 +1,62 @@
+{{- if .Values.monitoring.enabled }}
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: {{ include "curioed.fullname" . }}
+  labels:
+    {{- include "curioed.labels" . | nindent 4 }}
+    app.kubernetes.io/component: monitoring
+    release: {{ .Values.monitoring.prometheusRelease | quote }}
+spec:
+  groups:
+    - name: curioed.api
+      rules:
+        - alert: CurioedApiHighErrorRate
+          expr: |
+            (
+              sum(rate(http_requests_total{job="curioed-api",status=~"5.."}[5m]))
+              /
+              clamp_min(sum(rate(http_requests_total{job="curioed-api"}[5m])), 0.001)
+            ) > 0.02
+          for: 5m
+          labels:
+            severity: warning
+          annotations:
+            summary: CurioEd API 5xx rate is above 2%
+            description: More than 2% of scraped API responses are 5xx for 5 minutes. This stays quiet until the API serves /metrics.
+        - alert: CurioedApiHighLatency
+          expr: |
+            histogram_quantile(
+              0.95,
+              sum by (le) (rate(http_request_duration_seconds_bucket{job="curioed-api"}[5m]))
+            ) > 2
+          for: 5m
+          labels:
+            severity: warning
+          annotations:
+            summary: CurioEd API p95 latency is above 2 seconds
+            description: The 95th percentile of http_request_duration_seconds is above 2 seconds. This stays quiet until the API serves /metrics.
+    - name: curioed.workloads
+      rules:
+        - alert: CurioedPodRestarting
+          expr: |
+            increase(kube_pod_container_status_restarts_total{namespace="{{ .Release.Namespace }}",pod=~"{{ include "curioed.fullname" . }}-.*"}[15m]) > 3
+          for: 10m
+          labels:
+            severity: warning
+          annotations:
+            summary: A CurioEd pod is restarting
+            description: A container in {{ .Release.Namespace }} restarted more than 3 times in 15 minutes.
+        - alert: CurioedPostgresDown
+          expr: |
+            (
+              count(kube_pod_status_ready{namespace="{{ .Release.Namespace }}",pod=~"{{ include "curioed.clusterName" . }}-[0-9]+",condition="true"} == 1)
+              or vector(0)
+            ) < 1
+          for: 5m
+          labels:
+            severity: critical
+          annotations:
+            summary: CurioEd Postgres has no ready instance
+            description: No CloudNativePG pod for {{ include "curioed.clusterName" . }} is Ready. Uses kube-state-metrics, not the API.
+{{- end }}

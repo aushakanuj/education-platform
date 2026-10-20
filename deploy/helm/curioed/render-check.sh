@@ -137,13 +137,139 @@ if helm template curioed "${chart}" --namespace curioed --set curriculumSeed.ena
   exit 1
 fi
 
-if helm template curioed "${chart}" --namespace curioed --set cnpg.backup.enabled=true > /dev/null 2>"${out}.err"; then
-  echo "cnpg.backup.enabled=true should fail the render" >&2
+if grep -Eq '^kind: (ServiceMonitor|PrometheusRule|ObjectStore|ScheduledBackup)$' "${out}"; then
+  echo "default render included monitoring or backup objects" >&2
   exit 1
 fi
-if ! grep -q "not supported yet" "${out}.err"; then
-  echo "backup failure did not explain itself" >&2
+if grep -q 'barmanObjectName\|enablePodMonitor' "${out}"; then
+  echo "default render wired Barman or a PodMonitor" >&2
+  exit 1
+fi
+
+if helm template curioed "${chart}" --namespace curioed --set cnpg.backup.enabled=true > /dev/null 2>"${out}.err"; then
+  echo "cnpg.backup.enabled=true without an endpoint should fail the render" >&2
+  exit 1
+fi
+if ! grep -q "endpointURL" "${out}.err"; then
+  echo "backup failure did not mention endpointURL" >&2
   cat "${out}.err" >&2
+  exit 1
+fi
+
+helm template curioed "${chart}" --namespace curioed \
+  --set cnpg.backup.enabled=true \
+  --set cnpg.backup.endpointURL=https://s3.example.invalid \
+  --set cnpg.backup.bucket=example-bucket > "${out}.backup"
+python3 - "${out}.backup" <<'PY'
+import re
+import sys
+
+text = open(sys.argv[1], encoding="utf-8").read()
+if "stringData:" in text or "replace-with" in text:
+    raise SystemExit("backup render included a secret value or a placeholder token")
+docs = [doc for doc in re.split(r"(?m)^---\s*$", text) if doc.strip()]
+
+def kind(name):
+    found = []
+    for doc in docs:
+        match = re.search(r"(?m)^kind: (\S+)", doc)
+        if match and match.group(1) == name:
+            found.append(doc)
+    return found
+
+stores = kind("ObjectStore")
+schedules = kind("ScheduledBackup")
+clusters = [doc for doc in kind("Cluster") if "curioed-postgres" in doc]
+if len(stores) != 1 or len(schedules) != 1 or len(clusters) != 1:
+    raise SystemExit(
+        f"expected one ObjectStore, ScheduledBackup, and Cluster; got {len(stores)}, {len(schedules)}, {len(clusters)}"
+    )
+store = stores[0]
+for snippet in (
+    'retentionPolicy: "30d"',
+    'destinationPath: "s3://example-bucket/curioed/postgres"',
+    'endpointURL: "https://s3.example.invalid"',
+    "name: curioed-backup-s3",
+    "key: ACCESS_KEY_ID",
+    "key: ACCESS_SECRET_KEY",
+    "compression: gzip",
+    "maxParallel: 1",
+):
+    if snippet not in store:
+        raise SystemExit(f"ObjectStore is missing {snippet}")
+schedule = schedules[0]
+for snippet in (
+    'schedule: "0 0 2 * * *"',
+    "method: plugin",
+    'name: "barman-cloud.cloudnative-pg.io"',
+    "immediate: false",
+):
+    if snippet not in schedule:
+        raise SystemExit(f"ScheduledBackup is missing {snippet}")
+cluster = clusters[0]
+for snippet in ("isWALArchiver: true", "barmanObjectName: curioed-backup"):
+    if snippet not in cluster:
+        raise SystemExit(f"Cluster is missing {snippet}")
+if "enablePodMonitor" in cluster:
+    raise SystemExit("backup flag turned on the PodMonitor")
+print("off-site backup rendered")
+PY
+
+helm template curioed "${chart}" --namespace curioed --set monitoring.enabled=true > "${out}.monitor"
+python3 - "${out}.monitor" <<'PY'
+import re
+import sys
+
+text = open(sys.argv[1], encoding="utf-8").read()
+docs = [doc for doc in re.split(r"(?m)^---\s*$", text) if doc.strip()]
+
+def kind(name):
+    found = []
+    for doc in docs:
+        match = re.search(r"(?m)^kind: (\S+)", doc)
+        if match and match.group(1) == name:
+            found.append(doc)
+    return found
+
+monitors = kind("ServiceMonitor")
+rules = kind("PrometheusRule")
+if len(monitors) != 1 or len(rules) != 1:
+    raise SystemExit(f"expected one ServiceMonitor and PrometheusRule, got {len(monitors)} and {len(rules)}")
+if kind("ObjectStore") or kind("ScheduledBackup"):
+    raise SystemExit("monitoring flag rendered backup objects")
+monitor = monitors[0]
+for snippet in ("path: /metrics", "port: http", "replacement: curioed-api", 'release: "kube-prometheus-stack"'):
+    if snippet not in monitor:
+        raise SystemExit(f"ServiceMonitor is missing {snippet}")
+rule = rules[0]
+for alert in (
+    "CurioedApiHighErrorRate",
+    "CurioedApiHighLatency",
+    "CurioedPodRestarting",
+    "CurioedPostgresDown",
+):
+    if alert not in rule:
+        raise SystemExit(f"PrometheusRule is missing {alert}")
+clusters = kind("Cluster")
+if not clusters or "enablePodMonitor: true" not in clusters[0]:
+    raise SystemExit("monitoring flag did not enable the CNPG PodMonitor")
+if "isWALArchiver" in clusters[0]:
+    raise SystemExit("monitoring flag turned on WAL archiving")
+print("monitoring objects rendered")
+PY
+
+helm lint "${chart}" \
+  --set monitoring.enabled=true \
+  --set cnpg.backup.enabled=true \
+  --set cnpg.backup.endpointURL=https://s3.example.invalid \
+  --set cnpg.backup.bucket=example-bucket >/dev/null
+helm template curioed "${chart}" --namespace curioed \
+  --set monitoring.enabled=true \
+  --set cnpg.backup.enabled=true \
+  --set cnpg.backup.endpointURL=https://s3.example.invalid \
+  --set cnpg.backup.bucket=example-bucket > "${out}.both"
+if ! grep -q "kind: ServiceMonitor" "${out}.both" || ! grep -q "kind: ObjectStore" "${out}.both"; then
+  echo "combined flags did not render both features" >&2
   exit 1
 fi
 

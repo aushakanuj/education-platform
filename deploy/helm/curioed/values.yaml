@@ -203,11 +203,44 @@ cnpg:
     limits:
       cpu: "4"
       memory: 6Gi
-  # Off-site Barman / Backblaze is a later phase. Leaving this false keeps
-  # object-storage credentials out of the chart. The migrate hook's pg_dump
-  # is the backup that runs before Alembic.
+  # Off-site copy via the Barman Cloud plugin. The chart does not install the
+  # plugin and does not choose an object-storage provider. endpointURL and
+  # bucket are required when enabled; leave them empty until the team picks
+  # an S3-compatible API. The migrate hook's pg_dump still runs before Alembic.
   backup:
     enabled: false
+    # Placeholder shape, not a provider: https://s3.example.invalid
+    endpointURL: ""
+    # Placeholder shape: example-bucket
+    bucket: ""
+    path: curioed/postgres
+    retentionPolicy: 30d
+    # Six fields, seconds first. 02:00 UTC every day.
+    schedule: "0 0 2 * * *"
+    plugin: barman-cloud.cloudnative-pg.io
+    existingSecret: curioed-backup-s3
+    accessKeyIdKey: ACCESS_KEY_ID
+    secretAccessKeyKey: ACCESS_SECRET_KEY
+    walCompression: gzip
+    dataCompression: gzip
+    walMaxParallel: 1
+    sidecar:
+      resources:
+        requests:
+          cpu: 50m
+          memory: 128Mi
+        limits:
+          cpu: "1"
+          memory: 256Mi
+
+# Prometheus Operator objects. Default off. The API does not serve /metrics yet;
+# see deploy/helm/monitoring/README.md before turning this on.
+monitoring:
+  enabled: false
+  # Matches a kube-prometheus-stack release installed with this name.
+  prometheusRelease: kube-prometheus-stack
+  metricsPath: /metrics
+  interval: 30s
 
 persistence:
   storageClass: local-path

@@ -84,6 +84,18 @@ app.kubernetes.io/component: {{ .component }}
 {{- printf "%s-backups" (include "curioed.fullname" .) | trunc 63 | trimSuffix "-" }}
 {{- end }}
 
+{{- define "curioed.objectStoreName" -}}
+{{- printf "%s-backup" (include "curioed.fullname" .) | trunc 63 | trimSuffix "-" }}
+{{- end }}
+
+{{- define "curioed.scheduledBackupName" -}}
+{{- printf "%s-nightly" (include "curioed.objectStoreName" .) | trunc 63 | trimSuffix "-" }}
+{{- end }}
+
+{{- define "curioed.backupDestination" -}}
+{{- printf "s3://%s/%s" .Values.cnpg.backup.bucket (.Values.cnpg.backup.path | trimPrefix "/") }}
+{{- end }}
+
 {{- define "curioed.imageRef" -}}
 {{- printf "%s:%s" .repository (.tag | default "unreleased") }}
 {{- end }}
@@ -114,7 +126,40 @@ app.kubernetes.io/component: {{ .component }}
 {{- fail "secrets.tunnel.existingSecret is required" }}
 {{- end }}
 {{- if .Values.cnpg.backup.enabled }}
-{{- fail "cnpg.backup.enabled is not supported yet. Off-site Barman needs object storage. The migrate hook pg_dump is the backup that runs before Alembic." }}
+{{- $backup := .Values.cnpg.backup }}
+{{- if not (regexMatch "^https://[A-Za-z0-9.-]+(:[0-9]+)?(/.*)?$" $backup.endpointURL) }}
+{{- fail "cnpg.backup.endpointURL is required when backups are enabled. Set the https URL of the S3-compatible API. The chart does not choose a provider." }}
+{{- end }}
+{{- if not (regexMatch "^[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$" $backup.bucket) }}
+{{- fail "cnpg.backup.bucket is required when backups are enabled" }}
+{{- end }}
+{{- if not (regexMatch "^[A-Za-z0-9][A-Za-z0-9_./-]{0,127}$" $backup.path) }}
+{{- fail "cnpg.backup.path must be a prefix inside the bucket, without a leading slash" }}
+{{- end }}
+{{- if not (regexMatch "^[1-9][0-9]*[dwm]$" $backup.retentionPolicy) }}
+{{- fail "cnpg.backup.retentionPolicy must look like 30d" }}
+{{- end }}
+{{- if ne (len (splitList " " $backup.schedule)) 6 }}
+{{- fail "cnpg.backup.schedule must be six cron fields with seconds first, for example \"0 0 2 * * *\"" }}
+{{- end }}
+{{- if not (regexMatch "^[a-z0-9]([-a-z0-9]*[a-z0-9])?$" $backup.existingSecret) }}
+{{- fail "cnpg.backup.existingSecret must be a Secret name" }}
+{{- end }}
+{{- if not (regexMatch "^[A-Za-z0-9][A-Za-z0-9_.-]*$" $backup.accessKeyIdKey) }}
+{{- fail "cnpg.backup.accessKeyIdKey must be a Secret key name" }}
+{{- end }}
+{{- if not (regexMatch "^[A-Za-z0-9][A-Za-z0-9_.-]*$" $backup.secretAccessKeyKey) }}
+{{- fail "cnpg.backup.secretAccessKeyKey must be a Secret key name" }}
+{{- end }}
+{{- if not (regexMatch "^(gzip|bzip2|lz4|snappy)$" $backup.walCompression) }}
+{{- fail "cnpg.backup.walCompression must be gzip, bzip2, lz4, or snappy" }}
+{{- end }}
+{{- if not (regexMatch "^(gzip|bzip2|lz4|snappy)$" $backup.dataCompression) }}
+{{- fail "cnpg.backup.dataCompression must be gzip, bzip2, lz4, or snappy" }}
+{{- end }}
+{{- if or (lt ($backup.walMaxParallel | int) 1) (gt ($backup.walMaxParallel | int) 8) }}
+{{- fail "cnpg.backup.walMaxParallel must be from 1 to 8" }}
+{{- end }}
 {{- end }}
 {{- end }}
 

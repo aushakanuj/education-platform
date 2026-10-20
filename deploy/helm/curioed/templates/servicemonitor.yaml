@@ -1,0 +1,26 @@
+{{- if .Values.monitoring.enabled }}
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: {{ include "curioed.apiName" . }}
+  labels:
+    {{- include "curioed.labels" . | nindent 4 }}
+    app.kubernetes.io/component: api
+    release: {{ .Values.monitoring.prometheusRelease | quote }}
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: {{ include "curioed.name" . }}
+      app.kubernetes.io/instance: {{ .Release.Name }}
+      app.kubernetes.io/component: api
+  namespaceSelector:
+    matchNames:
+      - {{ .Release.Namespace }}
+  endpoints:
+    - port: http
+      path: {{ .Values.monitoring.metricsPath }}
+      interval: {{ .Values.monitoring.interval }}
+      relabelings:
+        - targetLabel: job
+          replacement: curioed-api
+{{- end }}

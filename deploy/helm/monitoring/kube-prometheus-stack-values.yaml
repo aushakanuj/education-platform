@@ -1,0 +1,114 @@
+# Overlay for prometheus-community/kube-prometheus-stack.
+# Written against chart 92.x. Install instructions are in README.md.
+# Nothing in CI applies this file.
+
+grafana:
+  resources:
+    requests:
+      cpu: 20m
+      memory: 64Mi
+    limits:
+      cpu: 200m
+      memory: 128Mi
+  sidecar:
+    resources:
+      requests:
+        cpu: 10m
+        memory: 32Mi
+      limits:
+        cpu: 100m
+        memory: 64Mi
+
+alertmanager:
+  alertmanagerSpec:
+    replicas: 1
+    retention: 120h
+    resources:
+      requests:
+        cpu: 10m
+        memory: 32Mi
+      limits:
+        cpu: 100m
+        memory: 64Mi
+    storage:
+      volumeClaimTemplate:
+        spec:
+          storageClassName: local-path
+          accessModes:
+            - ReadWriteOnce
+          resources:
+            requests:
+              storage: 1Gi
+
+prometheusOperator:
+  resources:
+    requests:
+      cpu: 10m
+      memory: 32Mi
+    limits:
+      cpu: 200m
+      memory: 64Mi
+
+kube-state-metrics:
+  resources:
+    requests:
+      cpu: 10m
+      memory: 48Mi
+    limits:
+      cpu: 100m
+      memory: 96Mi
+
+prometheus-node-exporter:
+  resources:
+    requests:
+      cpu: 10m
+      memory: 16Mi
+    limits:
+      cpu: 50m
+      memory: 32Mi
+
+# k3s does not expose these the way the chart's default ServiceMonitors expect.
+kubeEtcd:
+  enabled: false
+kubeControllerManager:
+  enabled: false
+kubeScheduler:
+  enabled: false
+kubeProxy:
+  enabled: false
+
+prometheus:
+  prometheusSpec:
+    replicas: 1
+    retention: 7d
+    retentionSize: 2GiB
+    scrapeInterval: 30s
+    walCompression: true
+    # Empty selectors, with the nil-uses-helm-values flags off, so this
+    # Prometheus sees the CurioEd ServiceMonitor and the PodMonitor that
+    # CloudNativePG creates in the application namespace.
+    ruleSelectorNilUsesHelmValues: false
+    serviceMonitorSelectorNilUsesHelmValues: false
+    podMonitorSelectorNilUsesHelmValues: false
+    ruleSelector: {}
+    serviceMonitorSelector: {}
+    podMonitorSelector: {}
+    ruleNamespaceSelector: {}
+    serviceMonitorNamespaceSelector: {}
+    podMonitorNamespaceSelector: {}
+    resources:
+      requests:
+        cpu: 100m
+        memory: 768Mi
+      limits:
+        cpu: 500m
+        memory: 1536Mi
+    storageSpec:
+      volumeClaimTemplate:
+        spec:
+          storageClassName: local-path
+          accessModes:
+            - ReadWriteOnce
+          resources:
+            requests:
+              storage: 8Gi

@@ -1,0 +1,29 @@
+{{- if .Values.cnpg.backup.enabled }}
+apiVersion: barmancloud.cnpg.io/v1
+kind: ObjectStore
+metadata:
+  name: {{ include "curioed.objectStoreName" . }}
+  labels:
+    {{- include "curioed.labels" . | nindent 4 }}
+    app.kubernetes.io/component: backup
+spec:
+  retentionPolicy: {{ .Values.cnpg.backup.retentionPolicy | quote }}
+  configuration:
+    destinationPath: {{ include "curioed.backupDestination" . | quote }}
+    endpointURL: {{ .Values.cnpg.backup.endpointURL | quote }}
+    s3Credentials:
+      accessKeyId:
+        name: {{ .Values.cnpg.backup.existingSecret }}
+        key: {{ .Values.cnpg.backup.accessKeyIdKey }}
+      secretAccessKey:
+        name: {{ .Values.cnpg.backup.existingSecret }}
+        key: {{ .Values.cnpg.backup.secretAccessKeyKey }}
+    wal:
+      compression: {{ .Values.cnpg.backup.walCompression }}
+      maxParallel: {{ .Values.cnpg.backup.walMaxParallel }}
+    data:
+      compression: {{ .Values.cnpg.backup.dataCompression }}
+  instanceSidecarConfiguration:
+    resources:
+      {{- toYaml .Values.cnpg.backup.sidecar.resources | nindent 6 }}
+{{- end }}
