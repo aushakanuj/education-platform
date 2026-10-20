@@ -58,9 +58,12 @@ app.kubernetes.io/component: {{ .component }}
 {{- printf "%s-seed" (include "curioed.fullname" .) | trunc 63 | trimSuffix "-" }}
 {{- end }}
 
-{{/* Plain Job, one per Helm revision, so a failed seed stays visible. */}}
+{{/* Plain Job, one per Helm revision. Shorten the prefix so -r<rev> survives the 63-character name limit. */}}
 {{- define "curioed.seedJobName" -}}
-{{- printf "%s-seed-r%s" (include "curioed.fullname" .) (.Release.Revision | toString) | trunc 63 | trimSuffix "-" }}
+{{- $suffix := printf "-r%s" (.Release.Revision | toString) -}}
+{{- $prefix := printf "%s-seed" (include "curioed.fullname" .) -}}
+{{- $room := int (sub 63 (len $suffix)) -}}
+{{- printf "%s%s" (trunc $room $prefix | trimSuffix "-") $suffix -}}
 {{- end }}
 
 {{- define "curioed.clusterName" -}}
@@ -133,11 +136,14 @@ app.kubernetes.io/component: {{ .component }}
 {{- fail "cnpg.backup.enabled is not supported yet. Off-site Barman needs object storage. The migrate hook pg_dump is the backup that runs before Alembic." }}
 {{- end }}
 {{- range $image := list .Values.api.image .Values.web.image .Values.cloudflared.image }}
-{{- if eq ($image.tag | default "") "latest" }}
-{{- fail (printf "image tag for %s must be a digest or pinned tag, not latest" $image.repository) }}
+{{- if eq (lower ($image.tag | default "" | toString)) "latest" }}
+{{- fail (printf "image.tag is required for %s and must be a pinned tag, not latest" $image.repository) }}
 {{- end }}
 {{- end }}
-{{- if contains ":latest" .Values.cnpg.image }}
+{{- if regexMatch "(?i):latest($|@)" (.Values.llmMock.image | toString) }}
+{{- fail "image.tag is required for llmMock and must be a pinned tag, not latest" }}
+{{- end }}
+{{- if regexMatch "(?i):latest($|@)" (.Values.cnpg.image | toString) }}
 {{- fail "cnpg.image must not use the latest tag" }}
 {{- end }}
 {{- if lt (int .Values.api.limitConcurrency) 1 }}

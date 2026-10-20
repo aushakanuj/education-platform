@@ -20,6 +20,10 @@ EOF
 cat > "${tmp}/bin/helm" << 'EOF'
 #!/usr/bin/env bash
 printf 'helm %s\n' "$*" >> "${STUB_LOG}"
+if [[ "$1" == "status" ]]; then
+  printf '%s\n' '{"version":7}'
+  exit 0
+fi
 if [[ "${HELM_FAIL:-0}" == 1 && "$1" == "upgrade" ]]; then
   echo "helm upgrade failed" >&2
   exit 1
@@ -36,10 +40,47 @@ EOF
 cat > "${tmp}/bin/kubectl" << 'EOF'
 #!/usr/bin/env bash
 printf 'kubectl %s\n' "$*" >> "${STUB_LOG}"
+if [[ "${KUBECTL_FAIL:-0}" == 1 ]]; then
+  echo "kubectl failed" >&2
+  exit 1
+fi
 if [[ "$1" == "get" ]]; then
-  cat << 'JSON'
-{"items":[{"status":{"phase":"Cluster in healthy state","instances":1,"readyInstances":1}}]}
-JSON
+  case "${CNPG_PHASE:-healthy}" in
+    missing)
+      printf '%s\n' '{"items":[]}'
+      ;;
+    not-ready)
+      printf '%s\n' '{"items":[{"status":{"phase":"Setting up","instances":1,"readyInstances":0}}]}'
+      ;;
+    *)
+      printf '%s\n' '{"items":[{"status":{"phase":"Cluster in healthy state","instances":1,"readyInstances":1}}]}'
+      ;;
+  esac
+  exit 0
+fi
+if [[ "$1" == "wait" ]]; then
+  case "${SEED_WAIT:-complete}" in
+    timeout)
+      exit 1
+      ;;
+    failed)
+      if [[ "$*" == *condition=failed* ]]; then
+        exit 0
+      fi
+      sleep 5
+      exit 1
+      ;;
+    *)
+      if [[ "$*" == *condition=complete* ]]; then
+        exit 0
+      fi
+      sleep 5
+      exit 1
+      ;;
+  esac
+fi
+if [[ "$1" == "logs" ]]; then
+  echo "seed pod log"
   exit 0
 fi
 echo "unexpected kubectl invocation: $*" >&2
@@ -78,7 +119,7 @@ run_deploy() {
     PATH="${tmp}/bin:${PATH}" \
     CLONE="${clone}" \
     STATE_FILE="${tmp}/state/sha" \
-    LOCK_FILE="${tmp}/state/lock" \
+    LOCK_FILE="${tmp}/state/lock-${RANDOM}" \
     STUB_LOG="${tmp}/log" \
     "$@" \
     "${script}" > "${tmp}/out" 2>&1 || code=$?
@@ -170,6 +211,10 @@ fi
 if [[ "$(cat "${tmp}/state/sha")" != "${head_sha}" ]]; then
   fail "state file was not written with HEAD after the upgrade"
 fi
+if ! grep -q 'job/curioed-seed-r7' "${tmp}/log"; then
+  fail "successful deploy did not wait on the seed job"
+  cat "${tmp}/log"
+fi
 
 # HEAD after checkout is not origin/main. The script must abort before build
 # and must not write the state file.
@@ -222,6 +267,69 @@ if ! grep -q '^docker build ' "${tmp}/log"; then
   fail "failed helm upgrade did not reach the build"
   cat "${tmp}/log"
 fi
+
+# CNPG gate. A clone that is behind origin/main must not build when the
+# cluster is missing, not ready, or kubectl itself fails.
+cnpg_case() {
+  local name="$1"
+  shift
+  make_remote "${tmp}/remote-${name}"
+  git clone -q "${tmp}/remote-${name}" "${tmp}/clone-${name}"
+  advance_remote "${tmp}/remote-${name}"
+  rm -f "${tmp}/state/${name}"
+  local code
+  code="$(run_deploy "${tmp}/clone-${name}" STATE_FILE="${tmp}/state/${name}" "$@")"
+  if [[ "${code}" -eq 0 ]]; then
+    fail "${name} exited 0"
+    cat "${tmp}/out"
+  fi
+  if grep -q '^docker ' "${tmp}/log"; then
+    fail "${name} built an image"
+    cat "${tmp}/log"
+  fi
+  if [[ -f "${tmp}/state/${name}" ]]; then
+    fail "${name} wrote the state file"
+  fi
+}
+cnpg_case kubectl-fail KUBECTL_FAIL=1
+if ! grep -q 'not Ready' "${tmp}/out"; then
+  fail "kubectl failure did not report that CNPG is not Ready"
+  cat "${tmp}/out"
+fi
+cnpg_case cnpg-missing CNPG_PHASE=missing
+cnpg_case cnpg-not-ready CNPG_PHASE=not-ready
+
+# Seed wait. Failure and timeout print SEED FAILED and skip the state file.
+seed_case() {
+  local name="$1"
+  shift
+  make_remote "${tmp}/remote-${name}"
+  git clone -q "${tmp}/remote-${name}" "${tmp}/clone-${name}"
+  advance_remote "${tmp}/remote-${name}"
+  rm -f "${tmp}/state/${name}"
+  local code
+  code="$(run_deploy "${tmp}/clone-${name}" STATE_FILE="${tmp}/state/${name}" "$@")"
+  if [[ "${code}" -eq 0 ]]; then
+    fail "${name} exited 0"
+    cat "${tmp}/out"
+  fi
+  if ! grep -q 'SEED FAILED' "${tmp}/out"; then
+    fail "${name} did not print SEED FAILED"
+    cat "${tmp}/out"
+  fi
+  if ! grep -q 'seed pod log' "${tmp}/out"; then
+    fail "${name} did not print the seed pod log"
+    cat "${tmp}/out"
+  fi
+  if grep -q 'helm rollback' "${tmp}/log"; then
+    fail "${name} rolled the release back"
+  fi
+  if [[ -f "${tmp}/state/${name}" ]]; then
+    fail "${name} wrote the state file"
+  fi
+}
+seed_case seed-failed SEED_WAIT=failed
+seed_case seed-timeout SEED_WAIT=timeout
 
 if [[ "${failures}" -ne 0 ]]; then
   echo "${failures} autodeploy case(s) failed"

@@ -192,13 +192,22 @@ tests:
     asserts:
       - hasDocuments:
           count: 0
-  - it: prod curriculum seed stays off until PR 197 merges
+  - it: prod curriculum seed is on and keeps the revision job for a day
     values:
       - ../values-prod.yaml
     template: seed-job.yaml
+    release:
+      revision: 1
     asserts:
-      - hasDocuments:
-          count: 0
+      - equal:
+          path: metadata.name
+          value: curioed-seed-r1
+      - equal:
+          path: spec.ttlSecondsAfterFinished
+          value: 86400
+      - equal:
+          path: spec.backoffLimit
+          value: 1
   - it: an enabled curriculum seed is a plain job named for the revision
     template: seed-job.yaml
     set:
@@ -216,7 +225,21 @@ tests:
           value: 1
       - equal:
           path: spec.ttlSecondsAfterFinished
-          value: 600
+          value: 86400
+  - it: a long name keeps the seed revision suffix inside 63 characters
+    template: seed-job.yaml
+    set:
+      curriculumSeed.enabled: true
+      fullnameOverride: this-name-is-deliberately-longer-than-the-kubernetes-name-limit-xxxxxxxx
+    release:
+      revision: 12
+    asserts:
+      - matchRegex:
+          path: metadata.name
+          pattern: ^.{1,63}$
+      - matchRegex:
+          path: metadata.name
+          pattern: -r12$
   - it: prod migrate keeps its hook weight
     values:
       - ../values-prod.yaml

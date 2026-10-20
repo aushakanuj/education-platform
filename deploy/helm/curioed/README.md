@@ -34,14 +34,14 @@ kubectl label namespace curioed \
 | --- | --- | --- | --- |
 | api, docling, llm worker, migrate, curriculum seed, demo-data | false | unset | `deploy/Dockerfile.api` has no `USER`. `python:3.12-slim-bookworm` image config User is empty. **TODO:** add a `USER` line in `Dockerfile.api` (aushak's OK) before turning this on. |
 | web | false | unset | `nginx:1.31.7-alpine-slim` has no `USER` and listens on port 80. `CHOWN`, `SETUID`, `SETGID`, and `NET_BIND_SERVICE` are added back. |
-| llm-mock | false | unset | `python:3.12.7-slim-bookworm` image config User is empty. |
+| llm-mock | false | unset | `python:3.12.15-slim-bookworm` image config User is empty. |
 | cloudflared | true | 65532 | `cloudflare/cloudflared:2026.10.2` image config User is `65532:65532`. |
-| k6 | true | 12345 | `grafana/k6:0.57.0` adds uid 12345 and sets `USER k6`. |
+| k6 | true | 12345 | `grafana/k6:2.3.0` image config User is 12345. |
 | CNPG | not set by this chart | 26 via the operator | Image config User is 26. The operator sets `runAsNonRoot` and `runAsUser`. The chart does not override that. |
 
 Other defaults: `allowPrivilegeEscalation: false`, capabilities `drop: [ALL]`, `seccompProfile: RuntimeDefault`. `readOnlyRootFilesystem` stays false. The API Hugging Face cache, uploads, and inductor cache are already volumes. Nginx still writes under `/var` when the flag is on, via the emptyDirs above.
 
-The curriculum seed Job is off by default, including prod, until PR #197 merges. The command is `python -m education_platform.modules.materials.seed`. It is not a hook. The name is `<fullname>-seed-r<revision>`, with `backoffLimit: 1` and `ttlSecondsAfterFinished: 600`, so a failed seed stays visible and does not fail `helm upgrade`. It requests 100m CPU and 256Mi, with limits of 1 CPU and 1Gi. Migrate and the seed both start with a `wait-for-db` initContainer that loops `pg_isready` against the CNPG rw service for 120s, using `ghcr.io/cloudnative-pg/postgresql:16.15-standard-trixie`. That initContainer uses the same container securityContext as the Job it waits for. `databaseWait.image.tag` must be a pinned tag. `latest` and an empty tag fail the render. On a first install, disable the migrate hook with `--set migrate.enabled=false` until the CNPG Cluster exists.
+The curriculum seed Job is off in the chart default and on in prod, because #197 merges first. The command is `python -m education_platform.modules.materials.seed`. It is not a hook. The name is `<fullname>-seed-r<revision>`. The prefix is shortened so `-r<revision>` still fits in 63 characters. `backoffLimit` is 1 and `ttlSecondsAfterFinished` is 86400. Autodeploy waits on that Job immediately after `helm upgrade`, so the TTL is not what makes a failure visible. The next upgrade's Helm cleanup removes the previous revision's Job. A failed seed does not roll the release back. It requests 100m CPU and 256Mi, with limits of 1 CPU and 1Gi. Migrate and the seed both start with a `wait-for-db` initContainer that loops `pg_isready` against the CNPG rw service for 120s, using `ghcr.io/cloudnative-pg/postgresql:16.15-standard-trixie`. That initContainer uses the same container securityContext as the Job it waits for. `databaseWait.image.tag` must be a pinned tag. `latest` and an empty tag fail the render. On a first install, disable the migrate hook with `--set migrate.enabled=false` until the CNPG Cluster exists.
 
 The CNPG Cluster and every PVC (uploads, hf-cache, inductor, backups) carry `helm.sh/resource-policy: keep`.
 
@@ -63,7 +63,7 @@ No liveness and no readiness. A database ping would kill a parse, and neither wo
 
 `terminationGracePeriodSeconds` is 600 for docling and 40 for the LLM worker. Docling sets `WORKER_SHUTDOWN_GRACE_SECONDS` to 570. The LLM worker sets it to 25. CD deploys on every merge, so the all-queue docling worker keeps the long grace. A 25s grace would requeue a long ingest on every deploy. Once Coder's worker image is deployed, the process releases its lease on SIGTERM. Until that image is what the cluster runs, Python is PID 1 and ignores SIGTERM.
 
-Both worker Deployments use `strategy: Recreate` and `progressDeadlineSeconds: 900`. Recreate keeps the old and new pods from overlapping. On one node, two docling pods would be 3Gi each. 900 seconds is the same 15 minutes as `k8s-autodeploy.sh`. The Kubernetes default progress deadline is 600s, which is the docling grace itself.
+Both worker Deployments use `strategy: Recreate` and `progressDeadlineSeconds: 1500`. Recreate keeps the old and new pods from overlapping. On one node, two docling pods would be 3Gi each. 1500 seconds is the docling grace plus 900, and it is the same 25 minutes as `k8s-autodeploy.sh`. The Kubernetes default progress deadline is 600s, which is the docling grace itself.
 
 Compose (`deploy/docker-compose.prod.yml` service `worker`) is one container: image `education-platform-api`, command `python -m education_platform.workers`, the same env and uploads/HF/inductor volumes as the API, `stop_grace_period: 30s`, and a `db_ping.py` healthcheck. Prod runs that process as `worker-docling` at 1 replica, 3Gi request and limit, 2 CPU request and limit. `workers.llm` stays off in prod. Both templates still drain every queue until `WORKER_QUEUES` exists. KEDA stays off for that reason.
 
@@ -131,7 +131,7 @@ Default parameters fit a 2Gi limit: `shared_buffers` 512MB, `effective_cache_siz
 
 The migrate Job is a `pre-install,pre-upgrade` hook. On a first install the Cluster does not exist yet, so install in two steps:
 
-Helm's default `--timeout` is 5 minutes. The upgrade below waits 15 minutes, the same as `k8s-autodeploy.sh`, so a docling pod can spend its 600s grace and the new pod can still become ready. The first install does not wait: the CloudNativePG cluster does not exist yet.
+Helm's default `--timeout` is 5 minutes. The upgrade below waits 25 minutes, the same as `k8s-autodeploy.sh`, so a docling pod can spend its 600s grace and the new pod still has 900s inside the 1500s progress deadline. The first install does not wait: the CloudNativePG cluster does not exist yet.
 
 ```sh
 helm install curioed deploy/helm/curioed -n curioed --create-namespace \
@@ -145,7 +145,7 @@ helm upgrade curioed deploy/helm/curioed -n curioed \
   --set api.image.tag=REPLACE_SHA \
   --set web.image.tag=REPLACE_SHA \
   --wait \
-  --timeout 15m
+  --timeout 25m
 ```
 
 The load-test profile turns that hook off. Its demo-data Job waits for Postgres, runs `alembic upgrade head`, the curriculum seed, then `DEMO_SEED=1 python /app/backend/scripts/seed_demo.py`.
@@ -204,7 +204,7 @@ API_URL=http://192.0.2.10:30080 WEB_URL=http://192.0.2.10:30080 HOST=curioed.onl
   k6 run deploy/loadtest/k6-api.js
 ```
 
-In cluster, `values-loadtest.yaml` runs the same script from a ConfigMap in a Job capped at 2 CPU and 1Gi, image `grafana/k6:0.57.0`. `API_URL` and `WEB_URL` are the in-cluster Service URLs.
+In cluster, `values-loadtest.yaml` runs the same script from a ConfigMap in a Job capped at 2 CPU and 1Gi, image `grafana/k6:2.3.0`. `API_URL` and `WEB_URL` are the in-cluster Service URLs.
 
 `deploy/loadtest/collect.sh` appends a CSV every 5 seconds: HPA current and desired replicas, `kubectl top`, MemAvailable from `/proc/meminfo`, `pg_stat_activity` counts by state, and p50/p95/p99 from the k6 summary when the Job has printed one. Below 3 GiB MemAvailable, or if `PROD_HEALTH_URL` fails, it deletes the k6 Job and exits non-zero.
 
@@ -218,7 +218,7 @@ docker build -f deploy/Dockerfile.web -t curioed-web:demo --build-arg VITE_API_B
 docker save curioed-api:demo curioed-web:demo | sudo k3s ctr images import -
 ```
 
-`deploy/k8s/k8s-autodeploy.sh` refuses that working-tree path, takes a `flock`, fetches `origin/main`, and exits when the SHA matches the state file. Before it builds, the CNPG Cluster in namespace `curioed` must be healthy, with `readyInstances` equal to `instances` (`kubectl get cluster.postgresql.cnpg.io -n curioed`). Otherwise it exits 1 and does not build. First install is manual, in this order: CNPG, then restore, then `helm install`. The upgrade is `helm upgrade --install` with `--wait --timeout 15m` and no `--atomic` and no `--wait-for-jobs`. Helm's own default wait is 5 minutes. 15 minutes is required because the docling worker may spend 600s draining an ingest.
+`deploy/k8s/k8s-autodeploy.sh` refuses that working-tree path, takes a `flock`, fetches `origin/main`, and exits when the SHA matches the state file. A dirty clone, tracked or untracked, exits 1 before checkout. A clean clone is then `git checkout --force --detach` of that SHA, and the script aborts if `HEAD` is not that SHA. Before it builds, the CNPG Cluster in namespace `curioed` must be healthy, with `readyInstances` equal to `instances` (`kubectl get cluster.postgresql.cnpg.io -n curioed`). Otherwise it exits 1 and does not build. First install is manual, in this order: CNPG, then restore, then `helm install`. The upgrade is `helm upgrade --install` with `--wait --timeout 25m` and no `--atomic` and no `--wait-for-jobs`. Helm's own default wait is 5 minutes. 25 minutes matches the workers' 1500s progress deadline. After the upgrade succeeds, the script waits on `job/<release>-seed-r<revision>` and exits non-zero with `SEED FAILED` if that Job fails or times out. It does not roll the release back, and it writes the state file only after the seed Job completes.
 
 ## Restore checks
 

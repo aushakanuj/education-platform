@@ -17,7 +17,7 @@ tests:
           value: Recreate
       - equal:
           path: spec.progressDeadlineSeconds
-          value: 900
+          value: 1500
       - equal:
           path: spec.template.spec.terminationGracePeriodSeconds
           value: 600
@@ -36,7 +36,7 @@ tests:
           value: Recreate
       - equal:
           path: spec.progressDeadlineSeconds
-          value: 900
+          value: 1500
       - equal:
           path: spec.template.spec.terminationGracePeriodSeconds
           value: 40
@@ -55,7 +55,7 @@ tests:
           value: Recreate
       - equal:
           path: spec.progressDeadlineSeconds
-          value: 900
+          value: 1500
       - equal:
           path: spec.template.spec.terminationGracePeriodSeconds
           value: 600

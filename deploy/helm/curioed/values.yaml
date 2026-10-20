@@ -398,12 +398,12 @@ workerDocling:
   # python -m education_platform.workers. It drains every queue until
   # WORKER_QUEUES exists. CD deploys on every merge, so the pod grace stays
   # 600. A 25s grace would requeue a long ingest on every deploy.
-  # 570 is that grace minus 30. progressDeadlineSeconds is 900, matching
-  # helm --timeout 15m. The Kubernetes default of 600 would expire as the
-  # old pod finishes draining.
+  # 570 is that grace minus 30. progressDeadlineSeconds is grace + 900
+  # (1500), and helm --timeout is 25m. The Kubernetes default of 600 would
+  # expire as the old pod finishes draining.
   terminationGracePeriodSeconds: 600
   shutdownGraceSeconds: 570
-  progressDeadlineSeconds: 900
+  progressDeadlineSeconds: 1500
   resources:
     requests:
       cpu: "2"
@@ -428,9 +428,10 @@ workers:
       readOnlyRootFilesystem: false
     # Off in prod. Load-test can turn it on. Shutdown grace is 25 and the
     # pod grace is 40. Recreate, same as docling, so two pods never overlap.
+    # 1500 is grace + 900, the same deadline as the all-queue worker.
     terminationGracePeriodSeconds: 40
     shutdownGraceSeconds: 25
-    progressDeadlineSeconds: 900
+    progressDeadlineSeconds: 1500
     resources:
       requests:
         cpu: 100m
@@ -467,7 +468,9 @@ migrate:
 # Plain Job, not a hook. The name includes the Helm revision, so a failed
 # seed stays in the namespace and does not fail helm upgrade. --wait does
 # not wait for Jobs unless --wait-for-jobs is set. Migrate stays the hook.
-# Prod leaves this off until PR #197 merges (#196, then #197, then #201).
+# Autodeploy checks this Job synchronously right after the upgrade.
+# The next upgrade's Helm cleanup removes the previous revision's Job.
+# Prod turns the Job on. The chart default stays off.
 curriculumSeed:
   enabled: false
   # Same root api image. Keep off until Dockerfile.api has a USER line.
@@ -479,7 +482,10 @@ curriculumSeed:
     readOnlyRootFilesystem: false
   backoffLimit: 1
   activeDeadlineSeconds: 600
-  ttlSecondsAfterFinished: 600
+  # 24h. Long enough that a failed Job is still visible if something other
+  # than autodeploy is watching. Autodeploy does not rely on this TTL: it
+  # waits on the Job before it exits.
+  ttlSecondsAfterFinished: 86400
   resources:
     requests:
       cpu: 100m
@@ -523,7 +529,9 @@ cloudflared:
 # This chart does not set a postgres securityContext.
 cnpg:
   instances: 1
-  image: ghcr.io/cloudnative-pg/postgresql:16.15-standard-bookworm
+  # 16.15-standard-bookworm still has unfixed HIGH findings in libldap.
+  # The pinned trixie tag is clean at HIGH and CRITICAL.
+  image: ghcr.io/cloudnative-pg/postgresql:16.15-standard-trixie
   imagePullPolicy: IfNotPresent
   database: education
   owner: education
@@ -645,8 +653,10 @@ caddyAlias:
 # Off except in values-loadtest.yaml. The image is a pinned CPython tag.
 llmMock:
   enabled: false
-  image: python:3.12.7-slim-bookworm
-  # python:3.12.7-slim-bookworm image config User is empty (root).
+  image: python:3.12.15-slim-bookworm
+  # python:3.12.15-slim-bookworm image config User is empty (root).
+  # Trivy 0.76.0 reports no HIGH or CRITICAL findings on this tag once
+  # .trivyignore is applied. python:3.12.7-slim-bookworm does not.
   securityContext:
     runAsNonRoot: false
     runAsUser: null
@@ -690,9 +700,10 @@ demoData:
 loadtest:
   k6:
     enabled: false
-    image: grafana/k6:0.57.0
-    # grafana/k6:0.57.0 Dockerfile adds uid 12345 and sets USER k6.
-    # The image config User is the name k6, so the chart sets the numeric uid.
+    image: grafana/k6:2.3.0
+    # grafana/k6:2.3.0 image config User is 12345. 0.57.0 and 1.8.2 have
+    # more fixable HIGH findings. 2.3.0 is the newest pinned release and
+    # still has fixable HIGH findings; there is no newer release tag.
     securityContext:
       runAsNonRoot: true
       runAsUser: 12345

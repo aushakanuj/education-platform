@@ -10,8 +10,41 @@ with_ci_tags() {
   helm "$@" --set api.image.tag=ci --set web.image.tag=ci
 }
 
+assert_recreate_deadline() {
+  python3 - "$1" << 'PY'
+import re
+import sys
+
+text = open(sys.argv[1], encoding="utf-8").read()
+docs = [doc for doc in re.split(r"(?m)^---\s*$", text) if doc.strip()]
+found = 0
+for doc in docs:
+    kind = re.search(r"(?m)^kind: (\S+)", doc)
+    if kind is None or kind.group(1) != "Deployment":
+        continue
+    if "type: Recreate" not in doc:
+        continue
+    name = re.search(r"(?m)^  name: (\S+)", doc)
+    label = name.group(1) if name else "deployment"
+    grace = re.search(r"terminationGracePeriodSeconds: (\d+)", doc)
+    deadline = re.search(r"progressDeadlineSeconds: (\d+)", doc)
+    if grace is None or deadline is None:
+        raise SystemExit(f"{label} is Recreate without grace and progress deadline")
+    if int(deadline.group(1)) <= int(grace.group(1)) + 600:
+        raise SystemExit(
+            f"{label} progressDeadlineSeconds {deadline.group(1)} "
+            f"is not above grace {grace.group(1)} + 600"
+        )
+    found += 1
+if found == 0:
+    raise SystemExit(f"no Recreate deployment in {sys.argv[1]}")
+print(f"recreate deadline ok in {sys.argv[1]} ({found})")
+PY
+}
+
 with_ci_tags lint "${chart}"
 with_ci_tags template curioed "${chart}" --namespace curioed > "${out}"
+assert_recreate_deadline "${out}"
 
 python3 - "${out}" <<'PY'
 import re
@@ -101,7 +134,7 @@ for label, doc, snippet in (
     ("migrate backoff", job, "backoffLimit: 0"),
     ("migrate script", job, "migrate-wrapper.sh"),
     ("migrate memory", job, "memory: 256Mi"),
-    ("pgvector image", cluster, "ghcr.io/cloudnative-pg/postgresql:16.15-standard-bookworm"),
+    ("pgvector image", cluster, "ghcr.io/cloudnative-pg/postgresql:16.15-standard-trixie"),
     ("pgvector extension", cluster, "CREATE EXTENSION IF NOT EXISTS vector"),
     ("shared buffers", cluster, 'shared_buffers: "512MB"'),
     ("effective cache", cluster, 'effective_cache_size: "1GB"'),
@@ -237,8 +270,8 @@ if ! printf '%s\n' "$seed_on" | grep -q 'backoffLimit: 1'; then
   echo "curriculum seed backoffLimit must be 1" >&2
   exit 1
 fi
-if ! printf '%s\n' "$seed_on" | grep -q 'ttlSecondsAfterFinished: 600'; then
-  echo "curriculum seed is missing ttlSecondsAfterFinished" >&2
+if ! printf '%s\n' "$seed_on" | grep -q 'ttlSecondsAfterFinished: 86400'; then
+  echo "curriculum seed ttl is not 86400" >&2
   exit 1
 fi
 if ! printf '%s\n' "$seed_on" | grep -q 'memory: 256Mi'; then
@@ -277,30 +310,66 @@ if helm template curioed "${chart}" --namespace curioed --set api.image.tag=late
   echo "latest image tag should fail the render" >&2
   exit 1
 fi
+if printf '%s\n' "$(cat "${out}.err")" | grep -q 'yaml: line'; then
+  echo "latest image tag failed as invalid YAML" >&2
+  cat "${out}.err" >&2
+  exit 1
+fi
+if helm template curioed "${chart}" --namespace curioed --set api.image.tag=LATEST --set web.image.tag=ci > /dev/null 2>"${out}.err"; then
+  echo "LATEST image tag should fail the render" >&2
+  exit 1
+fi
+if helm template curioed "${chart}" --namespace curioed --set api.image.tag=ci --set web.image.tag=ci --set llmMock.image=python:latest > /dev/null 2>"${out}.err"; then
+  echo "llmMock python:latest should fail the render" >&2
+  exit 1
+fi
+if ! grep -q "llmMock" "${out}.err"; then
+  echo "llmMock latest did not name llmMock" >&2
+  cat "${out}.err" >&2
+  exit 1
+fi
+if helm template curioed "${chart}" --namespace curioed --set api.image.tag=ci --set web.image.tag=ci --set llmMock.image=python:LATEST > /dev/null 2>"${out}.err"; then
+  echo "llmMock python:LATEST should fail the render" >&2
+  exit 1
+fi
 if helm template curioed "${chart}" --namespace curioed > /dev/null 2>"${out}.err"; then
   echo "an empty image tag should fail the render" >&2
   exit 1
 fi
-if ! grep -q "image.tag is required" "${out}.err"; then
-  echo "empty image tag did not say the tag is required" >&2
+if printf '%s\n' "$(cat "${out}.err")" | grep -q 'yaml: line'; then
+  echo "empty image tag failed as invalid YAML" >&2
+  cat "${out}.err" >&2
+  exit 1
+fi
+if ! grep -q "api.image.tag" "${out}.err"; then
+  echo "empty image tag did not name api.image.tag" >&2
   cat "${out}.err" >&2
   exit 1
 fi
 
-lint_missing="$(helm lint "${chart}" 2>&1 || true)"
-if printf '%s\n' "${lint_missing}" | grep -q 'yaml: line 55'; then
-  echo "helm lint reported yaml: line 55 instead of the required image tag" >&2
+set +e
+lint_missing="$(helm lint "${chart}" 2>&1)"
+lint_rc=$?
+set -e
+if [ "${lint_rc}" -eq 0 ]; then
+  echo "helm lint with no image tag should fail" >&2
   printf '%s\n' "${lint_missing}" >&2
   exit 1
 fi
-if ! printf '%s\n' "${lint_missing}" | grep -q 'image.tag is required'; then
-  echo "helm lint did not say the image tag is required" >&2
+if printf '%s\n' "${lint_missing}" | grep -q 'yaml: line'; then
+  echo "helm lint reported a YAML error instead of the image tag requirement" >&2
+  printf '%s\n' "${lint_missing}" >&2
+  exit 1
+fi
+if ! printf '%s\n' "${lint_missing}" | grep -q 'api.image.tag'; then
+  echo "helm lint did not name api.image.tag" >&2
   printf '%s\n' "${lint_missing}" >&2
   exit 1
 fi
 printf '%s\n' "${lint_missing}" > "${out}.lint-missing-tag"
 
 with_ci_tags template curioed "${chart}" --namespace curioed --set workers.llm.enabled=true > "${out}.llm"
+assert_recreate_deadline "${out}.llm"
 python3 - "${out}.llm" <<'PY'
 import re
 import sys
@@ -474,6 +543,7 @@ if ! cmp -s "${chart}/files/k6-api.js" "${root}/deploy/loadtest/k6-api.js"; then
 fi
 
 helm template curioed "${chart}" --namespace curioed -f "${chart}/values-prod.yaml" > "${out}.prod"
+assert_recreate_deadline "${out}.prod"
 python3 - "${out}.prod" <<'PY'
 import re, sys
 text = open(sys.argv[1], encoding="utf-8").read()
@@ -508,8 +578,11 @@ if 'requests.cpu: "6"' not in quota or 'limits.cpu: "16"' not in quota:
     raise SystemExit("prod cpu quota is wrong")
 if 'JEV_JUDGE_MODE: "off"' in text:
     raise SystemExit("prod must leave the lesson judge unchanged")
-if any(kind_of(doc) == "Job" and name_of(doc).find("-seed-") != -1 for doc in docs):
-    raise SystemExit("prod curriculum seed stays off until PR 197 merges")
+seed_jobs = [name_of(doc) for doc in docs if kind_of(doc) == "Job" and "-seed-r" in name_of(doc)]
+if seed_jobs != ["curioed-seed-r1"]:
+    raise SystemExit(f"prod curriculum seed job is {seed_jobs}")
+if "ttlSecondsAfterFinished: 86400" not in text:
+    raise SystemExit("prod curriculum seed ttl is not 86400")
 migrate = next(doc for doc in docs if kind_of(doc) == "Job" and name_of(doc).endswith("-migrate"))
 if 'helm.sh/hook: "pre-install,pre-upgrade"' not in migrate:
     raise SystemExit("prod migrate must stay a hook")

@@ -86,11 +86,12 @@ workers:
 migrate:
   enabled: true
 
-# Stays false until PR #197 merges. Merge order is #196, then #197, then #201.
-# Flip this to true after that. The Job is not a hook: its name includes the
-# release revision, so a failed seed stays visible and does not fail helm upgrade.
+# #197 merges before this chart, so prod seeds the curriculum.
+# The Job is not a hook. Autodeploy waits on job/<release>-seed-r<revision>
+# immediately after helm upgrade. ttlSecondsAfterFinished is 86400.
+# The next upgrade's Helm cleanup removes the previous revision's Job.
 curriculumSeed:
-  enabled: false
+  enabled: true
 
 cloudflared:
   enabled: true

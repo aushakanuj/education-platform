@@ -17,6 +17,10 @@ if [[ "${KUBECTL_FAIL:-0}" == 1 ]]; then
   echo "kubectl failed" >&2
   exit 1
 fi
+if [[ -n "${KUBECTL_STDOUT+x}" ]]; then
+  printf '%s' "${KUBECTL_STDOUT}"
+  exit 0
+fi
 cat << JSON
 {"spec":{"replicas":1},"status":{"readyReplicas":${READY:-1}}}
 JSON
@@ -81,6 +85,26 @@ run_case() {
 run_case "kubectl failure exits 1" 1 KUBECTL_FAIL=1 "${guard}"
 if grep -q '^docker ' "${tmp}/log"; then
   echo "FAIL kubectl failure still called docker"
+  failures=$((failures + 1))
+fi
+if grep -q 'Traceback' "${tmp}/out"; then
+  echo "FAIL kubectl failure printed a traceback"
+  failures=$((failures + 1))
+fi
+
+run_case "non-json kubectl exits 1" 1 KUBECTL_STDOUT='not-json' "${guard}"
+if grep -q '^docker ' "${tmp}/log"; then
+  echo "FAIL non-json called docker"
+  failures=$((failures + 1))
+fi
+if grep -q 'Traceback' "${tmp}/out"; then
+  echo "FAIL non-json printed a traceback"
+  cat "${tmp}/out"
+  failures=$((failures + 1))
+fi
+if ! grep -q 'WARNING: kubectl output is not JSON' "${tmp}/out"; then
+  echo "FAIL non-json did not warn"
+  cat "${tmp}/out"
   failures=$((failures + 1))
 fi
 

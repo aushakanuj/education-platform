@@ -54,20 +54,34 @@ kube() {
 }
 
 if ! deploy_json="$(kube get deploy "${deployment}" --namespace "${namespace}" -o json)"; then
-  log "kubectl failed; compose was not touched"
+  log "WARNING: kubectl failed; compose was not touched"
   exit 1
 fi
 
-parsed="$(
+if ! parsed="$(
   printf '%s' "${deploy_json}" | python3 -c '
 import json, sys
-doc = json.load(sys.stdin)
+raw = sys.stdin.read()
+try:
+    doc = json.loads(raw)
+except json.JSONDecodeError:
+    sys.exit(1)
+if not isinstance(doc, dict):
+    sys.exit(1)
 spec = doc.get("spec") or {}
 status = doc.get("status") or {}
-print(int(spec.get("replicas") or 0))
-print(int(status.get("readyReplicas") or 0))
+try:
+    desired = int(spec.get("replicas") or 0)
+    ready = int(status.get("readyReplicas") or 0)
+except (TypeError, ValueError):
+    sys.exit(1)
+print(desired)
+print(ready)
 '
-)"
+)"; then
+  log "WARNING: kubectl output is not JSON; compose was not touched"
+  exit 1
+fi
 desired="${parsed%%$'\n'*}"
 ready="${parsed#*$'\n'}"
 log "k8s ${namespace}/${deployment} desired=${desired} ready=${ready}"
