@@ -41,7 +41,7 @@ kubectl label namespace curioed \
 
 Other defaults: `allowPrivilegeEscalation: false`, capabilities `drop: [ALL]`, `seccompProfile: RuntimeDefault`. `readOnlyRootFilesystem` stays false. The API Hugging Face cache, uploads, and inductor cache are already volumes. Nginx still writes under `/var` when the flag is on, via the emptyDirs above.
 
-The curriculum seed Job is off by default. Prod turns it on. The command is `python -m education_platform.modules.materials.seed` from PR #197. Hook weight 10 runs after the migrate hook at weight 5. It requests 100m CPU and 256Mi, with limits of 1 CPU and 1Gi, same as the migrate hook. The LimitRange still covers any pod that forgets resources. On the first install, disable migrate and the seed with `--set` until the CNPG Cluster exists.
+The curriculum seed Job is off by default, including prod, until PR #197 merges. The command is `python -m education_platform.modules.materials.seed`. It is not a hook. The name is `<fullname>-seed-r<revision>`, with `backoffLimit: 1` and `ttlSecondsAfterFinished: 600`, so a failed seed stays visible and does not fail `helm upgrade`. It requests 100m CPU and 256Mi, with limits of 1 CPU and 1Gi. Migrate and the seed both start with a `wait-for-db` initContainer that loops `pg_isready` against the CNPG rw service for 120s, using `postgres:16.10-bookworm`. On a first install, disable the migrate hook with `--set migrate.enabled=false` until the CNPG Cluster exists.
 
 The CNPG Cluster and every PVC (uploads, hf-cache, inductor, backups) carry `helm.sh/resource-policy: keep`.
 
@@ -170,7 +170,7 @@ Compose and k8s share one tunnel token. If both cloudflared processes connect, C
 
 Prod keeps `cloudflared.replicas` at 0. The Deployment is a rolling update (`maxUnavailable: 0`, `maxSurge: 1`) with `--metrics 0.0.0.0:2000`, a `/ready` probe on that port, and `terminationGracePeriodSeconds: 40` (cloudflared's grace default is 30s). The image tag is `2026.10.1`. A PDB of `maxUnavailable: 1` appears only when replicas are at least 2. With network policy enabled, kubelet probes are allowed to port 2000 and nothing else is opened; cloudflared egress to Traefik in `kube-system` is already allowed. No extra Traefik middleware is added for SSE.
 
-`deploy/k8s/curioed-tunnel-guard.sh` reads the k8s Deployment. If desired or ready replicas are above 0, it `docker stop`s running containers named `education-platform-prod-cloudflared*`. It does not remove them and it does not start or scale anything. If kubectl fails, it exits non-zero and does not touch Docker. `--dry-run` prints the plan. The sample oneshot unit is `curioed-tunnel-guard.service` (`After=` and `Wants=` `docker.service` and `k3s.service`). `curioed-tunnel-guard.timer` is optional.
+`deploy/k8s/curioed-tunnel-guard.sh` reads the k8s Deployment. When at least one pod is Ready, it `docker stop`s running containers named `education-platform-prod-cloudflared*`. It does not remove them and it does not start or scale anything. Exit 0 when nothing was stopped, including a tunnel that is not Ready and a `--dry-run`. Exit 2 when it stopped Compose cloudflared. Exit 1 when kubectl or docker fails; a kubectl failure does not touch Docker. The sample oneshot unit is `curioed-tunnel-guard.service` (`SuccessExitStatus=2`, `After=` and `Wants=` `docker.service` and `k3s.service`). `curioed-tunnel-guard.timer` is optional.
 
 Switch:
 
@@ -212,7 +212,7 @@ docker build -f deploy/Dockerfile.web -t curioed-web:demo --build-arg VITE_API_B
 docker save curioed-api:demo curioed-web:demo | sudo k3s ctr images import -
 ```
 
-`deploy/k8s/k8s-autodeploy.sh` refuses that working-tree path, takes a `flock`, fetches `origin/main`, and exits when the SHA matches the state file. Otherwise it builds, imports, and runs `helm upgrade --install` with `--wait --timeout 15m` and no `--atomic`.
+`deploy/k8s/k8s-autodeploy.sh` refuses that working-tree path, takes a `flock`, fetches `origin/main`, and exits when the SHA matches the state file. Before it builds, the CNPG Cluster in namespace `curioed` must be healthy, with `readyInstances` equal to `instances` (`kubectl get cluster.postgresql.cnpg.io -n curioed`). Otherwise it exits 1 and does not build. First install is manual, in this order: CNPG, then restore, then `helm install`. The upgrade is `helm upgrade --install` with `--wait --timeout 15m` and no `--atomic` and no `--wait-for-jobs`.
 
 ## Restore checks
 

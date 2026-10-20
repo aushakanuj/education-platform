@@ -58,6 +58,11 @@ app.kubernetes.io/component: {{ .component }}
 {{- printf "%s-seed" (include "curioed.fullname" .) | trunc 63 | trimSuffix "-" }}
 {{- end }}
 
+{{/* Plain Job, one per Helm revision, so a failed seed stays visible. */}}
+{{- define "curioed.seedJobName" -}}
+{{- printf "%s-seed-r%s" (include "curioed.fullname" .) (.Release.Revision | toString) | trunc 63 | trimSuffix "-" }}
+{{- end }}
+
 {{- define "curioed.clusterName" -}}
 {{- $base := include "curioed.fullname" . | trunc 40 | trimSuffix "-" }}
 {{- printf "%s-postgres" $base }}
@@ -85,11 +90,21 @@ app.kubernetes.io/component: {{ .component }}
 {{- end }}
 
 {{- define "curioed.imageRef" -}}
-{{- $tag := required (printf "image.tag is required for %s. Pass a commit SHA or pinned tag with --set. ci is only a test tag, not a published image. Do not use latest or unreleased." .repository) .tag -}}
+{{- $tag := .tag -}}
+{{- if not $tag -}}
+{{- $_ := required (printf "image.tag is required for %s. Pass a commit SHA or pinned tag with --set. ci is only a test tag, not a published image. Do not use latest or unreleased." .repository) $tag -}}
+{{- /* Lint mode logs required and keeps going. A bare "repo:" is invalid YAML and hides that message. */ -}}
+{{- $tag = "missing-tag" -}}
+{{- end -}}
 {{- printf "%s:%s" .repository $tag -}}
 {{- end }}
 
 {{- define "curioed.validate" -}}
+{{- $_ := required "image.tag is required for the api image. Pass a commit SHA or pinned tag with --set. ci is only a test tag, not a published image. Do not use latest or unreleased." .Values.api.image.tag -}}
+{{- $_ := required "image.tag is required for the web image. Pass a commit SHA or pinned tag with --set. ci is only a test tag, not a published image. Do not use latest or unreleased." .Values.web.image.tag -}}
+{{- if or (not .Values.databaseWait.image.tag) (eq .Values.databaseWait.image.tag "latest") }}
+{{- fail "databaseWait.image.tag must be a pinned tag, not latest or empty" }}
+{{- end }}
 {{- if not (regexMatch "^[A-Za-z0-9.-]+$" .Values.domain) }}
 {{- fail (printf "domain must be a hostname, got %q" .Values.domain) }}
 {{- end }}
@@ -276,6 +291,36 @@ envFrom:
 - name: WORKER_SHUTDOWN_GRACE_SECONDS
   value: {{ (.shutdownGrace | default .pool.shutdownGraceSeconds) | quote }}
 {{- end }}
+{{- end }}
+
+{{/* pg_isready loop. Same container securityContext as the workload that waits. */}}
+{{- define "curioed.dbWaitInitContainer" -}}
+- name: wait-for-db
+  image: {{ printf "%s:%s" .root.Values.databaseWait.image.repository (.root.Values.databaseWait.image.tag | toString) | quote }}
+  imagePullPolicy: IfNotPresent
+  {{- include "curioed.containerSecurityContext" (dict "root" .root "security" .security "add" list) | nindent 2 }}
+  command: ["sh", "-c"]
+  args:
+    - |
+      deadline=$(($(date +%s) + {{ .root.Values.databaseWait.timeoutSeconds }}))
+      echo "waiting up to {{ .root.Values.databaseWait.timeoutSeconds }}s for ${POSTGRES_HOST}"
+      until pg_isready -h "${POSTGRES_HOST}" -p 5432 -U "${POSTGRES_USER}" -d "${POSTGRES_DB}"; do
+        if [ "$(date +%s)" -ge "${deadline}" ]; then
+          echo "timed out after {{ .root.Values.databaseWait.timeoutSeconds }}s waiting for ${POSTGRES_HOST}" >&2
+          exit 1
+        fi
+        sleep 2
+      done
+  env:
+    - name: POSTGRES_HOST
+      value: {{ include "curioed.postgresHost" .root | quote }}
+    - name: POSTGRES_DB
+      value: {{ .root.Values.cnpg.database | quote }}
+    - name: POSTGRES_USER
+      valueFrom:
+        secretKeyRef:
+          name: {{ .root.Values.secrets.database.existingSecret }}
+          key: {{ .root.Values.secrets.database.usernameKey }}
 {{- end }}
 
 {{- define "curioed.imagePullSecrets" -}}

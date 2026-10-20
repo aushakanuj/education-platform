@@ -83,11 +83,11 @@ workers:
 migrate:
   enabled: true
 
-# PR #197 supplies `python -m education_platform.modules.materials.seed`.
-# Hook weight 10 runs after migrate (weight 5). On the first install, disable
-# this and migrate with --set until the CNPG Cluster exists, then upgrade.
+# Stays false until PR #197 merges. Merge order is #196, then #197, then #201.
+# Flip this to true after that. The Job is not a hook: its name includes the
+# release revision, so a failed seed stays visible and does not fail helm upgrade.
 curriculumSeed:
-  enabled: true
+  enabled: false
 
 cloudflared:
   enabled: true

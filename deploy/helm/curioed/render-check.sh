@@ -2,14 +2,16 @@
 # Lint the chart and fail if the render drifts from the k3s design.
 set -eu
 
-root="$(CDPATH= cd -- "$(dirname "$0")/../../.." && pwd)"
+root="$(CDPATH='' cd -- "$(dirname "$0")/../../.." && pwd)"
 chart="${root}/deploy/helm/curioed"
 out="${TMPDIR:-/tmp}/curioed-helm.yaml"
-# ci is a render placeholder. It is not a published image.
-test_tag="--set api.image.tag=ci --set web.image.tag=ci"
 
-helm lint "${chart}" ${test_tag}
-helm template curioed "${chart}" --namespace curioed ${test_tag} > "${out}"
+with_ci_tags() {
+  helm "$@" --set api.image.tag=ci --set web.image.tag=ci
+}
+
+with_ci_tags lint "${chart}"
+with_ci_tags template curioed "${chart}" --namespace curioed > "${out}"
 
 python3 - "${out}" <<'PY'
 import re
@@ -187,7 +189,7 @@ if "AI_GATEWAY_FEATURES" in api:
 print(f"rendered {len(docs)} documents")
 PY
 
-migrate_off="$(helm template curioed "${chart}" --namespace curioed --set migrate.enabled=false ${test_tag})"
+migrate_off="$(with_ci_tags template curioed "${chart}" --namespace curioed --set migrate.enabled=false)"
 if printf '%s\n' "$migrate_off" | grep -q 'migrate-wrapper.sh'; then
   echo "migrate.enabled=false still rendered the migrate hook" >&2
   exit 1
@@ -197,13 +199,37 @@ if printf '%s\n' "$migrate_off" | grep -q 'education_platform.modules.materials.
   exit 1
 fi
 
-seed_on="$(helm template curioed "${chart}" --namespace curioed --set curriculumSeed.enabled=true --set migrate.enabled=false ${test_tag})"
+seed_on="$(with_ci_tags template curioed "${chart}" --namespace curioed --set curriculumSeed.enabled=true --set migrate.enabled=false)"
 if printf '%s\n' "$seed_on" | grep -q 'migrate-wrapper.sh'; then
   echo "seed-only render still included migrate" >&2
   exit 1
 fi
 if ! printf '%s\n' "$seed_on" | grep -q 'education_platform.modules.materials.seed'; then
-  echo "curriculumSeed.enabled=true did not render the seed hook" >&2
+  echo "curriculumSeed.enabled=true did not render the seed job" >&2
+  exit 1
+fi
+if printf '%s\n' "$seed_on" | grep -q 'helm.sh/hook:'; then
+  echo "curriculum seed must not be a Helm hook" >&2
+  exit 1
+fi
+if ! printf '%s\n' "$seed_on" | grep -q 'seed-r1'; then
+  echo "curriculum seed name must include the release revision" >&2
+  exit 1
+fi
+if ! printf '%s\n' "$seed_on" | grep -q 'name: wait-for-db'; then
+  echo "curriculum seed is missing the database wait" >&2
+  exit 1
+fi
+if ! printf '%s\n' "$seed_on" | grep -q 'postgres:16.10-bookworm'; then
+  echo "database wait image is not the pinned postgres tag" >&2
+  exit 1
+fi
+if ! printf '%s\n' "$seed_on" | grep -q 'backoffLimit: 1'; then
+  echo "curriculum seed backoffLimit must be 1" >&2
+  exit 1
+fi
+if ! printf '%s\n' "$seed_on" | grep -q 'ttlSecondsAfterFinished: 600'; then
+  echo "curriculum seed is missing ttlSecondsAfterFinished" >&2
   exit 1
 fi
 if ! printf '%s\n' "$seed_on" | grep -q 'memory: 256Mi'; then
@@ -219,7 +245,7 @@ if ! printf '%s\n' "$seed_on" | grep -q 'memory: 1Gi'; then
   exit 1
 fi
 
-if helm template curioed "${chart}" --namespace curioed --set cnpg.backup.enabled=true ${test_tag} > /dev/null 2>"${out}.err"; then
+if with_ci_tags template curioed "${chart}" --namespace curioed --set cnpg.backup.enabled=true > /dev/null 2>"${out}.err"; then
   echo "cnpg.backup.enabled=true should fail the render" >&2
   exit 1
 fi
@@ -229,11 +255,10 @@ if ! grep -q "not supported yet" "${out}.err"; then
   exit 1
 fi
 
-if helm template curioed "${chart}" --namespace curioed \
+if with_ci_tags template curioed "${chart}" --namespace curioed \
   --set networkPolicy.enabled=true \
   --set networkPolicy.postgres.mode=cidr \
   --set networkPolicy.postgres.cidr= \
-  ${test_tag} \
   > /dev/null 2>"${out}.err"; then
   echo "empty postgres cidr should fail the render" >&2
   exit 1
@@ -253,7 +278,20 @@ if ! grep -q "image.tag is required" "${out}.err"; then
   exit 1
 fi
 
-helm template curioed "${chart}" --namespace curioed --set workers.llm.enabled=true ${test_tag} > "${out}.llm"
+lint_missing="$(helm lint "${chart}" 2>&1 || true)"
+if printf '%s\n' "${lint_missing}" | grep -q 'yaml: line 55'; then
+  echo "helm lint reported yaml: line 55 instead of the required image tag" >&2
+  printf '%s\n' "${lint_missing}" >&2
+  exit 1
+fi
+if ! printf '%s\n' "${lint_missing}" | grep -q 'image.tag is required'; then
+  echo "helm lint did not say the image tag is required" >&2
+  printf '%s\n' "${lint_missing}" >&2
+  exit 1
+fi
+printf '%s\n' "${lint_missing}" > "${out}.lint-missing-tag"
+
+with_ci_tags template curioed "${chart}" --namespace curioed --set workers.llm.enabled=true > "${out}.llm"
 python3 - "${out}.llm" <<'PY'
 import re
 import sys
@@ -280,7 +318,7 @@ print("enabled LLM worker rendered")
 PY
 
 all_on="${out}.all"
-helm template curioed "${chart}" --namespace curioed \
+with_ci_tags template curioed "${chart}" --namespace curioed \
   --set workers.llm.enabled=true \
   --set curriculumSeed.enabled=true \
   --set networkPolicy.enabled=true \
@@ -288,7 +326,6 @@ helm template curioed "${chart}" --namespace curioed \
   --set keda.llm.enabled=true \
   --set keda.docling.enabled=true \
   --set web.autoscaling.enabled=true \
-  ${test_tag} \
   > "${all_on}"
 
 python3 - "${all_on}" <<'PY'
@@ -462,21 +499,13 @@ if 'requests.cpu: "6"' not in quota or 'limits.cpu: "16"' not in quota:
     raise SystemExit("prod cpu quota is wrong")
 if 'JEV_JUDGE_MODE: "off"' in text:
     raise SystemExit("prod must leave the lesson judge unchanged")
-seed = next(doc for doc in docs if kind_of(doc) == "Job" and name_of(doc).endswith("-seed"))
+if any(kind_of(doc) == "Job" and name_of(doc).find("-seed-") != -1 for doc in docs):
+    raise SystemExit("prod curriculum seed stays off until PR 197 merges")
 migrate = next(doc for doc in docs if kind_of(doc) == "Job" and name_of(doc).endswith("-migrate"))
-seed_weight = int(re.search(r'helm\.sh/hook-weight: "(\d+)"', seed).group(1))
-migrate_weight = int(re.search(r'helm\.sh/hook-weight: "(\d+)"', migrate).group(1))
-if migrate_weight >= seed_weight:
-    raise SystemExit(f"seed hook weight {seed_weight} must run after migrate weight {migrate_weight}")
-for snippet in (
-    "education_platform.modules.materials.seed",
-    "cpu: 100m",
-    'cpu: "1"',
-    "memory: 256Mi",
-    "memory: 1Gi",
-):
-    if snippet not in seed:
-        raise SystemExit(f"prod seed job is missing {snippet}")
+if 'helm.sh/hook: "pre-install,pre-upgrade"' not in migrate:
+    raise SystemExit("prod migrate must stay a hook")
+if "name: wait-for-db" not in migrate:
+    raise SystemExit("prod migrate is missing the database wait")
 
 def cpu_cores(raw: str) -> float:
     value = raw.strip().strip("'\"")

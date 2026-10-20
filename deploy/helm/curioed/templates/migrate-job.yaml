@@ -29,6 +29,8 @@ spec:
       {{- with include "curioed.scheduling" . | trim }}
       {{- nindent 6 . }}
       {{- end }}
+      initContainers:
+        {{- include "curioed.dbWaitInitContainer" (dict "root" . "security" .Values.migrate.securityContext) | nindent 8 }}
       containers:
         - name: migrate
           image: {{ include "curioed.imageRef" .Values.api.image }}

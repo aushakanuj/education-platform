@@ -158,11 +158,77 @@ dbPool:
 
 revisionHistoryLimit: 3
 
+# pg_isready initContainer on the migrate hook and the curriculum seed Job.
+# The tag is pinned. latest is rejected.
+databaseWait:
+  image:
+    repository: postgres
+    tag: "16.10-bookworm"
+  timeoutSeconds: 120
+
 # Shared hardening. runAsNonRoot, runAsUser, runAsGroup, and fsGroup are set
-# on each workload. A null user, group, or fsGroup is omitted.
+# on each workload. A null user, group, or fsGroup is omitted. fsGroup is what
+# owns the uploads PVC once a non-root uid is set.
 # readOnlyRootFilesystem stays false here. A workload can set its own bool.
 # When that bool is true the pod mounts an emptyDir on /tmp. Nginx also mounts
-# /var/cache/nginx and /var/run. The defaults below stay false.
+# /var/cache/nginx and /var/run. The defaults below stay false so today's
+# root images keep working. web.service.port stays 80 until nginx-unprivileged.
+#
+# nonRoot stays commented until those images are what the cluster runs.
+# Uncommenting this block does nothing by itself: copy the fields onto each
+# component's securityContext, set web.service.port to 8080, and drop
+# NET_BIND_SERVICE from web.addCapabilities.
+# nonRoot:
+#   api:
+#     runAsNonRoot: true
+#     runAsUser: 10001
+#     runAsGroup: 10001
+#     fsGroup: 10001
+#     readOnlyRootFilesystem: true
+#   web:
+#     runAsNonRoot: true
+#     runAsUser: 101
+#     runAsGroup: 101
+#     fsGroup: 101
+#     readOnlyRootFilesystem: true
+#     port: 8080
+#   workerDocling:
+#     runAsNonRoot: true
+#     runAsUser: 10001
+#     runAsGroup: 10001
+#     fsGroup: 10001
+#     readOnlyRootFilesystem: true
+#   workers:
+#     llm:
+#       runAsNonRoot: true
+#       runAsUser: 10001
+#       runAsGroup: 10001
+#       fsGroup: 10001
+#       readOnlyRootFilesystem: true
+#   migrate:
+#     runAsNonRoot: true
+#     runAsUser: 10001
+#     runAsGroup: 10001
+#     fsGroup: 10001
+#     readOnlyRootFilesystem: true
+#   curriculumSeed:
+#     runAsNonRoot: true
+#     runAsUser: 10001
+#     runAsGroup: 10001
+#     fsGroup: 10001
+#     readOnlyRootFilesystem: true
+#   llmMock:
+#     runAsNonRoot: true
+#     runAsUser: 10001
+#     runAsGroup: 10001
+#     fsGroup: 10001
+#     readOnlyRootFilesystem: true
+#   demoData:
+#     runAsNonRoot: true
+#     runAsUser: 10001
+#     runAsGroup: 10001
+#     fsGroup: 10001
+#     readOnlyRootFilesystem: true
 podSecurity:
   seccompProfile: RuntimeDefault
   allowPrivilegeEscalation: false
@@ -375,7 +441,7 @@ migrate:
     fsGroup: null
     readOnlyRootFilesystem: false
   # pre-install runs before this chart's Cluster and backup PVC exist.
-  # First install disables this and curriculumSeed, then the upgrade enables both.
+  # First install sets migrate.enabled=false, waits for CNPG, restores, then upgrades.
   hooks: pre-install,pre-upgrade
   weight: "5"
   deletePolicy: before-hook-creation,hook-succeeded
@@ -390,9 +456,10 @@ migrate:
       cpu: "1"
       memory: 1Gi
 
-# Off until the seed branch is merged. Do not retarget the command at
-# unmerged seed-branch code. Weight 10 runs after the migrate hook (weight 5).
-# Same first-install constraint as migrate: the database does not exist yet.
+# Plain Job, not a hook. The name includes the Helm revision, so a failed
+# seed stays in the namespace and does not fail helm upgrade. --wait does
+# not wait for Jobs unless --wait-for-jobs is set. Migrate stays the hook.
+# Prod leaves this off until PR #197 merges (#196, then #197, then #201).
 curriculumSeed:
   enabled: false
   # Same root api image. Keep off until Dockerfile.api has a USER line.
@@ -402,11 +469,9 @@ curriculumSeed:
     runAsGroup: null
     fsGroup: null
     readOnlyRootFilesystem: false
-  hooks: pre-install,pre-upgrade
-  weight: "10"
-  deletePolicy: before-hook-creation,hook-succeeded
-  backoffLimit: 0
+  backoffLimit: 1
   activeDeadlineSeconds: 600
+  ttlSecondsAfterFinished: 600
   resources:
     requests:
       cpu: 100m

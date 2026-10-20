@@ -2,18 +2,14 @@
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: {{ include "curioed.seedName" . }}
+  name: {{ include "curioed.seedJobName" . }}
   labels:
     {{- include "curioed.labels" . | nindent 4 }}
     app.kubernetes.io/component: seed
-  annotations:
-    helm.sh/hook: {{ .Values.curriculumSeed.hooks | quote }}
-    helm.sh/hook-weight: {{ .Values.curriculumSeed.weight | quote }}
-    helm.sh/hook-delete-policy: {{ .Values.curriculumSeed.deletePolicy | quote }}
 spec:
   backoffLimit: {{ .Values.curriculumSeed.backoffLimit }}
   activeDeadlineSeconds: {{ .Values.curriculumSeed.activeDeadlineSeconds }}
-  ttlSecondsAfterFinished: 600
+  ttlSecondsAfterFinished: {{ .Values.curriculumSeed.ttlSecondsAfterFinished }}
   template:
     metadata:
       labels:
@@ -29,6 +25,8 @@ spec:
       {{- with include "curioed.scheduling" . | trim }}
       {{- nindent 6 . }}
       {{- end }}
+      initContainers:
+        {{- include "curioed.dbWaitInitContainer" (dict "root" . "security" .Values.curriculumSeed.securityContext) | nindent 8 }}
       containers:
         - name: seed
           image: {{ include "curioed.imageRef" .Values.api.image }}
