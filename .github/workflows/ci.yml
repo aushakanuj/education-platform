@@ -104,23 +104,19 @@ jobs:
         run: deploy/k8s/curioed-tunnel-guard_test.sh
       - name: Autodeploy checkout
         run: deploy/k8s/k8s-autodeploy_test.sh
-      # aquasecurity/setup-trivy v0.3.1. HIGH and CRITICAL fail this job
-      # unless the CVE is listed in .trivyignore with a reason.
-      - name: Install Trivy
-        uses: aquasecurity/setup-trivy@81e514348e19b6112ce2a7e3ecbafe19c1e1f567 # v0.3.1
+      - name: Image scan guard
+        run: deploy/k8s/scan-base-images_test.sh
+
+  # nginx:1.27-alpine from deploy/Dockerfile.web fails this job on purpose.
+  # cursor/nonroot-images replaces that base. No continue-on-error, and the
+  # findings are not in .trivyignore.
+  image-scan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: aquasecurity/setup-trivy@81e514348e19b6112ce2a7e3ecbafe19c1e1f567 # v0.3.1
         with:
           version: v0.76.0
-      - name: Scan base images
-        run: |
-          # Trivy 0.76 accepts one image per invocation.
-          set -eu
-          for image in \
-            python:3.12-slim-bookworm \
-            nginx:1.31.7-alpine-slim \
-            cloudflare/cloudflared:2026.10.2 \
-            ghcr.io/cloudnative-pg/postgresql:16.15-standard-trixie
-          do
-            trivy image --scanners vuln --exit-code 1 --severity HIGH,CRITICAL \
-              --ignorefile .trivyignore \
-              "$image"
-          done
+      - name: Scan Dockerfile and chart images
+        run: deploy/k8s/scan-base-images.sh

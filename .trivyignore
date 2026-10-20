@@ -3,8 +3,10 @@
 # python:3.12-slim-bookworm or ghcr.io/cloudnative-pg/postgresql:16.15-standard-trixie.
 # Do not add a CVE that already has a fixed package in any scanned image.
 # nginx:1.31.7-alpine-slim and cloudflare/cloudflared:2026.10.2 are clean
-# at HIGH and CRITICAL. Do not point the scan back at nginx:1.27-alpine or
-# cloudflared:2026.10.1. nginx:1.31.7-alpine (not slim) still has fixed findings.
+# at HIGH and CRITICAL. Dockerfile.web is still nginx:1.27-alpine. That scan
+# is expected to fail until cursor/nonroot-images lands. Do not ignore those
+# findings and do not set continue-on-error. nginx:1.31.7-alpine (not slim)
+# still has fixed findings.
 
 # zlib zipOpenNewFileInZip4_64, shipped inside zlib1g. No patched bookworm package.
 CVE-2023-45853
@@ -87,4 +89,4 @@ CVE-2026-9538
 # sha256:34386ef0cb081344d7ec1c103ba398e6e9f64e9ab3a1509accc92a4e24a07258
 # and still ship 3.0.22-1~deb12u1.
 # review-by 2026-11-19: drop once bookworm ships a fixed openssl/libssl3
-CVE-2026-84782
+CVE-2026-84782 exp:2026-11-19
