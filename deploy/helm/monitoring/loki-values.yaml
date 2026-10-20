@@ -1,4 +1,4 @@
-# Overlay for grafana/loki in single-binary mode.
+# Overlay for grafana/loki 7.3.0 (app 3.6.12), single-binary mode.
 # Filesystem storage. MinIO stays off so this file does not pick a provider.
 # Install instructions are in README.md. Nothing in CI applies this file.
 
@@ -57,3 +57,14 @@ write:
   replicas: 0
 backend:
   replicas: 0
+
+# Chart 7 defaults a canary DaemonSet, a Helm test that needs that canary,
+# and a rules sidecar. All three are off so the single-node budget stays
+# the singleBinary container.
+lokiCanary:
+  enabled: false
+test:
+  enabled: false
+sidecar:
+  rules:
+    enabled: false

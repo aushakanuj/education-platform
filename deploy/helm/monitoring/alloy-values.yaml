@@ -1,10 +1,19 @@
-# Overlay for grafana/alloy. Ships pod logs to the Loki service from
-# loki-values.yaml. Install instructions are in README.md.
+# Overlay for grafana/alloy 1.14.0 (app v1.21.0). Ships pod logs to the Loki
+# service from loki-values.yaml. Install instructions are in README.md.
 # Nothing in CI applies this file.
 
 controller:
   type: deployment
   replicas: 1
+
+configReloader:
+  resources:
+    requests:
+      cpu: 10m
+      memory: 32Mi
+    limits:
+      cpu: 100m
+      memory: 64Mi
 
 alloy:
   resources:

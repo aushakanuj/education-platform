@@ -6,7 +6,7 @@ Install the CloudNativePG operator and the Barman Cloud plugin yourself if you a
 
 ## Memory
 
-Limits are the budget. Requests are what the scheduler reserves. The sum of the limits is **2432Mi (2.375Gi)**. The 2.5Gi target leaves about 128Mi unused.
+Limits are the budget. Requests are what the scheduler reserves. The sum of the limits is **2496Mi (2.4375Gi)**. The 2.5Gi target leaves 64Mi unused.
 
 | Component | Values key | CPU request | Memory request | CPU limit | Memory limit |
 | --- | --- | --- | --- | --- | --- |
@@ -19,7 +19,8 @@ Limits are the budget. Requests are what the scheduler reserves. The sum of the 
 | node-exporter | `prometheus-node-exporter.resources` | 10m | 16Mi | 50m | 32Mi |
 | Loki | `singleBinary.resources` | 50m | 128Mi | 300m | 384Mi |
 | Alloy | `alloy.resources` | 10m | 32Mi | 100m | 64Mi |
-| **Sum** | | **230m** | **1152Mi (1.125Gi)** | | **2432Mi (2.375Gi)** |
+| Alloy config reloader | `configReloader.resources` | 10m | 32Mi | 100m | 64Mi |
+| **Sum** | | **240m** | **1184Mi (1.156Gi)** | | **2496Mi (2.4375Gi)** |
 
 Disk, separate from that RAM budget: Prometheus 8Gi (retention 7 days or 2GiB, whichever comes first), Alertmanager 1Gi, Loki 10Gi. `storageClassName` is `local-path`, the k3s default. The Barman sidecar on the Postgres pod is sized in the CurioEd chart (`cnpg.backup.sidecar`) and is not part of this table.
 
@@ -38,17 +39,21 @@ helm upgrade --install kube-prometheus-stack prometheus-community/kube-prometheu
   -f deploy/helm/monitoring/kube-prometheus-stack-values.yaml
 
 helm upgrade --install loki grafana/loki \
+  --version 7.3.0 \
   --namespace monitoring \
   -f deploy/helm/monitoring/loki-values.yaml
 
 helm upgrade --install alloy grafana/alloy \
+  --version 1.14.0 \
   --namespace monitoring \
   -f deploy/helm/monitoring/alloy-values.yaml
 ```
 
 The Prometheus release name `kube-prometheus-stack` matches `monitoring.prometheusRelease` in the CurioEd chart. The values turn off the Helm-release selector so Prometheus also scrapes the PodMonitor that CloudNativePG creates in the application namespace. k3s control-plane jobs (`kubeEtcd`, `kubeControllerManager`, `kubeScheduler`, `kubeProxy`) are disabled because k3s does not publish them at the chart's default addresses.
 
-Loki runs as one binary on the local disk. MinIO is disabled. Alloy tails pod logs and pushes them to `http://loki.monitoring.svc.cluster.local:3100/loki/api/v1/push`. Promtail is the older shipper; this install uses Alloy.
+Loki 7.3.0 runs as one binary on the local disk. MinIO, the canary DaemonSet, and the rules sidecar are disabled. Alloy 1.14.0 tails pod logs and pushes them to `http://loki.monitoring.svc.cluster.local:3100/loki/api/v1/push`. Promtail is the older shipper; this install uses Alloy.
+
+Alertmanager's default route is a receiver named `null`, so alerts are accepted and not delivered. Commented email and webhook examples live in `kube-prometheus-stack-values.yaml`. Pick one at cutover and keep the password or URL out of git.
 
 ## CurioEd scrape and alerts
 
@@ -58,7 +63,7 @@ In the CurioEd chart, `monitoring.enabled` defaults to false. Turning it on rend
 - a PrometheusRule with four alerts: API 5xx rate above 2% for 5 minutes, API p95 latency above 2 seconds for 5 minutes, more than 3 container restarts in 15 minutes, and no Ready Postgres pod for 5 minutes
 - `monitoring.enablePodMonitor: true` on the CNPG Cluster
 
-The API process does not serve `/metrics` today. A search of `backend/` finds no Prometheus client and no metrics route. With the flag on, the ServiceMonitor target will be down and the two HTTP alerts will not fire. The restart alert and the Postgres-down alert use kube-state-metrics, so those work once this stack is installed.
+The API process does not serve `/metrics` today. A search of `backend/` finds no Prometheus client and no metrics route. This chart does not add that route. With the flag on, the ServiceMonitor target will be down and the two HTTP alerts will not fire. The restart alert and the Postgres-down alert use kube-state-metrics, so those work once this stack is installed. Adding `/metrics` is a follow-up after #188.
 
 Smallest change that makes the HTTP alerts real, without editing the Coder-owned modules (`modules/assistant`, `modules/text_to_sql`, `modules/guard`, `ai_platform`, `judge/`, `generation/worker.py`, `config.py`):
 
