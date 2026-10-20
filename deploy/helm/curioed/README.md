@@ -65,24 +65,19 @@ Two copies, with different jobs:
 - Every upgrade still runs the migrate hook's `pg_dump` onto the backups PVC. That dump sits on the same disk as the database and is the safety copy for a bad Alembic migration.
 - `cnpg.backup.enabled=true` adds an off-site Barman copy. The chart renders an `ObjectStore` (`barmancloud.cnpg.io/v1`) and a `ScheduledBackup`, and it sets the Cluster's WAL archiver plugin to `barman-cloud.cloudnative-pg.io`. You install that plugin in the operator namespace yourself. The chart does not install it.
 
-`endpointURL` and `bucket` are empty by default. Enabling backups without both of them fails the render. Set them to the S3-compatible API you choose. `path` is a prefix inside the bucket (default `curioed/postgres`). The destination is `s3://<bucket>/<path>`. No provider is named in the chart.
+`endpointURL` and `bucket` are empty by default, so the template is not tied to one provider. Enabling backups without both of them fails the render. `path` is a prefix inside the bucket (default `curioed/postgres`). The destination is `s3://<bucket>/<path>`.
 
-```sh
-helm upgrade curioed deploy/helm/curioed -n curioed \
-  --set cnpg.backup.enabled=true \
-  --set cnpg.backup.endpointURL=https://s3.example.invalid \
-  --set cnpg.backup.bucket=example-bucket
-```
+Cloudflare R2 is the store to use. The commented example in `values.yaml` is `https://<account-id>.r2.cloudflarestorage.com`. Barman takes the region from a Secret key (`cnpg.backup.regionKey`). For R2 that key's value is the literal `auto`. Creating the bucket, the token, and the Secret is a manual step in [RESTORE.md](RESTORE.md).
 
-Create Secret `curioed-backup-s3` first, with keys `ACCESS_KEY_ID` and `ACCESS_SECRET_KEY`. Retention defaults to `30d`. The schedule is `0 0 2 * * *` (six fields, seconds first): a base backup at 02:00 UTC. WAL archiving runs continuously. The Barman sidecar on the Postgres pod requests 128Mi and is limited to 256Mi.
+Retention defaults to `30d`. The schedule is `0 0 21 * * *` (six fields, seconds first): a base backup at 21:00 UTC, which is 02:30 IST. WAL archiving runs continuously. The Barman sidecar on the Postgres pod requests 128Mi and is limited to 256Mi.
 
 Point-in-time recovery into a new Cluster, and the checks to run before serving traffic, are in [RESTORE.md](RESTORE.md).
 
 ## Monitoring
 
-`monitoring.enabled` defaults to false. Values and install commands for kube-prometheus-stack, Loki, and Alloy live in [`../monitoring/README.md`](../monitoring/README.md). That stack is sized to 2432Mi (2.375Gi) of memory limits.
+`monitoring.enabled` defaults to false. Values and install commands for kube-prometheus-stack, Loki, and Alloy live in [`../monitoring/README.md`](../monitoring/README.md). That stack is sized to 2496Mi (2.4375Gi) of memory limits.
 
-Turning the flag on renders a ServiceMonitor for `/metrics` and a PrometheusRule (API 5xx, API p95, pod restarts, Postgres not Ready). The API does not expose Prometheus metrics yet, so the HTTP alerts have nothing to scrape until `prometheus-fastapi-instrumentator` is added in `main.py`. The restart and Postgres alerts use kube-state-metrics and do not need that endpoint. The flag also sets `monitoring.enablePodMonitor` on the CNPG Cluster.
+Turning the flag on renders a ServiceMonitor for `/metrics` and a PrometheusRule (API 5xx, API p95, pod restarts, Postgres not Ready). The API does not expose Prometheus metrics yet, and this chart does not add `/metrics`. That route is a follow-up after #188. Until then the HTTP alerts have nothing to scrape. The restart and Postgres alerts use kube-state-metrics and do not need that endpoint. The flag also sets `monitoring.enablePodMonitor` on the CNPG Cluster.
 
 ## Check
 

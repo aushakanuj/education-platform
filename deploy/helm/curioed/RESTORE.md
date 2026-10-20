@@ -2,7 +2,7 @@
 
 Off-site backup is a Barman Cloud `ObjectStore` plus WAL archiving. This chart turns that on with `cnpg.backup.enabled=true`. It does not template a restore. Apply the recovery Cluster below by hand, into a new name, and verify it before any traffic uses it.
 
-The chart does not choose an object-storage provider. Use the same `endpointURL`, bucket, path, and Secret you set on the source cluster. Examples below use placeholders.
+The chart template accepts any S3-compatible endpoint. Cloudflare R2 is the store this install uses. The placeholders below are not real account ids, bucket names, or tokens.
 
 ## Before you start
 
@@ -16,7 +16,38 @@ kubectl get scheduledbackup,backup -n curioed
 kubectl get objectstore -n curioed
 ```
 
-WAL archiving is continuous once the source Cluster lists `barman-cloud.cloudnative-pg.io` with `isWALArchiver: true`. Base backups follow `cnpg.backup.schedule` (default `0 0 2 * * *`, 02:00 UTC). Retention is `cnpg.backup.retentionPolicy` (default `30d`) on the ObjectStore. A timestamp older than that window cannot be restored.
+WAL archiving is continuous once the source Cluster lists `barman-cloud.cloudnative-pg.io` with `isWALArchiver: true`. Base backups follow `cnpg.backup.schedule` (default `0 0 21 * * *`, 21:00 UTC, 02:30 IST). Retention is `cnpg.backup.retentionPolicy` (default `30d`) on the ObjectStore. A timestamp older than that window cannot be restored.
+
+## Cloudflare R2
+
+R2 speaks the S3 API. Barman does not take a region as a plain string. `s3Credentials.region` is a reference to a key in `curioed-backup-s3`. For R2 that key must contain the literal `auto`.
+
+Use these chart values when you enable backups. Keep the angle brackets until you have the real account id and bucket name, and do not commit either one:
+
+```text
+cnpg.backup.endpointURL=https://<account-id>.r2.cloudflarestorage.com
+cnpg.backup.bucket=<r2-bucket>
+cnpg.backup.path=curioed/postgres
+cnpg.backup.regionKey=REGION
+```
+
+The recovery Cluster later in this file reads that same ObjectStore, so the Secret has to exist in `curioed` before a restore as well.
+
+### Manual step for the repo owner
+
+Do this before the first backup. Nothing in git or CI creates the bucket, the token, or the Secret.
+
+1. In the Cloudflare dashboard, create an R2 bucket.
+2. Create an R2 API token that can read and write only that bucket. Cloudflare shows the access key id and the secret once.
+3. Create the Secret from those values. The command below is placeholders only:
+
+```sh
+kubectl create secret generic curioed-backup-s3 \
+  --namespace curioed \
+  --from-literal=ACCESS_KEY_ID='<r2-access-key-id>' \
+  --from-literal=ACCESS_SECRET_KEY='<r2-secret-access-key>' \
+  --from-literal=REGION='auto'
+```
 
 ## Restore into a new Cluster
 

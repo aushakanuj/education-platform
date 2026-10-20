@@ -140,7 +140,7 @@ app.kubernetes.io/component: {{ .component }}
 {{- fail "cnpg.backup.retentionPolicy must look like 30d" }}
 {{- end }}
 {{- if ne (len (splitList " " $backup.schedule)) 6 }}
-{{- fail "cnpg.backup.schedule must be six cron fields with seconds first, for example \"0 0 2 * * *\"" }}
+{{- fail "cnpg.backup.schedule must be six cron fields with seconds first, for example \"0 0 21 * * *\"" }}
 {{- end }}
 {{- if not (regexMatch "^[a-z0-9]([-a-z0-9]*[a-z0-9])?$" $backup.existingSecret) }}
 {{- fail "cnpg.backup.existingSecret must be a Secret name" }}
@@ -150,6 +150,9 @@ app.kubernetes.io/component: {{ .component }}
 {{- end }}
 {{- if not (regexMatch "^[A-Za-z0-9][A-Za-z0-9_.-]*$" $backup.secretAccessKeyKey) }}
 {{- fail "cnpg.backup.secretAccessKeyKey must be a Secret key name" }}
+{{- end }}
+{{- if and $backup.regionKey (not (regexMatch "^[A-Za-z0-9][A-Za-z0-9_.-]*$" $backup.regionKey)) }}
+{{- fail "cnpg.backup.regionKey must be empty or a Secret key name" }}
 {{- end }}
 {{- if not (regexMatch "^(gzip|bzip2|lz4|snappy)$" $backup.walCompression) }}
 {{- fail "cnpg.backup.walCompression must be gzip, bzip2, lz4, or snappy" }}

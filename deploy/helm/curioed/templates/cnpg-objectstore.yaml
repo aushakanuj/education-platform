@@ -18,6 +18,11 @@ spec:
       secretAccessKey:
         name: {{ .Values.cnpg.backup.existingSecret }}
         key: {{ .Values.cnpg.backup.secretAccessKeyKey }}
+      {{- with .Values.cnpg.backup.regionKey }}
+      region:
+        name: {{ $.Values.cnpg.backup.existingSecret }}
+        key: {{ . }}
+      {{- end }}
     wal:
       compression: {{ .Values.cnpg.backup.walCompression }}
       maxParallel: {{ .Values.cnpg.backup.walMaxParallel }}

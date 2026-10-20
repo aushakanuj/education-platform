@@ -197,9 +197,11 @@ for snippet in (
 ):
     if snippet not in store:
         raise SystemExit(f"ObjectStore is missing {snippet}")
+if "region:" in store:
+    raise SystemExit("region was rendered without regionKey")
 schedule = schedules[0]
 for snippet in (
-    'schedule: "0 0 2 * * *"',
+    'schedule: "0 0 21 * * *"',
     "method: plugin",
     'name: "barman-cloud.cloudnative-pg.io"',
     "immediate: false",
@@ -213,6 +215,29 @@ for snippet in ("isWALArchiver: true", "barmanObjectName: curioed-backup"):
 if "enablePodMonitor" in cluster:
     raise SystemExit("backup flag turned on the PodMonitor")
 print("off-site backup rendered")
+PY
+
+helm template curioed "${chart}" --namespace curioed \
+  --set cnpg.backup.enabled=true \
+  --set cnpg.backup.endpointURL=https://s3.example.invalid \
+  --set cnpg.backup.bucket=example-bucket \
+  --set cnpg.backup.regionKey=REGION > "${out}.region"
+python3 - "${out}.region" <<'PY'
+import re
+import sys
+
+text = open(sys.argv[1], encoding="utf-8").read()
+docs = [doc for doc in re.split(r"(?m)^---\s*$", text) if doc.strip()]
+stores = []
+for doc in docs:
+    match = re.search(r"(?m)^kind: (\S+)", doc)
+    if match and match.group(1) == "ObjectStore":
+        stores.append(doc)
+if len(stores) != 1 or "key: REGION" not in stores[0]:
+    raise SystemExit("regionKey did not render s3Credentials.region")
+if "auto" in stores[0] or "r2.cloudflarestorage.com" in stores[0]:
+    raise SystemExit("region render hardcoded an R2 endpoint or the auto region")
+print("optional region key rendered")
 PY
 
 helm template curioed "${chart}" --namespace curioed --set monitoring.enabled=true > "${out}.monitor"

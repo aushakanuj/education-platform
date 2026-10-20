@@ -204,19 +204,26 @@ cnpg:
       cpu: "4"
       memory: 6Gi
   # Off-site copy via the Barman Cloud plugin. The chart does not install the
-  # plugin and does not choose an object-storage provider. endpointURL and
-  # bucket are required when enabled; leave them empty until the team picks
-  # an S3-compatible API. The migrate hook's pg_dump still runs before Alembic.
+  # plugin. endpointURL and bucket stay empty so any S3-compatible API still
+  # renders. Cloudflare R2 is the store to fill in at install time. The
+  # migrate hook's pg_dump still runs before Alembic.
+  #
+  # R2 example, commented. Do not commit an account id or a token.
+  #   endpointURL: "https://<account-id>.r2.cloudflarestorage.com"
+  #   bucket: "<r2-bucket>"
+  #   path: curioed/postgres
+  #   regionKey: REGION
+  # Barman reads the region from that Secret key. For R2 the value is auto.
   backup:
     enabled: false
-    # Placeholder shape, not a provider: https://s3.example.invalid
     endpointURL: ""
-    # Placeholder shape: example-bucket
     bucket: ""
     path: curioed/postgres
+    # Empty omits s3Credentials.region. Set REGION for R2 and put auto in the Secret.
+    regionKey: ""
     retentionPolicy: 30d
-    # Six fields, seconds first. 02:00 UTC every day.
-    schedule: "0 0 2 * * *"
+    # Six fields, seconds first. 21:00 UTC is 02:30 IST.
+    schedule: "0 0 21 * * *"
     plugin: barman-cloud.cloudnative-pg.io
     existingSecret: curioed-backup-s3
     accessKeyIdKey: ACCESS_KEY_ID
