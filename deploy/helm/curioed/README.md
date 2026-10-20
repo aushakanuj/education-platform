@@ -33,9 +33,9 @@ kubectl label namespace curioed \
 | Workload | runAsNonRoot | runAsUser | Why |
 | --- | --- | --- | --- |
 | api, docling, llm worker, migrate, curriculum seed, demo-data | false | unset | `deploy/Dockerfile.api` has no `USER`. `python:3.12-slim-bookworm` image config User is empty. **TODO:** add a `USER` line in `Dockerfile.api` (aushak's OK) before turning this on. |
-| web | false | unset | `nginx:1.27-alpine` has no `USER` and listens on port 80. `CHOWN`, `SETUID`, `SETGID`, and `NET_BIND_SERVICE` are added back. |
+| web | false | unset | `nginx:1.31.7-alpine-slim` has no `USER` and listens on port 80. `CHOWN`, `SETUID`, `SETGID`, and `NET_BIND_SERVICE` are added back. |
 | llm-mock | false | unset | `python:3.12.7-slim-bookworm` image config User is empty. |
-| cloudflared | true | 65532 | `cloudflare/cloudflared:2026.10.1` image config User is `65532:65532`. |
+| cloudflared | true | 65532 | `cloudflare/cloudflared:2026.10.2` image config User is `65532:65532`. |
 | k6 | true | 12345 | `grafana/k6:0.57.0` adds uid 12345 and sets `USER k6`. |
 | CNPG | not set by this chart | 26 via the operator | Image config User is 26. The operator sets `runAsNonRoot` and `runAsUser`. The chart does not override that. |
 
@@ -174,7 +174,7 @@ A chart Service cannot select Traefik pods in `kube-system`. Selectors do not cr
 
 Compose and k8s share one tunnel token. If both cloudflared processes connect, Cloudflare splits requests across two databases.
 
-Prod keeps `cloudflared.replicas` at 0. The Deployment is a rolling update (`maxUnavailable: 0`, `maxSurge: 1`) with `--metrics 0.0.0.0:2000`, a `/ready` probe on that port, and `terminationGracePeriodSeconds: 40` (cloudflared's grace default is 30s). The image tag is `2026.10.1`. A PDB of `maxUnavailable: 1` appears only when replicas are at least 2. With network policy enabled, kubelet probes are allowed to port 2000 and nothing else is opened; cloudflared egress to Traefik in `kube-system` is already allowed. No extra Traefik middleware is added for SSE.
+Prod keeps `cloudflared.replicas` at 0. The Deployment is a rolling update (`maxUnavailable: 0`, `maxSurge: 1`) with `--metrics 0.0.0.0:2000`, a `/ready` probe on that port, and `terminationGracePeriodSeconds: 40` (cloudflared's grace default is 30s). The image tag is `2026.10.2`. A PDB of `maxUnavailable: 1` appears only when replicas are at least 2. With network policy enabled, kubelet probes are allowed to port 2000 and nothing else is opened; cloudflared egress to Traefik in `kube-system` is already allowed. No extra Traefik middleware is added for SSE.
 
 `deploy/k8s/curioed-tunnel-guard.sh` reads the k8s Deployment. When at least one pod is Ready, it `docker stop`s running containers named `education-platform-prod-cloudflared*`. It does not remove them and it does not start or scale anything. Exit 0 when nothing was stopped, including a tunnel that is not Ready and a `--dry-run`. Exit 2 when it stopped Compose cloudflared. Exit 1 when kubectl or docker fails; a kubectl failure does not touch Docker. The sample oneshot unit is `curioed-tunnel-guard.service` (`SuccessExitStatus=2`, `After=` and `Wants=` `docker.service` and `k3s.service`). `curioed-tunnel-guard.timer` is optional.
 

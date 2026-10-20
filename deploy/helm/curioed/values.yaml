@@ -343,10 +343,12 @@ web:
     # Required, same rule as api.image.tag. CI supplies --set web.image.tag=ci.
     tag: ""
     pullPolicy: IfNotPresent
-  # nginx:1.27-alpine has no USER (image config User is empty) and listens on
-  # port 80. runAsNonRoot stays false. The entrypoint needs CHOWN, SETUID,
-  # and SETGID, plus NET_BIND_SERVICE for port 80. nginx-unprivileged on
-  # 8080 is the later non-root option. The Dockerfile stays as it is.
+  # nginx:1.31.7-alpine-slim has no USER (image config User is empty) and
+  # listens on port 80. runAsNonRoot stays false. The entrypoint needs
+  # CHOWN, SETUID, and SETGID, plus NET_BIND_SERVICE for port 80.
+  # nginx:1.31.7-alpine still has fixed HIGH findings, so the scan uses
+  # the slim tag. nginx-unprivileged on 8080 is the later non-root option.
+  # The Dockerfile stays as it is.
   securityContext:
     runAsNonRoot: false
     runAsUser: null
@@ -488,7 +490,9 @@ curriculumSeed:
 
 cloudflared:
   enabled: true
-  # cloudflare/cloudflared:2026.10.1 image config User is 65532:65532.
+  # cloudflare/cloudflared:2026.10.2 image config User is 65532:65532.
+  # Entrypoint is still cloudflared --no-autoupdate. TUNNEL_TOKEN and
+  # `tunnel run` are unchanged.
   securityContext:
     runAsNonRoot: true
     runAsUser: 65532
@@ -500,7 +504,7 @@ cloudflared:
   metricsPort: 2000
   image:
     repository: cloudflare/cloudflared
-    tag: "2026.10.1"
+    tag: "2026.10.2"
     pullPolicy: IfNotPresent
   # Dashboard public-hostname service for the tunnel. Not passed to `tunnel run`;
   # a token tunnel reads its origin from Cloudflare.

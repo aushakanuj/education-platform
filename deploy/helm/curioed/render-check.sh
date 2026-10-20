@@ -90,7 +90,7 @@ for label, doc, snippet in (
     ("web replicas", web, "replicas: 2"),
     ("web cap", web, "NET_BIND_SERVICE"),
     ("tunnel replicas", tunnel, "replicas: 2"),
-    ("tunnel image", tunnel, "cloudflare/cloudflared:2026.10.1"),
+    ("tunnel image", tunnel, "cloudflare/cloudflared:2026.10.2"),
     ("hpa min", hpa, "minReplicas: 1"),
     ("hpa max", hpa, "maxReplicas: 4"),
     ("hpa target", hpa, "averageUtilization: 65"),

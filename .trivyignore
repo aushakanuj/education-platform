@@ -2,8 +2,9 @@
 # Trivy 0.76.0 on 2026-10-20. Each CVE below has no FixedVersion in
 # python:3.12-slim-bookworm or ghcr.io/cloudnative-pg/postgresql:16.15-standard-trixie.
 # Do not add a CVE that already has a fixed package in any scanned image.
-# nginx:1.27-alpine and cloudflare/cloudflared:2026.10.1 findings are not listed:
-# those images publish a fixed package, so the gate must keep failing on them.
+# nginx:1.31.7-alpine-slim and cloudflare/cloudflared:2026.10.2 are clean
+# at HIGH and CRITICAL. Do not point the scan back at nginx:1.27-alpine or
+# cloudflared:2026.10.1. nginx:1.31.7-alpine (not slim) still has fixed findings.
 
 # zlib zipOpenNewFileInZip4_64, shipped inside zlib1g. No patched bookworm package.
 CVE-2023-45853
@@ -79,3 +80,10 @@ CVE-2026-86144
 
 # perl Archive::Tar header denial of service. No patched package in bookworm or trixie.
 CVE-2026-9538
+
+# openssl DTLS handshake information disclosure in libssl3 and openssl.
+# No patched bookworm package. python:3.12-slim-bookworm and
+# python:3.12.15-slim-bookworm are the same digest
+# sha256:34386ef0cb081344d7ec1c103ba398e6e9f64e9ab3a1509accc92a4e24a07258
+# and still ship 3.0.22-1~deb12u1.
+CVE-2026-84782

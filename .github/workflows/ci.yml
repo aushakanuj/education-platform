@@ -114,8 +114,8 @@ jobs:
           set -eu
           for image in \
             python:3.12-slim-bookworm \
-            nginx:1.27-alpine \
-            cloudflare/cloudflared:2026.10.1 \
+            nginx:1.31.7-alpine-slim \
+            cloudflare/cloudflared:2026.10.2 \
             ghcr.io/cloudnative-pg/postgresql:16.15-standard-trixie
           do
             trivy image --scanners vuln --exit-code 1 --severity HIGH,CRITICAL \
