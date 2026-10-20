@@ -126,21 +126,21 @@ config:
   #   key: SOME_TOKEN
   # extraEnv stays empty for names that are not in the chart yet.
 
-# Pool env from Coder's PR #200 (head 1989159). The app ignores these names
-# until that PR merges.
-# App defaults when unset: DB_POOL_SIZE 5, DB_MAX_OVERFLOW 5,
-# DB_POOL_TIMEOUT_SECONDS 30, DB_POOL_RECYCLE_SECONDS 1800,
-# TEXT_TO_SQL_DB_POOL_SIZE 5, TEXT_TO_SQL_DB_MAX_OVERFLOW 5,
-# WORKER_SHUTDOWN_GRACE_SECONDS 25.
-# Budget once PR #200 is deployed: about 30 connections per api pod in the
-# worst case, counting all engines, so 180 at HPA max 6, plus the workers and
-# one SSE LISTEN connection per stream. That fits under max_connections 300.
-# The imported 6b7553c image ignores these names and uses about 45 connections
-# per pod, so prod and load-test keep api maxReplicas at 4 until that image
-# includes #200. Raise maxReplicas to 6 after that.
+# Every pool variable is set here and again in values-prod.yaml and
+# values-loadtest.yaml. Do not omit one and inherit the app default.
+# PR #200 puts the app defaults back to main: DB_MAX_OVERFLOW 10, recycle
+# off, and TEXT_TO_SQL_DB_MAX_OVERFLOW 10. The numbers below are what the
+# pods run with instead.
+# Budget with these numbers: about 30 connections per api pod, so 180 at
+# HPA max 6, plus the workers and one SSE LISTEN connection per stream.
+# That fits under max_connections 300. The imported 6b7553c image ignores
+# these names and opens about 45 connections per pod, so prod and load-test
+# keep api maxReplicas at 4 until that image includes #200.
 # No PgBouncer. LISTEN needs a direct connection.
-# Workers do not open the text-to-SQL pool. terminationGracePeriodSeconds stays
-# at least 40 (docling 600, llm 300), above WORKER_SHUTDOWN_GRACE_SECONDS + 5.
+# Workers do not open the text-to-SQL pool. The llm worker uses
+# WORKER_SHUTDOWN_GRACE_SECONDS 25 and a pod grace of at least 40.
+# Docling keeps terminationGracePeriodSeconds 600 and
+# WORKER_SHUTDOWN_GRACE_SECONDS 570.
 dbPool:
   api:
     size: 5

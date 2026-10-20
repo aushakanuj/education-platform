@@ -85,6 +85,217 @@ tests:
       - contains:
           path: spec.template.spec.containers[0].env
           content:
+            name: DB_POOL_SIZE
+            value: "2"
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: DB_MAX_OVERFLOW
+            value: "2"
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: DB_POOL_RECYCLE_SECONDS
+            value: "1800"
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: WORKER_SHUTDOWN_GRACE_SECONDS
+            value: "25"
+      - notContains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: TEXT_TO_SQL_DB_POOL_SIZE
+      - greaterOrEqual:
+          path: spec.template.spec.terminationGracePeriodSeconds
+          value: 40
+  - it: prod sets every api pool env and does not inherit app defaults
+    values:
+      - ../values-prod.yaml
+    template: api-deployment.yaml
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: DB_POOL_SIZE
+            value: "5"
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: DB_MAX_OVERFLOW
+            value: "5"
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: DB_POOL_TIMEOUT_SECONDS
+            value: "30"
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: DB_POOL_RECYCLE_SECONDS
+            value: "1800"
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: TEXT_TO_SQL_DB_POOL_SIZE
+            value: "2"
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: TEXT_TO_SQL_DB_MAX_OVERFLOW
+            value: "3"
+  - it: prod docling sets the worker pool and keeps the long ingest grace
+    values:
+      - ../values-prod.yaml
+    template: worker-docling-deployment.yaml
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: DB_POOL_SIZE
+            value: "2"
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: DB_MAX_OVERFLOW
+            value: "2"
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: DB_POOL_RECYCLE_SECONDS
+            value: "1800"
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: WORKER_SHUTDOWN_GRACE_SECONDS
+            value: "570"
+      - notContains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: TEXT_TO_SQL_DB_POOL_SIZE
+      - greaterOrEqual:
+          path: spec.template.spec.terminationGracePeriodSeconds
+          value: 40
+  - it: prod llm worker uses grace 25 when it is turned on
+    values:
+      - ../values-prod.yaml
+    template: worker-llm-deployment.yaml
+    set:
+      workers.llm.enabled: true
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: DB_POOL_SIZE
+            value: "2"
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: DB_MAX_OVERFLOW
+            value: "2"
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: DB_POOL_RECYCLE_SECONDS
+            value: "1800"
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: WORKER_SHUTDOWN_GRACE_SECONDS
+            value: "25"
+      - greaterOrEqual:
+          path: spec.template.spec.terminationGracePeriodSeconds
+          value: 40
+  - it: loadtest sets every api pool env and does not inherit app defaults
+    values:
+      - ../values-loadtest.yaml
+    template: api-deployment.yaml
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: DB_POOL_SIZE
+            value: "5"
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: DB_MAX_OVERFLOW
+            value: "5"
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: DB_POOL_TIMEOUT_SECONDS
+            value: "30"
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: DB_POOL_RECYCLE_SECONDS
+            value: "1800"
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: TEXT_TO_SQL_DB_POOL_SIZE
+            value: "2"
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: TEXT_TO_SQL_DB_MAX_OVERFLOW
+            value: "3"
+  - it: loadtest docling uses the explicit worker pool if it is enabled
+    values:
+      - ../values-loadtest.yaml
+    template: worker-docling-deployment.yaml
+    set:
+      workerDocling.enabled: true
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: DB_POOL_SIZE
+            value: "2"
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: DB_MAX_OVERFLOW
+            value: "2"
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: DB_POOL_RECYCLE_SECONDS
+            value: "1800"
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: WORKER_SHUTDOWN_GRACE_SECONDS
+            value: "570"
+      - greaterOrEqual:
+          path: spec.template.spec.terminationGracePeriodSeconds
+          value: 40
+  - it: loadtest llm worker uses grace 25 if it is enabled
+    values:
+      - ../values-loadtest.yaml
+    template: worker-llm-deployment.yaml
+    set:
+      workers.llm.enabled: true
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: DB_POOL_SIZE
+            value: "2"
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: DB_MAX_OVERFLOW
+            value: "2"
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: DB_POOL_RECYCLE_SECONDS
+            value: "1800"
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
             name: WORKER_SHUTDOWN_GRACE_SECONDS
             value: "25"
       - greaterOrEqual:

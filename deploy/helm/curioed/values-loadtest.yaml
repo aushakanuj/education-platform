@@ -14,8 +14,12 @@ config:
     # judge/client.py:46 and HttpJudge.decide at :92 is a Coder follow-up.
     JEV_JUDGE_MODE: "off"
 
-# Same pool numbers as values.yaml. See the PR #200 comment there.
+# Every pool variable is set in this file. Do not drop a key.
+# After PR #200 the app defaults are main's again: DB_MAX_OVERFLOW 10,
+# recycle off, and TEXT_TO_SQL_DB_MAX_OVERFLOW 10. These values override that.
 # No PgBouncer: LISTEN needs a direct connection. max_connections is 300.
+# Workers are off. The llm worker, if enabled, uses shutdown grace 25 and a
+# pod grace of at least 40. Docling, if enabled, still inherits 600s / 570.
 dbPool:
   api:
     size: 5
