@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
 # Stop Compose cloudflared only when the k8s tunnel has a Ready pod.
-# Never starts or scales anything. If kubectl fails or nothing is Ready,
-# docker is not touched.
+# Never starts or scales anything.
+# Exit 0 when nothing was stopped.
+# Exit 2 when one or more Compose cloudflared containers were stopped.
+# Exit 1 when kubectl or docker fails.
 set -euo pipefail
 set +x
 
@@ -26,7 +28,7 @@ while [[ $# -gt 0 ]]; do
       ;;
     *)
       echo "unknown argument: $1" >&2
-      exit 2
+      exit 1
       ;;
   esac
 done
@@ -52,8 +54,8 @@ kube() {
 }
 
 if ! deploy_json="$(kube get deploy "${deployment}" --namespace "${namespace}" -o json)"; then
-  log "WARNING: kubectl failed; compose was not touched"
-  exit 0
+  log "kubectl failed; compose was not touched"
+  exit 1
 fi
 
 parsed="$(
@@ -76,10 +78,11 @@ if [[ "${ready}" -lt 1 ]]; then
 fi
 
 if ! names="$(docker ps --filter status=running --format '{{.Names}}')"; then
-  log "WARNING: docker ps failed; no stop was issued"
-  exit 0
+  log "docker ps failed; no stop was issued"
+  exit 1
 fi
 
+stopped=0
 while IFS= read -r name; do
   [[ -z "${name}" ]] && continue
   case "${name}" in
@@ -88,12 +91,22 @@ while IFS= read -r name; do
       if [[ "${dry_run}" -eq 1 ]]; then
         log "dry-run would docker stop ${name}"
       else
-        docker stop "${name}" >/dev/null
+        if ! docker stop "${name}" >/dev/null; then
+          log "docker stop failed for ${name}"
+          exit 1
+        fi
         log "stopped ${name}"
+        stopped=1
       fi
       ;;
   esac
 done <<< "${names}"
 
 log "compose containers matching ${prefix}:"
-docker ps -a --filter "name=^/${prefix}" --format '{{.Names}} {{.Status}}' || true
+if ! docker ps -a --filter "name=^/${prefix}" --format '{{.Names}} {{.Status}}'; then
+  log "docker ps failed"
+  exit 1
+fi
+if [[ "${stopped}" -eq 1 ]]; then
+  exit 2
+fi

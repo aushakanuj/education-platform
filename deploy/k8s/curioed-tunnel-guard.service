@@ -5,6 +5,8 @@ Wants=docker.service k3s.service
 
 [Service]
 Type=oneshot
+# 2 means Compose cloudflared was stopped. That is success for this unit.
+SuccessExitStatus=2
 ExecStart=/usr/local/sbin/curioed-tunnel-guard.sh
 # Copy deploy/k8s/curioed-tunnel-guard.sh to that path, or edit ExecStart.
 # Optional: enable curioed-tunnel-guard.timer instead of this unit.
