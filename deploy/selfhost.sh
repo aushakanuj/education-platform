@@ -150,9 +150,10 @@ bring_up() {
   prepare_runtime
   export DOCKER_BUILDKIT=1
   export COMPOSE_DOCKER_CLI_BUILD=1
-  compose --profile "$profile" pull postgres caddy "$tunnel_service"
+  compose --profile "$profile" pull postgres caddy data-init "$tunnel_service"
   compose --profile "$profile" build
   compose --profile "$profile" up -d --wait postgres
+  compose --profile "$profile" up --force-recreate --no-deps --abort-on-container-exit --exit-code-from data-init data-init
   compose --profile "$profile" up --force-recreate --no-deps --abort-on-container-exit --exit-code-from migrate migrate
   compose --profile "$profile" up -d --remove-orphans --wait --force-recreate --no-deps \
     api worker web caddy "$tunnel_service"

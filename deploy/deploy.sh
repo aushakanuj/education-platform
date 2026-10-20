@@ -88,9 +88,10 @@ export DOCKER_BUILDKIT=1
 export COMPOSE_DOCKER_CLI_BUILD=1
 compose=(docker compose --project-name education-platform-prod --env-file "$env_file" -f deploy/docker-compose.prod.yml)
 
-"${compose[@]}" pull postgres caddy
+"${compose[@]}" pull postgres caddy data-init
 "${compose[@]}" build
 "${compose[@]}" up -d --wait postgres
+"${compose[@]}" up --force-recreate --no-deps --abort-on-container-exit --exit-code-from data-init data-init
 "${compose[@]}" up --force-recreate --no-deps --abort-on-container-exit --exit-code-from migrate migrate
 "${compose[@]}" up -d --remove-orphans --wait --force-recreate --no-deps api worker web caddy
 

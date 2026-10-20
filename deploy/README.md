@@ -303,7 +303,7 @@ recreated, so the data volume stays. The first build downloads PyTorch CPU and
 Docling and takes a while. Later builds are incremental.
 
 Images are built on the VM, so they are `linux/arm64`. Base images
-(`python:3.12-slim-bookworm`, `node:20-bookworm-slim`, `nginx:1.27-alpine`,
+(`python:3.12-slim-bookworm`, `node:20-bookworm-slim`, `nginxinc/nginx-unprivileged:1.27-alpine`,
 `caddy:2-alpine`, `pgvector/pgvector:pg16`, `ghcr.io/astral-sh/uv`) publish
 arm64 tags. The API image installs CPU PyTorch (`2.13.0+cpu`) instead of the
 lockfile's NVIDIA libraries.

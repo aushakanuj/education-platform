@@ -80,6 +80,14 @@ RUN --mount=type=cache,target=/root/.cache/uv \
     && python -c "import torch; v=torch.__version__; assert '+cpu' in v, v; print('torch', v)" \
     && rm /tmp/install-python.sh
 
+# uid 10001 is the runtime user for api, worker, and migrate. Named volumes
+# are root-owned until deploy/docker-compose.prod.yml data-init chowns them.
+RUN groupadd --system --gid 10001 curioed \
+    && useradd --system --uid 10001 --gid 10001 --create-home --home-dir /home/curioed --shell /usr/sbin/nologin curioed \
+    && mkdir -p /data/uploads /data/hf /data/torchinductor \
+    && chown -R curioed:curioed /app /opt/docling-models /data /home/curioed
+
 WORKDIR /app/backend
 EXPOSE 8000
+USER 10001:10001
 ENTRYPOINT ["/app/deploy/api-entrypoint.sh"]
