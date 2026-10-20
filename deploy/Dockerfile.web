@@ -13,7 +13,9 @@ ENV VITE_API_BASE_URL=$VITE_API_BASE_URL
 RUN npx vite build
 
 # uid 101, listens on 8080. No NET_BIND_SERVICE: the process does not bind port 80.
-FROM nginxinc/nginx-unprivileged:1.27-alpine
+# 1.31.7-alpine-slim is the current unprivileged tag that is clean at
+# HIGH and CRITICAL. The non-slim alpine tag still has fixed findings.
+FROM nginxinc/nginx-unprivileged:1.31.7-alpine-slim
 
 COPY deploy/nginx.conf /etc/nginx/conf.d/default.conf
 COPY --from=build /src/dist /usr/share/nginx/html
